@@ -48,7 +48,6 @@ local.properties
 *.test
 *.out
 vendor/
-go.sum
 
 # ============================================================
 # IDE — IntelliJ IDEA / GoLand
