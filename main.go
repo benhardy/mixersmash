@@ -481,25 +481,44 @@ func (g *Game) Update() error {
 	}
 
 	// --- Colour-flow: propagate colours along confirmed links ---
+	// Pin sources BEFORE propagation so they always emit pure source colour.
+	for i, sc := range g.sourceCorners {
+		g.grid.Cells[sc[0]][sc[1]].Color = g.sourceColors[i]
+	}
+
+	// Snapshot all cell colours (column-major: Cells[col][row]).
+	cols := g.grid.Cols
+	rows := g.grid.Rows
+	snap := make([][]color.RGBA, cols)
+	for c := range snap {
+		snap[c] = make([]color.RGBA, rows)
+		for r := range snap[c] {
+			snap[c][r] = g.grid.Cells[c][r].Color
+		}
+	}
+
+	// Apply all lerps reading from snapshot, writing to grid.
 	isAnimating := g.currentState == stateCollapsing || g.currentState == stateSpawning
 	for _, link := range g.confirmedLinks {
 		sc, sr, dc, dr := link[0], link[1], link[2], link[3]
-		srcCell := &g.grid.Cells[sc][sr]
-		dstCell := &g.grid.Cells[dc][dr]
-		dstCell.Color = lerpColor(dstCell.Color, srcCell.Color, flowRate*srcCell.Health)
-		srcCell.Color = lerpColor(srcCell.Color, dstCell.Color, flowRate*dstCell.Health)
+		srcSnap := snap[sc][sr]
+		dstSnap := snap[dc][dr]
+		srcHealth := g.grid.Cells[sc][sr].Health
+		dstHealth := g.grid.Cells[dc][dr].Health
+		g.grid.Cells[dc][dr].Color = lerpColor(dstSnap, srcSnap, flowRate*srcHealth)
+		g.grid.Cells[sc][sr].Color = lerpColor(srcSnap, dstSnap, flowRate*dstHealth)
 		// Redraw updated cells (skip the action cell while it is animating).
 		if g.canvas != nil {
 			if !isAnimating || !(sc == g.actionCol && sr == g.actionRow) {
-				g.drawCell(sc, sr, srcCell, cellSize, 1.0)
+				g.drawCell(sc, sr, &g.grid.Cells[sc][sr], cellSize, 1.0)
 			}
 			if !isAnimating || !(dc == g.actionCol && dr == g.actionRow) {
-				g.drawCell(dc, dr, dstCell, cellSize, 1.0)
+				g.drawCell(dc, dr, &g.grid.Cells[dc][dr], cellSize, 1.0)
 			}
 		}
 	}
 
-	// --- Colour-flow: pin source corners back to their source colours ---
+	// Re-pin sources after propagation (bidirectional lerp may have pulled them slightly).
 	for i, sc := range g.sourceCorners {
 		g.grid.Cells[sc[0]][sc[1]].Color = g.sourceColors[i]
 	}
