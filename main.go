@@ -417,15 +417,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.DrawImage(g.canvas, nil)
 
 	if g.linkDragging {
-		// Build the set of glowing cells: source cell plus every valid potential
-		// target (healthy neighbour without an existing confirmed link).
+		// Build the set of glowing cells: always the source cell; also the hovered
+		// destination cell when the cursor is over a valid neighbour.
 		glowCells := [][2]int{{g.linkSrcCol, g.linkSrcRow}}
-		neighbours := cellNeighbours(g.linkSrcCol, g.linkSrcRow, g.grid.Cols, g.grid.Rows)
-		for _, n := range neighbours {
-			if g.grid.Cells[n[0]][n[1]].Health > 0 &&
-				!hasLink(g.confirmedLinks, g.linkSrcCol, g.linkSrcRow, n[0], n[1]) {
-				glowCells = append(glowCells, n)
-			}
+		if g.linkHoverCol != -1 {
+			glowCells = append(glowCells, [2]int{g.linkHoverCol, g.linkHoverRow})
 		}
 
 		// Glow pass: fire the shader for every cell in glowCells.
@@ -454,15 +450,19 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			screen.DrawRectShader(w, h, g.glowShader, opts)
 		}
 
-		// Potential link lines: iterate glowCells (excluding the source) so both
-		// passes use the same consistent set.
+		// Potential link lines: iterate all valid neighbours so lines are drawn to
+		// every valid unlinked healthy neighbour regardless of glow state.
 		sx, sy := cellCentre(g.linkSrcCol, g.linkSrcRow)
-		for _, gc := range glowCells[1:] {
-			nx, ny := cellCentre(gc[0], gc[1])
-			if gc[0] == g.linkHoverCol && gc[1] == g.linkHoverRow {
-				vector.StrokeLine(screen, sx, sy, nx, ny, 2, color.RGBA{255, 255, 255, 200}, true)
-			} else {
-				vector.StrokeLine(screen, sx, sy, nx, ny, 1.5, color.RGBA{255, 255, 255, 80}, true)
+		neighbours := cellNeighbours(g.linkSrcCol, g.linkSrcRow, g.grid.Cols, g.grid.Rows)
+		for _, n := range neighbours {
+			if g.grid.Cells[n[0]][n[1]].Health > 0 &&
+				!hasLink(g.confirmedLinks, g.linkSrcCol, g.linkSrcRow, n[0], n[1]) {
+				nx, ny := cellCentre(n[0], n[1])
+				if n[0] == g.linkHoverCol && n[1] == g.linkHoverRow {
+					vector.StrokeLine(screen, sx, sy, nx, ny, 2, color.RGBA{255, 255, 255, 200}, true)
+				} else {
+					vector.StrokeLine(screen, sx, sy, nx, ny, 1.5, color.RGBA{255, 255, 255, 80}, true)
+				}
 			}
 		}
 	}
