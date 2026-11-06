@@ -594,6 +594,134 @@ func TestAddLinkNoDuplicate(t *testing.T) {
 // removeLinksForCell
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// healthDrainPerCell
+// ---------------------------------------------------------------------------
+
+// TestHealthDrainPerCellNoLinks verifies that with zero linked neighbours the
+// full totalDrain is returned (divided by 1).
+func TestHealthDrainPerCellNoLinks(t *testing.T) {
+	got := healthDrainPerCell(0.2, 0)
+	if got != 0.2 {
+		t.Errorf("healthDrainPerCell(0.2, 0) = %v, want 0.2", got)
+	}
+}
+
+// TestHealthDrainPerCellOneLink verifies that with one linked neighbour the
+// drain is split equally between the clicked cell and that neighbour (÷2).
+func TestHealthDrainPerCellOneLink(t *testing.T) {
+	got := healthDrainPerCell(0.2, 1)
+	if got != 0.1 {
+		t.Errorf("healthDrainPerCell(0.2, 1) = %v, want 0.1", got)
+	}
+}
+
+// TestHealthDrainPerCellTwoLinks verifies that with two linked neighbours the
+// drain is shared across three cells (clicked + 2 links), i.e. ≈ 0.2/3.
+func TestHealthDrainPerCellTwoLinks(t *testing.T) {
+	got := healthDrainPerCell(0.2, 2)
+	want := float32(0.2) / float32(3)
+	diff := got - want
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 1e-6 {
+		t.Errorf("healthDrainPerCell(0.2, 2) = %v, want ~%v (diff %v > 1e-6)", got, want, diff)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// linkedCells
+// ---------------------------------------------------------------------------
+
+// TestLinkedCellsNone verifies that a cell not present in any link entry
+// returns an empty (nil or zero-length) slice.
+func TestLinkedCellsNone(t *testing.T) {
+	links := [][4]int{
+		{3, 3, 4, 3}, // neither endpoint is (1,1)
+	}
+	got := linkedCells(links, 1, 1)
+	if len(got) != 0 {
+		t.Errorf("linkedCells with no matching links: got %v, want empty", got)
+	}
+}
+
+// TestLinkedCellsOne verifies that cell (1,1) linked to (2,1) returns a slice
+// containing exactly {2, 1}.
+func TestLinkedCellsOne(t *testing.T) {
+	links := [][4]int{
+		normaliseLink(1, 1, 2, 1),
+	}
+	got := linkedCells(links, 1, 1)
+	if len(got) != 1 {
+		t.Fatalf("linkedCells: got %d results, want 1; got=%v", len(got), got)
+	}
+	if got[0] != [2]int{2, 1} {
+		t.Errorf("linkedCells: got[0] = %v, want {2, 1}", got[0])
+	}
+}
+
+// TestLinkedCellsTwo verifies that cell (1,1) linked to both (2,1) and (1,2)
+// returns both neighbours.
+func TestLinkedCellsTwo(t *testing.T) {
+	links := [][4]int{
+		normaliseLink(1, 1, 2, 1),
+		normaliseLink(1, 1, 1, 2),
+	}
+	got := linkedCells(links, 1, 1)
+	if len(got) != 2 {
+		t.Fatalf("linkedCells: got %d results, want 2; got=%v", len(got), got)
+	}
+	found := map[[2]int]bool{}
+	for _, c := range got {
+		found[c] = true
+	}
+	if !found[[2]int{2, 1}] {
+		t.Errorf("linkedCells: missing {2, 1}; got=%v", got)
+	}
+	if !found[[2]int{1, 2}] {
+		t.Errorf("linkedCells: missing {1, 2}; got=%v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// hasLink
+// ---------------------------------------------------------------------------
+
+// TestHasLink verifies that hasLink returns true when the link exists (in
+// either direction) and false when it does not.
+func TestHasLink(t *testing.T) {
+	links := [][4]int{
+		normaliseLink(1, 1, 2, 1), // link between (1,1) and (2,1)
+		normaliseLink(3, 0, 3, 1), // link between (3,0) and (3,1)
+	}
+
+	// Present in forward direction.
+	if !hasLink(links, 1, 1, 2, 1) {
+		t.Error("hasLink(links, 1,1, 2,1) = false, want true (forward)")
+	}
+	// Present in reverse direction.
+	if !hasLink(links, 2, 1, 1, 1) {
+		t.Error("hasLink(links, 2,1, 1,1) = false, want true (reverse)")
+	}
+	// Second link, forward.
+	if !hasLink(links, 3, 0, 3, 1) {
+		t.Error("hasLink(links, 3,0, 3,1) = false, want true (second link forward)")
+	}
+	// Second link, reverse.
+	if !hasLink(links, 3, 1, 3, 0) {
+		t.Error("hasLink(links, 3,1, 3,0) = false, want true (second link reverse)")
+	}
+	// Not present.
+	if hasLink(links, 0, 0, 1, 0) {
+		t.Error("hasLink(links, 0,0, 1,0) = true, want false")
+	}
+	// Empty slice.
+	if hasLink([][4]int{}, 1, 1, 2, 1) {
+		t.Error("hasLink(empty, 1,1, 2,1) = true, want false")
+	}
+}
+
 // TestRemoveLinksForCellRemovesBoth verifies that a link [1,1,2,2] is removed
 // when queried by either endpoint: (col=1,row=1) or (col=2,row=2).
 func TestRemoveLinksForCellRemovesBoth(t *testing.T) {

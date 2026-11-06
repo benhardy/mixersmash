@@ -127,6 +127,19 @@ func addLink(links [][4]int, aCol, aRow, bCol, bRow int) [][4]int {
 	return append(links, norm)
 }
 
+// hasLink reports whether a link already exists between (aCol, aRow) and
+// (bCol, bRow) in links.  The pair is normalised before comparison so that
+// A→B and B→A are treated as the same link.
+func hasLink(links [][4]int, aCol, aRow, bCol, bRow int) bool {
+	norm := normaliseLink(aCol, aRow, bCol, bRow)
+	for _, l := range links {
+		if l == norm {
+			return true
+		}
+	}
+	return false
+}
+
 // healthDrainPerCell returns the health drain applied to each individual cell
 // when a click drains totalDrain spread evenly across the clicked cell plus all
 // cells it is linked to.  linkCount is the number of linked neighbours.
@@ -447,7 +460,8 @@ func (g *Game) Update() error {
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			neighbours := cellNeighbours(g.linkSrcCol, g.linkSrcRow, g.grid.Cols, g.grid.Rows)
 			for _, n := range neighbours {
-				if n[0] == hc && n[1] == hr && g.grid.Cells[hc][hr].Health > 0 {
+				if n[0] == hc && n[1] == hr && g.grid.Cells[hc][hr].Health > 0 &&
+					!hasLink(g.confirmedLinks, g.linkSrcCol, g.linkSrcRow, hc, hr) {
 					g.linkHoverCol = hc
 					g.linkHoverRow = hr
 					break
@@ -505,6 +519,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		sx, sy := cellCentre(g.linkSrcCol, g.linkSrcRow)
 		for _, n := range neighbours {
 			if g.grid.Cells[n[0]][n[1]].Health <= 0 {
+				continue
+			}
+			if hasLink(g.confirmedLinks, g.linkSrcCol, g.linkSrcRow, n[0], n[1]) {
 				continue
 			}
 			nx, ny := cellCentre(n[0], n[1])
