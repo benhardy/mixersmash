@@ -420,11 +420,15 @@ func (g *Game) advanceState(tick int64) {
 				actionCell.Health -= drain
 			} else {
 				actionCell.Health = 0.0
-				g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
+				if !g.isSourceCorner(g.actionCol, g.actionRow) {
+					g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
+				}
 			}
 			if actionCell.Health < healthEpsilon {
 				actionCell.Health = 0.0
-				g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
+				if !g.isSourceCorner(g.actionCol, g.actionRow) {
+					g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
+				}
 				// Source corners never stay dead — resurrect them immediately.
 				if g.isSourceCorner(g.actionCol, g.actionRow) {
 					for i, sc := range g.sourceCorners {
