@@ -4,7 +4,6 @@ import (
 	"image"
 	"image/color"
 	"log"
-	"math"
 	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -175,60 +174,6 @@ func removeLinksForCell(links [][4]int, col, row int) [][4]int {
 	return result
 }
 
-// nearestHealthyCell returns the (col, row) of the nearest cell with Health > 0
-// to the given cursor pixel position.  Priority is given to the cell the cursor
-// is currently inside; if that cell is healthy the function returns it
-// immediately.  Otherwise it scans all cells and returns the one whose centre
-// is closest to the cursor using Euclidean distance.  If no healthy cells
-// exist, found is false.
-func nearestHealthyCell(cells [][]Cell, cursorX, cursorY, cellSize int) (col, row int, found bool) {
-	cols := len(cells)
-	if cols == 0 {
-		return 0, 0, false
-	}
-	rows := len(cells[0])
-	if rows == 0 {
-		return 0, 0, false
-	}
-
-	// Priority: cell under cursor, if healthy.
-	underCol := cursorX / cellSize
-	underRow := cursorY / cellSize
-	if underCol >= 0 && underCol < cols && underRow >= 0 && underRow < rows {
-		if cells[underCol][underRow].Health > 0 {
-			return underCol, underRow, true
-		}
-	}
-
-	// Euclidean scan over all cells.
-	bestDist := math.MaxFloat64
-	bestCol, bestRow := -1, -1
-	half := float64(cellSize) / 2.0
-	cx := float64(cursorX)
-	cy := float64(cursorY)
-	for c := 0; c < cols; c++ {
-		for r := 0; r < rows; r++ {
-			if cells[c][r].Health <= 0 {
-				continue
-			}
-			cellCX := float64(c)*float64(cellSize) + half
-			cellCY := float64(r)*float64(cellSize) + half
-			dx := cx - cellCX
-			dy := cy - cellCY
-			dist := dx*dx + dy*dy
-			if dist < bestDist {
-				bestDist = dist
-				bestCol = c
-				bestRow = r
-			}
-		}
-	}
-	if bestCol == -1 {
-		return 0, 0, false
-	}
-	return bestCol, bestRow, true
-}
-
 type Cell struct {
 	Color  color.RGBA
 	Health float32
@@ -268,8 +213,6 @@ type Game struct {
 	startTick      int64 // when did the current state start?
 	actionRow      int   // the row any given action is happening
 	actionCol      int   // the column an action is happening
-	highlightCol   int   // col of currently highlighted cell; -1 = none
-	highlightRow   int   // row of currently highlighted cell; -1 = none
 	glowShader     *ebiten.Shader
 	confirmedLinks [][4]int // persistent links between cells
 	linkDragging   bool     // true while a link drag is in progress
@@ -289,8 +232,6 @@ func newGameState(grid *Grid) *Game {
 		startTick:    0,
 		actionCol:    -1,
 		actionRow:    -1,
-		highlightCol: -1,
-		highlightRow: -1,
 		linkSrcCol:   -1,
 		linkSrcRow:   -1,
 		linkHoverCol: -1,
@@ -383,43 +324,9 @@ func (g *Game) advanceState(tick int64) {
 	}
 }
 
-// clearHighlight resets highlightCol/Row to -1 so no glow is drawn this frame.
-func clearHighlight(g *Game) {
-	if g.highlightCol == -1 {
-		return
-	}
-	g.highlightCol = -1
-	g.highlightRow = -1
-}
-
-// updateHighlight evaluates the nearest healthy cell to the cursor and updates
-// highlightCol/Row accordingly.  Glow rendering happens in Draw(), not here.
-// It is called every tick while in stateWaiting.
-func updateHighlight(g *Game) {
-	px, py := ebiten.CursorPosition()
-	if px < 0 || px >= windowWidth || py < 0 || py >= windowHeight {
-		clearHighlight(g)
-		return
-	}
-	newCol, newRow, found := nearestHealthyCell(g.grid.Cells, px, py, cellSize)
-	if found && newCol == g.highlightCol && newRow == g.highlightRow {
-		// No change — nothing to redraw.
-		return
-	}
-	// Update tracked highlight cell; glow is drawn each frame in Draw().
-	if found {
-		g.highlightCol = newCol
-		g.highlightRow = newRow
-	} else {
-		g.highlightCol = -1
-		g.highlightRow = -1
-	}
-}
-
 // Update handles input each tick.
 func (g *Game) Update() error {
 	if g.currentState == stateWaiting {
-		updateHighlight(g)
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			px, py := ebiten.CursorPosition()
 			col, row := cellFromPixel(px, py, cellSize)
@@ -431,7 +338,6 @@ func (g *Game) Update() error {
 			}
 			recolor(&g.grid.Cells[col][row])
 			g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
-			clearHighlight(g)
 			g.currentState = stateCollapsing
 			g.actionCol = col
 			g.actionRow = row
@@ -445,9 +351,6 @@ func (g *Game) Update() error {
 		}
 	} else {
 		g.advanceState(ebiten.Tick())
-		// After stateSpawning completes, the previously highlighted cell may
-		// now be dead; re-evaluate the highlight on the next waiting tick.
-		// (highlightCol/Row are already -1 since clearHighlight ran on click.)
 	}
 	// Link drag hover and release are handled outside the state branch because
 	// the click that starts the drag also transitions to stateCollapsing on the
@@ -487,9 +390,9 @@ func cellCentre(col, row int) (float32, float32) {
 	return float32(col*cellSize + cellSize/2), float32(row*cellSize + cellSize/2)
 }
 
-// Draw blits the offscreen canvas to the screen, then composites the glow
-// ring for the highlighted cell directly onto the screen each frame.
-// On the first call it also compiles the glow shader (ebiten must be
+// Draw blits the offscreen canvas to the screen, then composites glow rings
+// and potential-link lines onto the screen each frame while a link drag is
+// active.  On the first call it also compiles the glow shader (ebiten must be
 // initialised before NewShader can be called).
 func (g *Game) Draw(screen *ebiten.Image) {
 	if g.glowShader == nil {
@@ -513,37 +416,28 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	screen.DrawImage(g.canvas, nil)
 
-	// Draw potential links while dragging.
 	if g.linkDragging {
+		// Build the set of glowing cells: source cell plus every valid potential
+		// target (healthy neighbour without an existing confirmed link).
+		glowCells := [][2]int{{g.linkSrcCol, g.linkSrcRow}}
 		neighbours := cellNeighbours(g.linkSrcCol, g.linkSrcRow, g.grid.Cols, g.grid.Rows)
-		sx, sy := cellCentre(g.linkSrcCol, g.linkSrcRow)
 		for _, n := range neighbours {
-			if g.grid.Cells[n[0]][n[1]].Health <= 0 {
-				continue
-			}
-			if hasLink(g.confirmedLinks, g.linkSrcCol, g.linkSrcRow, n[0], n[1]) {
-				continue
-			}
-			nx, ny := cellCentre(n[0], n[1])
-			if n[0] == g.linkHoverCol && n[1] == g.linkHoverRow {
-				vector.StrokeLine(screen, sx, sy, nx, ny, 2, color.RGBA{255, 255, 255, 200}, true)
-			} else {
-				vector.StrokeLine(screen, sx, sy, nx, ny, 1.5, color.RGBA{255, 255, 255, 80}, true)
+			if g.grid.Cells[n[0]][n[1]].Health > 0 &&
+				!hasLink(g.confirmedLinks, g.linkSrcCol, g.linkSrcRow, n[0], n[1]) {
+				glowCells = append(glowCells, n)
 			}
 		}
-	}
 
-	if g.highlightCol != -1 && g.glowShader != nil {
-		col := g.highlightCol
-		row := g.highlightRow
-		cell := &g.grid.Cells[col][row]
-		if cell.Health > 0 {
+		// Glow pass: fire the shader for every cell in glowCells.
+		for _, gc := range glowCells {
+			col := gc[0]
+			row := gc[1]
+			cell := &g.grid.Cells[col][row]
 			csFloat := float32(cellSize)
 			halfCs := csFloat / 2
 			cx := float32(col*cellSize) + halfCs
 			cy := float32(row*cellSize) + halfCs
-			maxRadius := halfCs - 2
-			radius := maxRadius * cell.Health
+			radius := (halfCs - 2) * cell.Health
 			outerR := radius + glowWidth
 			x0 := cx - outerR
 			y0 := cy - outerR
@@ -558,6 +452,18 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			}
 			opts.Blend = ebiten.BlendSourceOver
 			screen.DrawRectShader(w, h, g.glowShader, opts)
+		}
+
+		// Potential link lines: iterate glowCells (excluding the source) so both
+		// passes use the same consistent set.
+		sx, sy := cellCentre(g.linkSrcCol, g.linkSrcRow)
+		for _, gc := range glowCells[1:] {
+			nx, ny := cellCentre(gc[0], gc[1])
+			if gc[0] == g.linkHoverCol && gc[1] == g.linkHoverRow {
+				vector.StrokeLine(screen, sx, sy, nx, ny, 2, color.RGBA{255, 255, 255, 200}, true)
+			} else {
+				vector.StrokeLine(screen, sx, sy, nx, ny, 1.5, color.RGBA{255, 255, 255, 80}, true)
+			}
 		}
 	}
 }
