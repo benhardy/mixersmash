@@ -522,3 +522,93 @@ func TestRandomColorNeverReturnsWhite(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// cellNeighbours
+// ---------------------------------------------------------------------------
+
+// TestCellNeighboursCorner verifies that the corner cell (0,0) on a 25×18
+// grid has exactly 2 valid cardinal neighbours: (1,0) and (0,1).
+func TestCellNeighboursCorner(t *testing.T) {
+	got := cellNeighbours(0, 0, 25, 18)
+	if len(got) != 2 {
+		t.Fatalf("cellNeighbours(0,0,25,18) returned %d neighbours, want 2: %v", len(got), got)
+	}
+	want := map[[2]int]bool{{1, 0}: true, {0, 1}: true}
+	for _, n := range got {
+		if !want[n] {
+			t.Errorf("unexpected neighbour %v", n)
+		}
+	}
+}
+
+// TestCellNeighboursEdge verifies that an edge cell (0,5) on a 25×18 grid
+// has exactly 3 valid cardinal neighbours.
+func TestCellNeighboursEdge(t *testing.T) {
+	got := cellNeighbours(0, 5, 25, 18)
+	if len(got) != 3 {
+		t.Fatalf("cellNeighbours(0,5,25,18) returned %d neighbours, want 3: %v", len(got), got)
+	}
+}
+
+// TestCellNeighboursCentre verifies that an interior cell (5,5) on a 25×18
+// grid has exactly 4 valid cardinal neighbours.
+func TestCellNeighboursCentre(t *testing.T) {
+	got := cellNeighbours(5, 5, 25, 18)
+	if len(got) != 4 {
+		t.Fatalf("cellNeighbours(5,5,25,18) returned %d neighbours, want 4: %v", len(got), got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// normaliseLink
+// ---------------------------------------------------------------------------
+
+// TestNormaliseLinkOrdering verifies that normaliseLink(3,2,1,4) and
+// normaliseLink(1,4,3,2) return the same canonical value regardless of
+// argument order.
+func TestNormaliseLinkOrdering(t *testing.T) {
+	a := normaliseLink(3, 2, 1, 4)
+	b := normaliseLink(1, 4, 3, 2)
+	if a != b {
+		t.Errorf("normaliseLink not symmetric: normaliseLink(3,2,1,4)=%v, normaliseLink(1,4,3,2)=%v", a, b)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// addLink
+// ---------------------------------------------------------------------------
+
+// TestAddLinkNoDuplicate verifies that adding the same (col,row) pair twice
+// results in a slice of length 1 — duplicates are suppressed.
+func TestAddLinkNoDuplicate(t *testing.T) {
+	var links [][4]int
+	links = addLink(links, 1, 1, 2, 2)
+	links = addLink(links, 1, 1, 2, 2)
+	if len(links) != 1 {
+		t.Errorf("addLink with duplicate: got len=%d, want 1; links=%v", len(links), links)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// removeLinksForCell
+// ---------------------------------------------------------------------------
+
+// TestRemoveLinksForCellRemovesBoth verifies that a link [1,1,2,2] is removed
+// when queried by either endpoint: (col=1,row=1) or (col=2,row=2).
+func TestRemoveLinksForCellRemovesBoth(t *testing.T) {
+	// Build a slice with a single pre-normalised link between (1,1) and (2,2).
+	initial := [][4]int{{1, 1, 2, 2}}
+
+	// Remove by first endpoint.
+	result := removeLinksForCell(initial, 1, 1)
+	if len(result) != 0 {
+		t.Errorf("removeLinksForCell with col=1,row=1: got %v, want empty slice", result)
+	}
+
+	// Remove by second endpoint.
+	result = removeLinksForCell(initial, 2, 2)
+	if len(result) != 0 {
+		t.Errorf("removeLinksForCell with col=2,row=2: got %v, want empty slice", result)
+	}
+}
