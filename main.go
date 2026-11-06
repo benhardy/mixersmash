@@ -16,7 +16,15 @@ const (
 	cellSize     = 32
 	gridCols     = windowWidth / cellSize  // 25
 	gridRows     = windowHeight / cellSize // 18
+
+	stateWaiting = 1
+	stateCollapsing = 2
+	stateSpawning = 3
+
+	collapseTicks = int64(5)
+	spawnTicks = int64(10)
 )
+
 
 // randomColor returns a random opaque colour (A=255).
 func randomColor() color.RGBA {
@@ -71,30 +79,90 @@ func NewGrid(cols, rows int) *Grid {
 type Game struct {
 	grid   *Grid
 	canvas *ebiten.Image
+    currentState int     // which state are we in?
+    startTick int64 // when did the current state start?
+    actionRow int // the row any given action is happening
+    actionCol int // the column an action is happening
+}
+
+// newGameState returns a Game with data fields initialised but no ebiten.Image
+// allocated.  Callers that need a canvas (i.e. main) must set g.canvas after
+// calling this.
+func newGameState(grid *Grid) *Game {
+	return &Game{
+		grid:         grid,
+		currentState: stateWaiting,
+		startTick:    0,
+		actionCol:    -1,
+		actionRow:    -1,
+	}
+}
+
+// elapsedFraction returns how far through a phase we are as a 0→1 float32.
+// currentTick is the game tick at the time of evaluation, startTick is when
+// the phase began, and durationTicks is the total length of the phase.
+func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
+	return float32(currentTick-startTick) / float32(durationTicks)
 }
 
 // drawCell erases the cell's bounding rectangle on canvas with black and
 // redraws the antialiased circle for (col, row) using clr.
-func drawCell(canvas *ebiten.Image, col, row int, clr color.RGBA, cs int) {
+func drawCell(canvas *ebiten.Image, col, row int, clr color.RGBA, cs int, cellFullness float32) {
 	x := float32(col * cs)
 	y := float32(row * cs)
-	vector.DrawFilledRect(canvas, x, y, float32(cs), float32(cs), color.Black, false)
-	cx := x + float32(cs)/2
-	cy := y + float32(cs)/2
-	radius := float32(cs)/2 - 2
+	csFloat := float32(cs)
+	vector.DrawFilledRect(canvas, x, y, csFloat, csFloat, color.Black, false)
+	halfCs := csFloat /2
+	cx := x + halfCs
+	cy := y + halfCs
+	maxRadius := (halfCs -2)
+	radius := maxRadius * cellFullness
 	vector.DrawFilledCircle(canvas, cx, cy, radius, clr, true)
+}
+
+// advanceState advances the state machine for a given tick value.  It does not
+// call ebiten.Tick() — the caller supplies the current tick so this function
+// is pure and unit-testable.  drawCell calls are skipped when g.canvas is nil.
+func (g *Game) advanceState(tick int64) {
+	if g.currentState == stateCollapsing {
+		elapsed := elapsedFraction(tick, g.startTick, collapseTicks)
+		if g.canvas != nil {
+			drawCell(g.canvas, g.actionCol, g.actionRow, g.grid.Colors[g.actionCol][g.actionRow], cellSize, 1.0-elapsed)
+		}
+		if elapsed >= 1.0 {
+			g.currentState = stateSpawning
+			g.startTick = tick
+		}
+	} else if g.currentState == stateSpawning {
+		elapsed := elapsedFraction(tick, g.startTick, spawnTicks)
+		if g.canvas != nil {
+			drawCell(g.canvas, g.actionCol, g.actionRow, g.grid.Colors[g.actionCol][g.actionRow], cellSize, elapsed)
+		}
+		if elapsed >= 1.0 {
+			g.currentState = stateWaiting
+			g.startTick = tick
+		}
+	}
 }
 
 // Update handles input each tick.
 func (g *Game) Update() error {
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		px, py := ebiten.CursorPosition()
-		col, row := cellFromPixel(px, py, cellSize)
-		if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-			g.grid.Colors[col][row] = recolor(g.grid.Colors[col][row])
-			drawCell(g.canvas, col, row, g.grid.Colors[col][row], cellSize)
-		}
-	}
+    if g.currentState == stateWaiting {
+        if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+            px, py := ebiten.CursorPosition()
+            col, row := cellFromPixel(px, py, cellSize)
+            if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
+                g.grid.Colors[col][row] = recolor(g.grid.Colors[col][row])
+                drawCell(g.canvas, col, row, g.grid.Colors[col][row], cellSize, 1.0)
+            }
+            g.currentState = stateCollapsing
+            g.actionCol = col
+            g.actionRow = row
+            g.startTick = ebiten.Tick()
+        }
+    } else {
+        g.advanceState(ebiten.Tick())
+    }
 	return nil
 }
 
@@ -118,14 +186,13 @@ func main() {
 	canvas.Fill(color.Black)
 	for c := 0; c < grid.Cols; c++ {
 		for r := 0; r < grid.Rows; r++ {
-			drawCell(canvas, c, r, grid.Colors[c][r], cellSize)
+			drawCell(canvas, c, r, grid.Colors[c][r], cellSize, 1.0)
 		}
 	}
 
-	game := &Game{
-		grid:   grid,
-		canvas: canvas,
-	}
+	game := newGameState(grid)
+	game.canvas = canvas
+	game.startTick = ebiten.Tick()
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
