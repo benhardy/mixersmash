@@ -40,10 +40,12 @@ var OuterRadius float
 
 func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
     dist := length(dstPos.xy - Center)
-    if dist < InnerRadius || dist > OuterRadius {
+    alpha := 1.0 - (dist-InnerRadius)/(OuterRadius-InnerRadius)
+    alpha *= clamp(dist-(InnerRadius-1.0), 0.0, 1.0)
+    alpha = clamp(alpha, 0.0, 1.0)
+    if alpha <= 0 {
         return vec4(0, 0, 0, 0)
     }
-    alpha := 1.0 - (dist-InnerRadius)/(OuterRadius-InnerRadius)
     return vec4(alpha, alpha, alpha, alpha)
 }
 `
