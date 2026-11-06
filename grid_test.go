@@ -319,6 +319,14 @@ func TestHealthConstants(t *testing.T) {
 	}
 }
 
+// TestHealthEpsilonConstant pins the value of healthEpsilon so that any
+// accidental change to the zero-clamp threshold is caught immediately.
+func TestHealthEpsilonConstant(t *testing.T) {
+	if healthEpsilon != 0.001 {
+		t.Errorf("healthEpsilon = %v, want 0.001", healthEpsilon)
+	}
+}
+
 // TestInitialCellHealth verifies that every cell produced by NewGrid starts
 // with Health == 1.0.
 func TestInitialCellHealth(t *testing.T) {
@@ -364,6 +372,33 @@ func TestHealthClampsToZeroOnFinalCollapse(t *testing.T) {
 	got := g.grid.Cells[col][row].Health
 	if got != 0.0 {
 		t.Errorf("Health after final collapse = %v, want 0.0 (clamped)", got)
+	}
+}
+
+// TestAdvanceStateSkipsSpawningWhenHealthZero verifies that when a cell's
+// Health reaches zero after a collapse completion the state machine transitions
+// directly to stateWaiting, bypassing stateSpawning entirely.
+func TestAdvanceStateSkipsSpawningWhenHealthZero(t *testing.T) {
+	const col, row = 1, 2
+	const startTick int64 = 50
+	g := newGameState(NewGrid(4, 4))
+	g.actionCol = col
+	g.actionRow = row
+	// healthMin triggers the clamp-to-zero branch, which then detects
+	// Health < healthEpsilon and routes to stateWaiting instead of stateSpawning.
+	g.grid.Cells[col][row].Health = healthMin
+	g.currentState = stateCollapsing
+	g.startTick = startTick
+
+	g.advanceState(startTick + collapseTicks)
+
+	if g.currentState != stateWaiting {
+		t.Errorf("currentState = %d after zero-health collapse, want stateWaiting (%d)",
+			g.currentState, stateWaiting)
+	}
+	if g.grid.Cells[col][row].Health != 0.0 {
+		t.Errorf("Health = %v after zero-health collapse, want 0.0",
+			g.grid.Cells[col][row].Health)
 	}
 }
 
@@ -468,6 +503,22 @@ func TestNearestHealthyCellCursorOutOfBounds(t *testing.T) {
 		}
 		if col != 0 || row != 0 {
 			t.Errorf("%s: nearestHealthyCell = (%d, %d), want (0, 0)", tc.name, col, row)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// randomColor — white exclusion
+// ---------------------------------------------------------------------------
+
+// TestRandomColorNeverReturnsWhite verifies that randomColor never returns
+// {R:255, G:255, B:255} across a large number of calls.
+func TestRandomColorNeverReturnsWhite(t *testing.T) {
+	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	for i := 0; i < 10_000; i++ {
+		c := randomColor()
+		if c.R == white.R && c.G == white.G && c.B == white.B {
+			t.Fatalf("randomColor() returned white {255,255,255} on iteration %d", i)
 		}
 	}
 }
