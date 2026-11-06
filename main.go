@@ -298,7 +298,7 @@ func (g *Game) drawCell(col, row int, cell *Cell, cs int, cellFullness float32) 
 	csFloat := float32(cs)
 
 	// Clear exactly the cell rect — no expansion.
-	vector.DrawFilledRect(g.canvas, float32(col*cs), float32(row*cs), csFloat, csFloat, color.Black, false)
+	vector.DrawFilledRect(g.canvas, float32(col*cs), float32(row*cs), csFloat, csFloat, color.RGBA{0, 0, 0, 0}, false)
 
 	if cell.Health <= 0 {
 		return
@@ -482,9 +482,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		g.glowShader = s
 	}
-	screen.DrawImage(g.canvas, nil)
+	screen.Fill(color.Black)
 
-	// Draw confirmed links as metallic pipes (three overlapping strokes).
+	// Draw confirmed links as metallic pipes (three overlapping strokes) before
+	// blitting the canvas so circles appear on top of links.
 	for _, l := range g.confirmedLinks {
 		x0, y0 := cellCentre(l[0], l[1])
 		x1, y1 := cellCentre(l[2], l[3])
@@ -492,6 +493,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		vector.StrokeLine(screen, x0, y0, x1, y1, 3, color.RGBA{140, 140, 140, 255}, true)
 		vector.StrokeLine(screen, x0, y0, x1, y1, 1, color.RGBA{220, 220, 220, 255}, true)
 	}
+
+	screen.DrawImage(g.canvas, nil)
 
 	// Draw potential links while dragging.
 	if g.linkDragging {
@@ -551,7 +554,6 @@ func main() {
 
 	grid := NewGrid(gridCols, gridRows)
 	canvas := ebiten.NewImage(windowWidth, windowHeight)
-	canvas.Fill(color.Black)
 
 	game := newGameState(grid)
 	game.canvas = canvas
