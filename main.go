@@ -69,7 +69,20 @@ func NewGrid(cols, rows int) *Grid {
 
 // Game is the Ebitengine game state.
 type Game struct {
-	grid *Grid
+	grid   *Grid
+	canvas *ebiten.Image
+}
+
+// drawCell erases the cell's bounding rectangle on canvas with black and
+// redraws the antialiased circle for (col, row) using clr.
+func drawCell(canvas *ebiten.Image, col, row int, clr color.RGBA, cs int) {
+	x := float32(col * cs)
+	y := float32(row * cs)
+	vector.DrawFilledRect(canvas, x, y, float32(cs), float32(cs), color.Black, false)
+	cx := x + float32(cs)/2
+	cy := y + float32(cs)/2
+	radius := float32(cs)/2 - 2
+	vector.DrawFilledCircle(canvas, cx, cy, radius, clr, true)
 }
 
 // Update handles input each tick.
@@ -79,22 +92,15 @@ func (g *Game) Update() error {
 		col, row := cellFromPixel(px, py, cellSize)
 		if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
 			g.grid.Colors[col][row] = recolor(g.grid.Colors[col][row])
+			drawCell(g.canvas, col, row, g.grid.Colors[col][row], cellSize)
 		}
 	}
 	return nil
 }
 
-// Draw renders the black background and all filled circles.
+// Draw blits the offscreen canvas to the screen in a single call.
 func (g *Game) Draw(screen *ebiten.Image) {
-	screen.Fill(color.Black)
-	for c := 0; c < g.grid.Cols; c++ {
-		for r := 0; r < g.grid.Rows; r++ {
-			cx := float32(c*cellSize) + float32(cellSize)/2
-			cy := float32(r*cellSize) + float32(cellSize)/2
-			radius := float32(cellSize)/2 - 2
-			vector.DrawFilledCircle(screen, cx, cy, radius, g.grid.Colors[c][r], true)
-		}
-	}
+	screen.DrawImage(g.canvas, nil)
 }
 
 // Layout returns the logical screen dimensions.
@@ -107,8 +113,18 @@ func main() {
 	ebiten.SetWindowTitle("go2d grid")
 	ebiten.SetWindowClosingHandled(false)
 
+	grid := NewGrid(gridCols, gridRows)
+	canvas := ebiten.NewImage(windowWidth, windowHeight)
+	canvas.Fill(color.Black)
+	for c := 0; c < grid.Cols; c++ {
+		for r := 0; r < grid.Rows; r++ {
+			drawCell(canvas, c, r, grid.Colors[c][r], cellSize)
+		}
+	}
+
 	game := &Game{
-		grid: NewGrid(gridCols, gridRows),
+		grid:   grid,
+		canvas: canvas,
 	}
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
