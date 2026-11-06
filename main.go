@@ -126,6 +126,28 @@ func addLink(links [][4]int, aCol, aRow, bCol, bRow int) [][4]int {
 	return append(links, norm)
 }
 
+// healthDrainPerCell returns the health drain applied to each individual cell
+// when a click drains totalDrain spread evenly across the clicked cell plus all
+// cells it is linked to.  linkCount is the number of linked neighbours.
+func healthDrainPerCell(totalDrain float32, linkCount int) float32 {
+	return totalDrain / float32(1+linkCount)
+}
+
+// linkedCells returns a slice of [col, row] pairs for every cell that shares a
+// confirmed link with (col, row), scanning both endpoints of each link entry.
+func linkedCells(links [][4]int, col, row int) [][2]int {
+	var result [][2]int
+	for _, l := range links {
+		sc, sr, dc, dr := l[0], l[1], l[2], l[3]
+		if sc == col && sr == row {
+			result = append(result, [2]int{dc, dr})
+		} else if dc == col && dr == row {
+			result = append(result, [2]int{sc, sr})
+		}
+	}
+	return result
+}
+
 // removeLinksForCell removes all links where either endpoint matches (col, row).
 // Returns the filtered slice.
 func removeLinksForCell(links [][4]int, col, row int) [][4]int {
@@ -301,8 +323,10 @@ func (g *Game) advanceState(tick int64) {
 			g.drawCell(g.actionCol, g.actionRow, actionCell, cellSize, 1.0-elapsed)
 		}
 		if elapsed >= 1.0 {
+			linked := linkedCells(g.confirmedLinks, g.actionCol, g.actionRow)
+			drain := healthDrainPerCell(healthDecrement, len(linked))
 			if actionCell.Health > healthMin {
-				actionCell.Health -= healthDecrement
+				actionCell.Health -= drain
 			} else {
 				actionCell.Health = 0.0
 				g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
@@ -313,6 +337,21 @@ func (g *Game) advanceState(tick int64) {
 				g.currentState = stateWaiting
 			} else {
 				g.currentState = stateSpawning
+			}
+			for _, n := range linked {
+				nc := &g.grid.Cells[n[0]][n[1]]
+				if nc.Health > drain {
+					nc.Health -= drain
+				} else {
+					nc.Health = 0.0
+				}
+				if nc.Health < healthEpsilon {
+					nc.Health = 0.0
+					g.confirmedLinks = removeLinksForCell(g.confirmedLinks, n[0], n[1])
+				}
+				if g.canvas != nil {
+					g.drawCell(n[0], n[1], nc, cellSize, 1.0)
+				}
 			}
 			g.startTick = tick
 		}
