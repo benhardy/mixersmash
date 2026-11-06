@@ -617,6 +617,138 @@ func TestHasLink(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// lerpColor
+// ---------------------------------------------------------------------------
+
+// TestLerpColorMidpoint verifies that lerping black→white at t=0.5 produces a
+// colour near {127,127,127,255} (±1 per channel for float→uint8 rounding).
+func TestLerpColorMidpoint(t *testing.T) {
+	black := color.RGBA{0, 0, 0, 255}
+	white := color.RGBA{255, 255, 255, 255}
+	got := lerpColor(black, white, 0.5)
+	for _, v := range []struct {
+		name string
+		got  uint8
+		want uint8
+	}{
+		{"R", got.R, 127},
+		{"G", got.G, 127},
+		{"B", got.B, 127},
+	} {
+		diff := int(v.got) - int(v.want)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 1 {
+			t.Errorf("lerpColor midpoint %s = %d, want ~127 (±1)", v.name, v.got)
+		}
+	}
+	if got.A != 255 {
+		t.Errorf("lerpColor midpoint A = %d, want 255", got.A)
+	}
+}
+
+// TestLerpColorAtZero verifies that t=0.0 returns the from colour unchanged.
+func TestLerpColorAtZero(t *testing.T) {
+	red := color.RGBA{255, 0, 0, 255}
+	blue := color.RGBA{0, 0, 255, 255}
+	got := lerpColor(red, blue, 0.0)
+	if got != red {
+		t.Errorf("lerpColor(red, blue, 0.0) = %v, want %v", got, red)
+	}
+}
+
+// TestLerpColorAtOne verifies that t=1.0 returns the to colour unchanged.
+func TestLerpColorAtOne(t *testing.T) {
+	red := color.RGBA{255, 0, 0, 255}
+	blue := color.RGBA{0, 0, 255, 255}
+	got := lerpColor(red, blue, 1.0)
+	if got != blue {
+		t.Errorf("lerpColor(red, blue, 1.0) = %v, want %v", got, blue)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// colorDistanceMax
+// ---------------------------------------------------------------------------
+
+// TestColorDistanceMaxSame verifies that a colour compared with itself is 0.
+func TestColorDistanceMaxSame(t *testing.T) {
+	c := color.RGBA{R: 100, G: 150, B: 200, A: 255}
+	got := colorDistanceMax(c, c)
+	if got != 0 {
+		t.Errorf("colorDistanceMax(c, c) = %d, want 0", got)
+	}
+}
+
+// TestColorDistanceMaxChannels verifies that the function returns the maximum
+// channel difference: R diff=255, G diff=100, B diff=50 → 255.
+func TestColorDistanceMaxChannels(t *testing.T) {
+	a := color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	b := color.RGBA{R: 0, G: 100, B: 50, A: 255}
+	got := colorDistanceMax(a, b)
+	if got != 255 {
+		t.Errorf("colorDistanceMax({255,0,0},{0,100,50}) = %d, want 255", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// blendColorsWeighted
+// ---------------------------------------------------------------------------
+
+// TestBlendColorsWeightedEqual verifies that equal weights blend red and blue
+// to approximately {127,0,127,255} (±1 per channel).
+func TestBlendColorsWeightedEqual(t *testing.T) {
+	red := color.RGBA{255, 0, 0, 255}
+	blue := color.RGBA{0, 0, 255, 255}
+	got := blendColorsWeighted([]color.RGBA{red, blue}, []float32{1, 1})
+	for _, v := range []struct {
+		name string
+		got  uint8
+		want uint8
+	}{
+		{"R", got.R, 127},
+		{"G", got.G, 0},
+		{"B", got.B, 127},
+	} {
+		diff := int(v.got) - int(v.want)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 1 {
+			t.Errorf("blendColorsWeightedEqual %s = %d, want ~%d (±1)", v.name, v.got, v.want)
+		}
+	}
+	if got.A != 255 {
+		t.Errorf("blendColorsWeightedEqual A = %d, want 255", got.A)
+	}
+}
+
+// TestBlendColorsWeightedSkewed verifies that a 3:1 weight blend of
+// {200,0,0,255} and {0,0,0,255} produces approximately {150,0,0,255} (±1).
+func TestBlendColorsWeightedSkewed(t *testing.T) {
+	c1 := color.RGBA{200, 0, 0, 255}
+	c2 := color.RGBA{0, 0, 0, 255}
+	got := blendColorsWeighted([]color.RGBA{c1, c2}, []float32{3, 1})
+	diff := int(got.R) - 150
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 1 {
+		t.Errorf("blendColorsWeightedSkewed R = %d, want ~150 (±1)", got.R)
+	}
+	if got.G != 0 {
+		t.Errorf("blendColorsWeightedSkewed G = %d, want 0", got.G)
+	}
+	if got.B != 0 {
+		t.Errorf("blendColorsWeightedSkewed B = %d, want 0", got.B)
+	}
+	if got.A != 255 {
+		t.Errorf("blendColorsWeightedSkewed A = %d, want 255", got.A)
+	}
+}
+
 // TestRemoveLinksForCellRemovesBoth verifies that a link [1,1,2,2] is removed
 // when queried by either endpoint: (col=1,row=1) or (col=2,row=2).
 func TestRemoveLinksForCellRemovesBoth(t *testing.T) {

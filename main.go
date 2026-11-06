@@ -30,6 +30,10 @@ const (
 	healthEpsilon   = float32(0.001)
 
 	glowWidth = float32(6)
+
+	flowRate           = float32(0.02) // colour blend per tick per unit health
+	sourceRecoveryRate = float32(0.01) // health recovered per tick for source corners
+	winTolerance       = 15            // max channel delta for win condition
 )
 
 const glowShaderSrc = `//kage:unit pixels
@@ -47,6 +51,68 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
     return vec4(alpha, alpha, alpha, alpha) // RGB values premultiplied by alpha
 }
 `
+
+// lerpColor linearly interpolates between two colours.
+// t=0 returns from, t=1 returns to. Alpha is always 255.
+func lerpColor(from, to color.RGBA, t float32) color.RGBA {
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return color.RGBA{
+		R: uint8(float32(from.R) + t*(float32(to.R)-float32(from.R))),
+		G: uint8(float32(from.G) + t*(float32(to.G)-float32(from.G))),
+		B: uint8(float32(from.B) + t*(float32(to.B)-float32(from.B))),
+		A: 255,
+	}
+}
+
+// colorDistanceMax returns the max absolute difference across the R, G, B
+// channels of two colours. Used for the win condition.
+func colorDistanceMax(a, b color.RGBA) int {
+	dr := int(a.R) - int(b.R)
+	if dr < 0 {
+		dr = -dr
+	}
+	dg := int(a.G) - int(b.G)
+	if dg < 0 {
+		dg = -dg
+	}
+	db := int(a.B) - int(b.B)
+	if db < 0 {
+		db = -db
+	}
+	if dr >= dg && dr >= db {
+		return dr
+	}
+	if dg >= db {
+		return dg
+	}
+	return db
+}
+
+// blendColorsWeighted returns the weighted average of a slice of colours.
+// Weights need not sum to 1 — they are normalised internally.
+// Alpha is always 255. If weights sum to 0, returns colors[0].
+func blendColorsWeighted(colors []color.RGBA, weights []float32) color.RGBA {
+	var sum float32
+	for _, w := range weights {
+		sum += w
+	}
+	if sum == 0 {
+		return colors[0]
+	}
+	var r, g, b float32
+	for i, c := range colors {
+		w := weights[i] / sum
+		r += float32(c.R) * w
+		g += float32(c.G) * w
+		b += float32(c.B) * w
+	}
+	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}
+}
 
 // randomColor returns a random opaque colour (A=255).
 // will be a subset of web-safe colours
@@ -220,6 +286,13 @@ type Game struct {
 	linkSrcRow     int      // source cell row during drag; -1 = none
 	linkHoverCol   int      // neighbour cell under cursor during drag; -1 = none
 	linkHoverRow   int      // neighbour cell row under cursor during drag; -1 = none
+
+	// colour-flow fields
+	sourceCorners [3][2]int    // col,row of the 3 source corners
+	targetCorner  [2]int       // col,row of the target corner
+	sourceColors  [3]color.RGBA
+	targetColor   color.RGBA
+	gameWon       bool
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -237,6 +310,67 @@ func newGameState(grid *Grid) *Game {
 		linkHoverCol: -1,
 		linkHoverRow: -1,
 	}
+}
+
+// initColourFlow sets up the colour-flow game mode on g after the grid is built.
+// It assigns source and target corners, generates source colours, computes the
+// target blend colour, and seeds each source corner cell with its source colour.
+func (g *Game) initColourFlow() {
+	cols := g.grid.Cols
+	rows := g.grid.Rows
+	// All four corners as (col, row) pairs.
+	corners := [4][2]int{
+		{0, 0},
+		{cols - 1, 0},
+		{0, rows - 1},
+		{cols - 1, rows - 1},
+	}
+	// Shuffle corner indices.
+	perm := rand.Perm(4)
+	for i := 0; i < 3; i++ {
+		g.sourceCorners[i] = corners[perm[i]]
+	}
+	g.targetCorner = corners[perm[3]]
+
+	// Generate 3 distinct vibrant source colours.
+	g.sourceColors[0] = randomColor()
+	for {
+		g.sourceColors[1] = randomColor()
+		if g.sourceColors[1] != g.sourceColors[0] {
+			break
+		}
+	}
+	for {
+		g.sourceColors[2] = randomColor()
+		if g.sourceColors[2] != g.sourceColors[0] && g.sourceColors[2] != g.sourceColors[1] {
+			break
+		}
+	}
+
+	// Seed source corner cells with their source colours.
+	for i, sc := range g.sourceCorners {
+		g.grid.Cells[sc[0]][sc[1]].Color = g.sourceColors[i]
+	}
+
+	// Compute target colour from random positive-weight blend of source colours.
+	var ratios [3]float32
+	for i := range ratios {
+		ratios[i] = rand.Float32()
+		if ratios[i] < 0.1 {
+			ratios[i] = 0.1
+		}
+	}
+	g.targetColor = blendColorsWeighted(g.sourceColors[:], ratios[:])
+}
+
+// isSourceCorner reports whether (col, row) is one of the three source corners.
+func (g *Game) isSourceCorner(col, row int) bool {
+	for _, sc := range g.sourceCorners {
+		if sc[0] == col && sc[1] == row {
+			return true
+		}
+	}
+	return false
 }
 
 // elapsedFraction returns how far through a phase we are as a 0→1 float32.
@@ -291,7 +425,19 @@ func (g *Game) advanceState(tick int64) {
 			if actionCell.Health < healthEpsilon {
 				actionCell.Health = 0.0
 				g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
-				g.currentState = stateWaiting
+				// Source corners never stay dead — resurrect them immediately.
+				if g.isSourceCorner(g.actionCol, g.actionRow) {
+					for i, sc := range g.sourceCorners {
+						if sc[0] == g.actionCol && sc[1] == g.actionRow {
+							actionCell.Health = 1.0
+							actionCell.Color = g.sourceColors[i]
+							break
+						}
+					}
+					g.currentState = stateSpawning
+				} else {
+					g.currentState = stateWaiting
+				}
 			} else {
 				g.currentState = stateSpawning
 			}
@@ -326,6 +472,47 @@ func (g *Game) advanceState(tick int64) {
 
 // Update handles input each tick.
 func (g *Game) Update() error {
+	// --- Colour-flow: recover source corner health ---
+	for _, sc := range g.sourceCorners {
+		cell := &g.grid.Cells[sc[0]][sc[1]]
+		if cell.Health < 1.0 {
+			cell.Health = min(float32(1.0), cell.Health+sourceRecoveryRate)
+		}
+	}
+
+	// --- Colour-flow: propagate colours along confirmed links ---
+	isAnimating := g.currentState == stateCollapsing || g.currentState == stateSpawning
+	for _, link := range g.confirmedLinks {
+		sc, sr, dc, dr := link[0], link[1], link[2], link[3]
+		srcCell := &g.grid.Cells[sc][sr]
+		dstCell := &g.grid.Cells[dc][dr]
+		dstCell.Color = lerpColor(dstCell.Color, srcCell.Color, flowRate*srcCell.Health)
+		srcCell.Color = lerpColor(srcCell.Color, dstCell.Color, flowRate*dstCell.Health)
+		// Redraw updated cells (skip the action cell while it is animating).
+		if g.canvas != nil {
+			if !isAnimating || !(sc == g.actionCol && sr == g.actionRow) {
+				g.drawCell(sc, sr, srcCell, cellSize, 1.0)
+			}
+			if !isAnimating || !(dc == g.actionCol && dr == g.actionRow) {
+				g.drawCell(dc, dr, dstCell, cellSize, 1.0)
+			}
+		}
+	}
+
+	// --- Colour-flow: pin source corners back to their source colours ---
+	for i, sc := range g.sourceCorners {
+		g.grid.Cells[sc[0]][sc[1]].Color = g.sourceColors[i]
+	}
+
+	// --- Colour-flow: check win condition ---
+	if !g.gameWon {
+		tc := g.targetCorner
+		cell := g.grid.Cells[tc[0]][tc[1]]
+		if colorDistanceMax(cell.Color, g.targetColor) <= winTolerance {
+			g.gameWon = true
+		}
+	}
+
 	if g.currentState == stateWaiting {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			px, py := ebiten.CursorPosition()
@@ -336,7 +523,6 @@ func (g *Game) Update() error {
 			if g.grid.Cells[col][row].Health <= 0 {
 				return nil
 			}
-			recolor(&g.grid.Cells[col][row])
 			g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
 			g.currentState = stateCollapsing
 			g.actionCol = col
@@ -466,6 +652,32 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			}
 		}
 	}
+
+	// --- Colour-flow: target corner border ring ---
+	// Draw a persistent ring at the target corner cell showing the goal colour.
+	{
+		tc := g.targetCorner
+		cx, cy := cellCentre(tc[0], tc[1])
+		radius := float32(cellSize)/2 - 1
+		vector.StrokeCircle(screen, cx, cy, radius, 3, g.targetColor, true)
+	}
+
+	// --- Colour-flow: HUD panel ---
+	// Semi-transparent dark background at top-centre.
+	vector.DrawFilledRect(screen, 300, 4, 200, 28, color.RGBA{0, 0, 0, 180}, false)
+	// Target colour swatch.
+	vector.DrawFilledRect(screen, 310, 8, 20, 20, g.targetColor, false)
+	// Current target corner cell colour swatch (for comparison).
+	{
+		tc := g.targetCorner
+		currentColor := g.grid.Cells[tc[0]][tc[1]].Color
+		vector.DrawFilledRect(screen, 370, 8, 20, 20, currentColor, false)
+	}
+
+	// --- Colour-flow: win overlay ---
+	if g.gameWon {
+		vector.DrawFilledRect(screen, 0, 0, windowWidth, windowHeight, color.RGBA{0, 200, 0, 80}, false)
+	}
 }
 
 // Layout returns the logical screen dimensions.
@@ -484,6 +696,7 @@ func main() {
 	game := newGameState(grid)
 	game.canvas = canvas
 	game.startTick = ebiten.Tick()
+	game.initColourFlow()
 
 	for c := 0; c < grid.Cols; c++ {
 		for r := 0; r < grid.Rows; r++ {
