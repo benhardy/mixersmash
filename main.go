@@ -31,7 +31,7 @@ const (
 
 	glowWidth = float32(6)
 
-	flowRate           = float32(0.02) // colour blend per tick per unit health
+	flowRate           = float32(0.12) // colour blend per tick per unit health
 	sourceRecoveryRate = float32(0.01) // health recovered per tick for source corners
 	winTolerance       = 15            // max channel delta for win condition
 )
@@ -498,7 +498,6 @@ func (g *Game) Update() error {
 	}
 
 	// Apply all lerps reading from snapshot, writing to grid.
-	isAnimating := g.currentState == stateCollapsing || g.currentState == stateSpawning
 	for _, link := range g.confirmedLinks {
 		sc, sr, dc, dr := link[0], link[1], link[2], link[3]
 		srcSnap := snap[sc][sr]
@@ -507,20 +506,24 @@ func (g *Game) Update() error {
 		dstHealth := g.grid.Cells[dc][dr].Health
 		g.grid.Cells[dc][dr].Color = lerpColor(dstSnap, srcSnap, flowRate*srcHealth)
 		g.grid.Cells[sc][sr].Color = lerpColor(srcSnap, dstSnap, flowRate*dstHealth)
-		// Redraw updated cells (skip the action cell while it is animating).
-		if g.canvas != nil {
-			if !isAnimating || !(sc == g.actionCol && sr == g.actionRow) {
-				g.drawCell(sc, sr, &g.grid.Cells[sc][sr], cellSize, 1.0)
-			}
-			if !isAnimating || !(dc == g.actionCol && dr == g.actionRow) {
-				g.drawCell(dc, dr, &g.grid.Cells[dc][dr], cellSize, 1.0)
-			}
-		}
 	}
 
 	// Re-pin sources after propagation (bidirectional lerp may have pulled them slightly).
 	for i, sc := range g.sourceCorners {
 		g.grid.Cells[sc[0]][sc[1]].Color = g.sourceColors[i]
+	}
+
+	// Redraw all cells to reflect propagated colours.
+	isAnimating := g.currentState == stateCollapsing || g.currentState == stateSpawning
+	if g.canvas != nil {
+		for col := 0; col < g.grid.Cols; col++ {
+			for row := 0; row < g.grid.Rows; row++ {
+				if isAnimating && col == g.actionCol && row == g.actionRow {
+					continue // advanceState handles the action cell during animation
+				}
+				g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
+			}
+		}
 	}
 
 	// --- Colour-flow: check win condition ---
