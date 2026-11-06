@@ -85,6 +85,60 @@ func cellFromPixel(px, py, cellSize int) (int, int) {
 	return px / cellSize, py / cellSize
 }
 
+// neighbourOffsets lists the cardinal (N/S/E/W) direction vectors used by
+// cellNeighbours.  Defined as a package-level var so it can be swapped out for
+// an 8-directional set without changing any call sites.
+var neighbourOffsets = [][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}}
+
+// cellNeighbours returns the valid cardinal neighbours of (col, row) within a
+// grid of dimensions cols×rows.  The returned slice contains [col, row] pairs.
+func cellNeighbours(col, row, cols, rows int) [][2]int {
+	var result [][2]int
+	for _, off := range neighbourOffsets {
+		nc := col + off[0]
+		nr := row + off[1]
+		if nc >= 0 && nc < cols && nr >= 0 && nr < rows {
+			result = append(result, [2]int{nc, nr})
+		}
+	}
+	return result
+}
+
+// normaliseLink returns a canonical [srcCol, srcRow, dstCol, dstRow] where the
+// "src" end is always the lexicographically smaller (col, row) pair, so that
+// A→B and B→A produce the same key.
+func normaliseLink(aCol, aRow, bCol, bRow int) [4]int {
+	if aCol < bCol || (aCol == bCol && aRow < bRow) {
+		return [4]int{aCol, aRow, bCol, bRow}
+	}
+	return [4]int{bCol, bRow, aCol, aRow}
+}
+
+// addLink adds a normalised link to links if it does not already exist.
+// Returns the (possibly extended) slice.
+func addLink(links [][4]int, aCol, aRow, bCol, bRow int) [][4]int {
+	norm := normaliseLink(aCol, aRow, bCol, bRow)
+	for _, l := range links {
+		if l == norm {
+			return links
+		}
+	}
+	return append(links, norm)
+}
+
+// removeLinksForCell removes all links where either endpoint matches (col, row).
+// Returns the filtered slice.
+func removeLinksForCell(links [][4]int, col, row int) [][4]int {
+	result := links[:0:0]
+	for _, l := range links {
+		if (l[0] == col && l[1] == row) || (l[2] == col && l[3] == row) {
+			continue
+		}
+		result = append(result, l)
+	}
+	return result
+}
+
 // nearestHealthyCell returns the (col, row) of the nearest cell with Health > 0
 // to the given cursor pixel position.  Priority is given to the cell the cursor
 // is currently inside; if that cell is healthy the function returns it
@@ -172,15 +226,21 @@ func NewGrid(cols, rows int) *Grid {
 
 // Game is the Ebitengine game state.
 type Game struct {
-	grid         *Grid
-	canvas       *ebiten.Image
-	currentState int   // which state are we in?
-	startTick    int64 // when did the current state start?
-	actionRow    int   // the row any given action is happening
-	actionCol    int   // the column an action is happening
-	highlightCol int   // col of currently highlighted cell; -1 = none
-	highlightRow int   // row of currently highlighted cell; -1 = none
-	glowShader   *ebiten.Shader
+	grid           *Grid
+	canvas         *ebiten.Image
+	currentState   int   // which state are we in?
+	startTick      int64 // when did the current state start?
+	actionRow      int   // the row any given action is happening
+	actionCol      int   // the column an action is happening
+	highlightCol   int   // col of currently highlighted cell; -1 = none
+	highlightRow   int   // row of currently highlighted cell; -1 = none
+	glowShader     *ebiten.Shader
+	confirmedLinks [][4]int // persistent links between cells
+	linkDragging   bool     // true while a link drag is in progress
+	linkSrcCol     int      // source cell col during drag; -1 = none
+	linkSrcRow     int      // source cell row during drag; -1 = none
+	linkHoverCol   int      // neighbour cell under cursor during drag; -1 = none
+	linkHoverRow   int      // neighbour cell row under cursor during drag; -1 = none
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -195,6 +255,10 @@ func newGameState(grid *Grid) *Game {
 		actionRow:    -1,
 		highlightCol: -1,
 		highlightRow: -1,
+		linkSrcCol:   -1,
+		linkSrcRow:   -1,
+		linkHoverCol: -1,
+		linkHoverRow: -1,
 	}
 }
 
@@ -241,13 +305,15 @@ func (g *Game) advanceState(tick int64) {
 				actionCell.Health -= healthDecrement
 			} else {
 				actionCell.Health = 0.0
+				g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
 			}
-            if actionCell.Health < healthEpsilon {
-                actionCell.Health = 0.0
-			    g.currentState = stateWaiting
-            } else {
-			    g.currentState = stateSpawning
-            }
+			if actionCell.Health < healthEpsilon {
+				actionCell.Health = 0.0
+				g.confirmedLinks = removeLinksForCell(g.confirmedLinks, g.actionCol, g.actionRow)
+				g.currentState = stateWaiting
+			} else {
+				g.currentState = stateSpawning
+			}
 			g.startTick = tick
 		}
 	} else if g.currentState == stateSpawning {
@@ -311,6 +377,12 @@ func (g *Game) Update() error {
 			g.actionCol = col
 			g.actionRow = row
 			g.startTick = ebiten.Tick()
+			// Begin link drag from the clicked cell.
+			g.linkDragging = true
+			g.linkSrcCol = col
+			g.linkSrcRow = row
+			g.linkHoverCol = -1
+			g.linkHoverRow = -1
 		}
 	} else {
 		g.advanceState(ebiten.Tick())
@@ -318,7 +390,41 @@ func (g *Game) Update() error {
 		// now be dead; re-evaluate the highlight on the next waiting tick.
 		// (highlightCol/Row are already -1 since clearHighlight ran on click.)
 	}
+	// Link drag hover and release are handled outside the state branch because
+	// the click that starts the drag also transitions to stateCollapsing on the
+	// same tick, so subsequent ticks arrive in the non-waiting branch.
+	if g.linkDragging {
+		px, py := ebiten.CursorPosition()
+		hc, hr := cellFromPixel(px, py, cellSize)
+		g.linkHoverCol = -1
+		g.linkHoverRow = -1
+		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
+			neighbours := cellNeighbours(g.linkSrcCol, g.linkSrcRow, g.grid.Cols, g.grid.Rows)
+			for _, n := range neighbours {
+				if n[0] == hc && n[1] == hr && g.grid.Cells[hc][hr].Health > 0 {
+					g.linkHoverCol = hc
+					g.linkHoverRow = hr
+					break
+				}
+			}
+		}
+	}
+	if g.linkDragging && inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+		if g.linkHoverCol != -1 {
+			g.confirmedLinks = addLink(g.confirmedLinks, g.linkSrcCol, g.linkSrcRow, g.linkHoverCol, g.linkHoverRow)
+		}
+		g.linkDragging = false
+		g.linkSrcCol = -1
+		g.linkSrcRow = -1
+		g.linkHoverCol = -1
+		g.linkHoverRow = -1
+	}
 	return nil
+}
+
+// cellCentre returns the pixel centre of a grid cell.
+func cellCentre(col, row int) (float32, float32) {
+	return float32(col*cellSize + cellSize/2), float32(row*cellSize + cellSize/2)
 }
 
 // Draw blits the offscreen canvas to the screen, then composites the glow
@@ -334,6 +440,32 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.glowShader = s
 	}
 	screen.DrawImage(g.canvas, nil)
+
+	// Draw confirmed links as metallic pipes (three overlapping strokes).
+	for _, l := range g.confirmedLinks {
+		x0, y0 := cellCentre(l[0], l[1])
+		x1, y1 := cellCentre(l[2], l[3])
+		vector.StrokeLine(screen, x0, y0, x1, y1, 5, color.RGBA{60, 60, 60, 255}, true)
+		vector.StrokeLine(screen, x0, y0, x1, y1, 3, color.RGBA{140, 140, 140, 255}, true)
+		vector.StrokeLine(screen, x0, y0, x1, y1, 1, color.RGBA{220, 220, 220, 255}, true)
+	}
+
+	// Draw potential links while dragging.
+	if g.linkDragging {
+		neighbours := cellNeighbours(g.linkSrcCol, g.linkSrcRow, g.grid.Cols, g.grid.Rows)
+		sx, sy := cellCentre(g.linkSrcCol, g.linkSrcRow)
+		for _, n := range neighbours {
+			if g.grid.Cells[n[0]][n[1]].Health <= 0 {
+				continue
+			}
+			nx, ny := cellCentre(n[0], n[1])
+			if n[0] == g.linkHoverCol && n[1] == g.linkHoverRow {
+				vector.StrokeLine(screen, sx, sy, nx, ny, 2, color.RGBA{255, 255, 255, 200}, true)
+			} else {
+				vector.StrokeLine(screen, sx, sy, nx, ny, 1.5, color.RGBA{255, 255, 255, 80}, true)
+			}
+		}
+	}
 
 	if g.highlightCol != -1 && g.glowShader != nil {
 		col := g.highlightCol
