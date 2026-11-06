@@ -27,6 +27,7 @@ const (
 
 	healthDecrement = float32(0.2)
 	healthMin       = float32(0.2)
+	healthEpsilon   = float32(0.001)
 
 	glowWidth = float32(6)
 )
@@ -241,7 +242,12 @@ func (g *Game) advanceState(tick int64) {
 			} else {
 				actionCell.Health = 0.0
 			}
-			g.currentState = stateSpawning
+            if actionCell.Health < healthEpsilon {
+                actionCell.Health = 0.0
+			    g.currentState = stateWaiting
+            } else {
+			    g.currentState = stateSpawning
+            }
 			g.startTick = tick
 		}
 	} else if g.currentState == stateSpawning {
