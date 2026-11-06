@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"log"
+	"math"
 	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -63,6 +64,60 @@ func cellFromPixel(px, py, cellSize int) (int, int) {
 	return px / cellSize, py / cellSize
 }
 
+// nearestHealthyCell returns the (col, row) of the nearest cell with Health > 0
+// to the given cursor pixel position.  Priority is given to the cell the cursor
+// is currently inside; if that cell is healthy the function returns it
+// immediately.  Otherwise it scans all cells and returns the one whose centre
+// is closest to the cursor using Euclidean distance.  If no healthy cells
+// exist, found is false.
+func nearestHealthyCell(cells [][]Cell, cursorX, cursorY, cellSize int) (col, row int, found bool) {
+	cols := len(cells)
+	if cols == 0 {
+		return 0, 0, false
+	}
+	rows := len(cells[0])
+	if rows == 0 {
+		return 0, 0, false
+	}
+
+	// Priority: cell under cursor, if healthy.
+	underCol := cursorX / cellSize
+	underRow := cursorY / cellSize
+	if underCol >= 0 && underCol < cols && underRow >= 0 && underRow < rows {
+		if cells[underCol][underRow].Health > 0 {
+			return underCol, underRow, true
+		}
+	}
+
+	// Euclidean scan over all cells.
+	bestDist := math.MaxFloat64
+	bestCol, bestRow := -1, -1
+	half := float64(cellSize) / 2.0
+	cx := float64(cursorX)
+	cy := float64(cursorY)
+	for c := 0; c < cols; c++ {
+		for r := 0; r < rows; r++ {
+			if cells[c][r].Health <= 0 {
+				continue
+			}
+			cellCX := float64(c)*float64(cellSize) + half
+			cellCY := float64(r)*float64(cellSize) + half
+			dx := cx - cellCX
+			dy := cy - cellCY
+			dist := dx*dx + dy*dy
+			if dist < bestDist {
+				bestDist = dist
+				bestCol = c
+				bestRow = r
+			}
+		}
+	}
+	if bestCol == -1 {
+		return 0, 0, false
+	}
+	return bestCol, bestRow, true
+}
+
 type Cell struct {
     Color  color.RGBA
     Health float32
@@ -102,6 +157,8 @@ type Game struct {
     startTick int64 // when did the current state start?
     actionRow int // the row any given action is happening
     actionCol int // the column an action is happening
+	highlightCol int // col of currently highlighted cell; -1 = none
+	highlightRow int // row of currently highlighted cell; -1 = none
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -114,6 +171,8 @@ func newGameState(grid *Grid) *Game {
 		startTick:    0,
 		actionCol:    -1,
 		actionRow:    -1,
+		highlightCol: -1,
+		highlightRow: -1,
 	}
 }
 
@@ -125,19 +184,24 @@ func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
 }
 
 // drawCell erases the cell's bounding rectangle on canvas with black and
-// redraws the antialiased circle for (col, row) using clr.
-func drawCell(canvas *ebiten.Image, col, row int, cell *Cell, cs int, cellFullness float32) {
+// redraws the antialiased circle for (col, row) using clr.  When highlighted
+// is true, a white 1.5px antialiased border is drawn at the natural (full)
+// circle edge regardless of current cellFullness or Health.
+func drawCell(canvas *ebiten.Image, col, row int, cell *Cell, cs int, cellFullness float32, highlighted bool) {
 	x := float32(col * cs)
 	y := float32(row * cs)
 	csFloat := float32(cs)
 	vector.DrawFilledRect(canvas, x, y, csFloat, csFloat, color.Black, false)
-	halfCs := csFloat /2
+	halfCs := csFloat / 2
 	cx := x + halfCs
 	cy := y + halfCs
-	maxRadius := (halfCs -2)
+	maxRadius := (halfCs - 2)
 	radius := maxRadius * cellFullness * cell.Health
 	clr := cell.Color
 	vector.DrawFilledCircle(canvas, cx, cy, radius, clr, true)
+	if highlighted {
+		vector.StrokeCircle(canvas, cx, cy, maxRadius, 1.5, color.White, true)
+	}
 }
 
 // advanceState advances the state machine for a given tick value.  It does not
@@ -148,7 +212,7 @@ func (g *Game) advanceState(tick int64) {
 		elapsed := elapsedFraction(tick, g.startTick, collapseTicks)
 		actionCell := &g.grid.Cells[g.actionCol][g.actionRow]
 		if g.canvas != nil {
-			drawCell(g.canvas, g.actionCol, g.actionRow, actionCell, cellSize, 1.0-elapsed)
+			drawCell(g.canvas, g.actionCol, g.actionRow, actionCell, cellSize, 1.0-elapsed, false)
 		}
 		if elapsed >= 1.0 {
 			if actionCell.Health > healthMin {
@@ -162,7 +226,7 @@ func (g *Game) advanceState(tick int64) {
 	} else if g.currentState == stateSpawning {
 		elapsed := elapsedFraction(tick, g.startTick, spawnTicks)
 		if g.canvas != nil {
-			drawCell(g.canvas, g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], cellSize, elapsed)
+			drawCell(g.canvas, g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], cellSize, elapsed, false)
 		}
 		if elapsed >= 1.0 {
 			g.currentState = stateWaiting
@@ -171,16 +235,67 @@ func (g *Game) advanceState(tick int64) {
 	}
 }
 
+// clearHighlight removes the white highlight border from the currently
+// highlighted cell (if any) and resets highlightCol/Row to -1.
+func clearHighlight(g *Game) {
+	if g.highlightCol == -1 {
+		return
+	}
+	if g.canvas != nil {
+		c := g.highlightCol
+		r := g.highlightRow
+		drawCell(g.canvas, c, r, &g.grid.Cells[c][r], cellSize, 1.0, false)
+	}
+	g.highlightCol = -1
+	g.highlightRow = -1
+}
+
+// updateHighlight evaluates the nearest healthy cell to the cursor and redraws
+// only the cells that have changed highlight state.  It is called every tick
+// while in stateWaiting.
+func updateHighlight(g *Game) {
+	px, py := ebiten.CursorPosition()
+	if px < 0 || px >= windowWidth || py < 0 || py >= windowHeight {
+		clearHighlight(g)
+		return
+	}
+	newCol, newRow, found := nearestHealthyCell(g.grid.Cells, px, py, cellSize)
+	if found && newCol == g.highlightCol && newRow == g.highlightRow {
+		// No change — nothing to redraw.
+		return
+	}
+	// Erase old highlight if present.
+	if g.highlightCol != -1 {
+		c := g.highlightCol
+		r := g.highlightRow
+		if g.canvas != nil {
+			drawCell(g.canvas, c, r, &g.grid.Cells[c][r], cellSize, 1.0, false)
+		}
+	}
+	if found {
+		if g.canvas != nil {
+			drawCell(g.canvas, newCol, newRow, &g.grid.Cells[newCol][newRow], cellSize, 1.0, true)
+		}
+		g.highlightCol = newCol
+		g.highlightRow = newRow
+	} else {
+		g.highlightCol = -1
+		g.highlightRow = -1
+	}
+}
+
 // Update handles input each tick.
 func (g *Game) Update() error {
     if g.currentState == stateWaiting {
+        updateHighlight(g)
         if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
             px, py := ebiten.CursorPosition()
             col, row := cellFromPixel(px, py, cellSize)
             if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
                 recolor(&g.grid.Cells[col][row])
-                drawCell(g.canvas, col, row, &g.grid.Cells[col][row], cellSize, 1.0)
+                drawCell(g.canvas, col, row, &g.grid.Cells[col][row], cellSize, 1.0, false)
             }
+            clearHighlight(g)
             g.currentState = stateCollapsing
             g.actionCol = col
             g.actionRow = row
@@ -188,6 +303,9 @@ func (g *Game) Update() error {
         }
     } else {
         g.advanceState(ebiten.Tick())
+        // After stateSpawning completes, the previously highlighted cell may
+        // now be dead; re-evaluate the highlight on the next waiting tick.
+        // (highlightCol/Row are already -1 since clearHighlight ran on click.)
     }
 	return nil
 }
@@ -212,7 +330,7 @@ func main() {
 	canvas.Fill(color.Black)
 	for c := 0; c < grid.Cols; c++ {
 		for r := 0; r < grid.Rows; r++ {
-			drawCell(canvas, c, r, &grid.Cells[c][r], cellSize, 1.0)
+			drawCell(canvas, c, r, &grid.Cells[c][r], cellSize, 1.0, false)
 		}
 	}
 
