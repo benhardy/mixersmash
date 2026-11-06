@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"image/color"
 	"log"
 	"math"
@@ -297,8 +298,10 @@ func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
 func (g *Game) drawCell(col, row int, cell *Cell, cs int, cellFullness float32) {
 	csFloat := float32(cs)
 
-	// Clear exactly the cell rect — no expansion.
-	vector.DrawFilledRect(g.canvas, float32(col*cs), float32(row*cs), csFloat, csFloat, color.RGBA{0, 0, 0, 0}, false)
+	// Clear exactly the cell rect — full pixel replacement, not a blend.
+	x0 := col * cs
+	y0 := row * cs
+	g.canvas.SubImage(image.Rect(x0, y0, x0+cs, y0+cs)).(*ebiten.Image).Clear()
 
 	if cell.Health <= 0 {
 		return
