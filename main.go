@@ -653,13 +653,25 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
-	// --- Colour-flow: target corner border ring ---
-	// Draw a persistent ring at the target corner cell showing the goal colour.
+	// --- Colour-flow: source corner rings ---
+	// Draw a white ring on each source corner cell.
+	for _, sc := range g.sourceCorners {
+		cx, cy := cellCentre(sc[0], sc[1])
+		radius := float32(cellSize/2) - 2.0
+		vector.StrokeCircle(screen, cx, cy, radius, 2.5, color.RGBA{220, 220, 220, 220}, true)
+	}
+
+	// --- Colour-flow: target corner rings ---
+	// Draw two concentric rings: white outer + goal-colour inner.
 	{
 		tc := g.targetCorner
 		cx, cy := cellCentre(tc[0], tc[1])
-		radius := float32(cellSize)/2 - 1
-		vector.StrokeCircle(screen, cx, cy, radius, 3, g.targetColor, true)
+		outerRadius := float32(cellSize/2) - 2.0
+		innerRadius := float32(cellSize/2) - 6.0
+		vector.StrokeCircle(screen, cx, cy, outerRadius, 2.5, color.RGBA{220, 220, 220, 220}, true)
+		targetClr := g.targetColor
+		targetClr.A = 255
+		vector.StrokeCircle(screen, cx, cy, innerRadius, 2.5, targetClr, true)
 	}
 
 	// --- Colour-flow: HUD panel ---
