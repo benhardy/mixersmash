@@ -44,10 +44,7 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
     alpha := 1.0 - (dist-InnerRadius)/(OuterRadius-InnerRadius)
     alpha *= clamp(dist-(InnerRadius-1.0), 0.0, 1.0)
     alpha = clamp(alpha, 0.0, 1.0)
-    if alpha <= 0 {
-        return vec4(0, 0, 0, 0)
-    }
-    return vec4(alpha, alpha, alpha, alpha)
+    return vec4(alpha, alpha, alpha, alpha) // RGB values premultiplied by alpha
 }
 `
 
@@ -61,10 +58,13 @@ func randomColor() color.RGBA {
 			B: uint8(51 * (rand.Intn(4) + 2)),
 			A: 255,
 		}
-		if col.R >= 102 || col.G >= 102 || col.B >= 102 {
-			return col
+        if col.R == 255 && col.G == 255 && col.B == 255 {
+            continue // don't use white
+        }
+		if col.R < 102 || col.G < 102 || col.B < 102 {
+		    continue // don't use too-dark colours
 		}
-		// go again if color is too dark (yeah i know this is not optimal)
+        return col
 	}
 }
 
