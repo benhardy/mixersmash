@@ -13,7 +13,7 @@ import (
 const (
 	windowWidth  = 800
 	windowHeight = 600
-	cellSize     = 32
+	cellSize     = 64
 	gridCols     = windowWidth / cellSize  // 25
 	gridRows     = windowHeight / cellSize // 18
 
@@ -23,25 +23,36 @@ const (
 
 	collapseTicks = int64(5)
 	spawnTicks = int64(10)
+
+	healthDecrement = float32(0.2)
+	healthMin       = float32(0.2)
 )
 
 
 // randomColor returns a random opaque colour (A=255).
+// will be a subset of web-safe colours
 func randomColor() color.RGBA {
-	return color.RGBA{
-		R: uint8(rand.Intn(256)),
-		G: uint8(rand.Intn(256)),
-		B: uint8(rand.Intn(256)),
-		A: 255,
-	}
+    for {
+        col := color.RGBA{
+            R: uint8(51*(rand.Intn(4)+2)),
+            G: uint8(51*(rand.Intn(4)+2)),
+            B: uint8(51*(rand.Intn(4)+2)),
+            A: 255,
+        }
+        if col.R >= 102 || col.G >= 102 || col.B >= 102 {
+            return col
+        }
+        // go again if color is too dark (yeah i know this is not optimal)
+    }
 }
 
 // recolor returns a random opaque colour guaranteed to differ from current.
-func recolor(current color.RGBA) color.RGBA {
+func recolor(cell *Cell) {
 	for {
 		c := randomColor()
-		if c != current {
-			return c
+		if cell.Color != c {
+			cell.Color = c
+			break
 		}
 	}
 }
@@ -52,26 +63,34 @@ func cellFromPixel(px, py, cellSize int) (int, int) {
 	return px / cellSize, py / cellSize
 }
 
+type Cell struct {
+    Color  color.RGBA
+    Health float32
+}
+
 // Grid holds the grid dimensions and per-cell colours.
 type Grid struct {
 	Cols   int
 	Rows   int
-	Colors [][]color.RGBA
+	Cells [][]Cell
 }
 
 // NewGrid initialises a Grid with random opaque colours in every cell.
 func NewGrid(cols, rows int) *Grid {
-	colors := make([][]color.RGBA, cols)
+	cells := make([][]Cell, cols)
 	for c := 0; c < cols; c++ {
-		colors[c] = make([]color.RGBA, rows)
+		cells[c] = make([]Cell, rows)
 		for r := 0; r < rows; r++ {
-			colors[c][r] = randomColor()
+			cells[c][r] = Cell {
+			    Color: randomColor(),
+			    Health: 1.0,
+            }
 		}
 	}
 	return &Grid{
 		Cols:   cols,
 		Rows:   rows,
-		Colors: colors,
+		Cells: cells,
 	}
 }
 
@@ -107,7 +126,7 @@ func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
 
 // drawCell erases the cell's bounding rectangle on canvas with black and
 // redraws the antialiased circle for (col, row) using clr.
-func drawCell(canvas *ebiten.Image, col, row int, clr color.RGBA, cs int, cellFullness float32) {
+func drawCell(canvas *ebiten.Image, col, row int, cell *Cell, cs int, cellFullness float32) {
 	x := float32(col * cs)
 	y := float32(row * cs)
 	csFloat := float32(cs)
@@ -116,7 +135,8 @@ func drawCell(canvas *ebiten.Image, col, row int, clr color.RGBA, cs int, cellFu
 	cx := x + halfCs
 	cy := y + halfCs
 	maxRadius := (halfCs -2)
-	radius := maxRadius * cellFullness
+	radius := maxRadius * cellFullness * cell.Health
+	clr := cell.Color
 	vector.DrawFilledCircle(canvas, cx, cy, radius, clr, true)
 }
 
@@ -126,17 +146,23 @@ func drawCell(canvas *ebiten.Image, col, row int, clr color.RGBA, cs int, cellFu
 func (g *Game) advanceState(tick int64) {
 	if g.currentState == stateCollapsing {
 		elapsed := elapsedFraction(tick, g.startTick, collapseTicks)
+		actionCell := &g.grid.Cells[g.actionCol][g.actionRow]
 		if g.canvas != nil {
-			drawCell(g.canvas, g.actionCol, g.actionRow, g.grid.Colors[g.actionCol][g.actionRow], cellSize, 1.0-elapsed)
+			drawCell(g.canvas, g.actionCol, g.actionRow, actionCell, cellSize, 1.0-elapsed)
 		}
 		if elapsed >= 1.0 {
+			if actionCell.Health > healthMin {
+				actionCell.Health -= healthDecrement
+			} else {
+				actionCell.Health = 0.0
+			}
 			g.currentState = stateSpawning
 			g.startTick = tick
 		}
 	} else if g.currentState == stateSpawning {
 		elapsed := elapsedFraction(tick, g.startTick, spawnTicks)
 		if g.canvas != nil {
-			drawCell(g.canvas, g.actionCol, g.actionRow, g.grid.Colors[g.actionCol][g.actionRow], cellSize, elapsed)
+			drawCell(g.canvas, g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], cellSize, elapsed)
 		}
 		if elapsed >= 1.0 {
 			g.currentState = stateWaiting
@@ -152,8 +178,8 @@ func (g *Game) Update() error {
             px, py := ebiten.CursorPosition()
             col, row := cellFromPixel(px, py, cellSize)
             if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-                g.grid.Colors[col][row] = recolor(g.grid.Colors[col][row])
-                drawCell(g.canvas, col, row, g.grid.Colors[col][row], cellSize, 1.0)
+                recolor(&g.grid.Cells[col][row])
+                drawCell(g.canvas, col, row, &g.grid.Cells[col][row], cellSize, 1.0)
             }
             g.currentState = stateCollapsing
             g.actionCol = col
@@ -186,7 +212,7 @@ func main() {
 	canvas.Fill(color.Black)
 	for c := 0; c < grid.Cols; c++ {
 		for r := 0; r < grid.Rows; r++ {
-			drawCell(canvas, c, r, grid.Colors[c][r], cellSize, 1.0)
+			drawCell(canvas, c, r, &grid.Cells[c][r], cellSize, 1.0)
 		}
 	}
 

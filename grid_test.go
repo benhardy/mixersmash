@@ -20,19 +20,20 @@ func TestRandomColorReturnsRGBA(t *testing.T) {
 	var _ color.RGBA = randomColor()
 }
 
-// TestRecolorReturnsDifferentColor verifies that recolor returns a colour
-// different from the one passed in. We try several times because there is a
-// tiny probability that two random colours coincide.
+// TestRecolorReturnsDifferentColor verifies that recolor mutates the cell to a
+// colour different from the one it started with. We try several times because
+// there is a tiny probability that two random colours coincide.
 func TestRecolorReturnsDifferentColor(t *testing.T) {
-	current := color.RGBA{R: 128, G: 64, B: 32, A: 255}
+	original := color.RGBA{R: 128, G: 64, B: 32, A: 255}
 	same := 0
 	const trials = 50
 	for i := 0; i < trials; i++ {
-		next := recolor(current)
-		if next.A != 255 {
-			t.Fatalf("recolor() returned A=%d, want 255", next.A)
+		cell := &Cell{Color: original, Health: 1.0}
+		recolor(cell)
+		if cell.Color.A != 255 {
+			t.Fatalf("recolor() produced A=%d, want 255", cell.Color.A)
 		}
-		if next == current {
+		if cell.Color == original {
 			same++
 		}
 	}
@@ -65,8 +66,8 @@ func TestCellFromPixel(t *testing.T) {
 	}
 }
 
-// TestGridInitialisation verifies that NewGrid returns a Grid whose Colors
-// slice has dimensions [Cols][Rows] with every cell having A == 255.
+// TestGridInitialisation verifies that NewGrid returns a Grid whose Cells
+// slice has dimensions [Cols][Rows] with every cell having Color.A == 255.
 func TestGridInitialisation(t *testing.T) {
 	const cols, rows = 5, 4
 	g := NewGrid(cols, rows)
@@ -77,17 +78,17 @@ func TestGridInitialisation(t *testing.T) {
 	if g.Rows != rows {
 		t.Errorf("Grid.Rows = %d, want %d", g.Rows, rows)
 	}
-	if len(g.Colors) != cols {
-		t.Fatalf("len(Grid.Colors) = %d, want %d", len(g.Colors), cols)
+	if len(g.Cells) != cols {
+		t.Fatalf("len(Grid.Cells) = %d, want %d", len(g.Cells), cols)
 	}
 	for c := 0; c < cols; c++ {
-		if len(g.Colors[c]) != rows {
-			t.Fatalf("len(Grid.Colors[%d]) = %d, want %d", c, len(g.Colors[c]), rows)
+		if len(g.Cells[c]) != rows {
+			t.Fatalf("len(Grid.Cells[%d]) = %d, want %d", c, len(g.Cells[c]), rows)
 		}
 		for r := 0; r < rows; r++ {
-			cell := g.Colors[c][r]
-			if cell.A != 255 {
-				t.Errorf("Grid.Colors[%d][%d].A = %d, want 255", c, r, cell.A)
+			cell := g.Cells[c][r]
+			if cell.Color.A != 255 {
+				t.Errorf("Grid.Cells[%d][%d].Color.A = %d, want 255", c, r, cell.Color.A)
 			}
 		}
 	}
@@ -300,5 +301,68 @@ func TestClickGatingDuringSpawning(t *testing.T) {
 	if g.actionCol != 3 || g.actionRow != 2 {
 		t.Errorf("actionCol/Row changed: got (%d, %d), want (3, 2)",
 			g.actionCol, g.actionRow)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+// TestHealthConstants documents the expected values of the health magic numbers
+// so that any accidental change to the step or floor is caught immediately.
+func TestHealthConstants(t *testing.T) {
+	if healthDecrement != 0.2 {
+		t.Errorf("healthDecrement = %v, want 0.2", healthDecrement)
+	}
+	if healthMin != 0.2 {
+		t.Errorf("healthMin = %v, want 0.2", healthMin)
+	}
+}
+
+// TestInitialCellHealth verifies that every cell produced by NewGrid starts
+// with Health == 1.0.
+func TestInitialCellHealth(t *testing.T) {
+	const cols, rows = 3, 3
+	g := NewGrid(cols, rows)
+	for c := 0; c < cols; c++ {
+		for r := 0; r < rows; r++ {
+			if g.Cells[c][r].Health != 1.0 {
+				t.Errorf("Cells[%d][%d].Health = %v, want 1.0", c, r, g.Cells[c][r].Health)
+			}
+		}
+	}
+}
+
+// TestHealthDecrementsAfterCollapse verifies that completing a collapse
+// (elapsed >= 1.0) decrements Health by healthDecrement when the cell has
+// enough health remaining.
+func TestHealthDecrementsAfterCollapse(t *testing.T) {
+	const col, row = 1, 1
+	g := newTestGame(stateCollapsing, 100, col, row)
+	// Confirm starting health.
+	if g.grid.Cells[col][row].Health != 1.0 {
+		t.Fatalf("precondition: Health = %v, want 1.0", g.grid.Cells[col][row].Health)
+	}
+	// Drive the collapse to completion.
+	g.advanceState(100 + collapseTicks)
+	got := g.grid.Cells[col][row].Health
+	want := float32(1.0) - healthDecrement
+	if got != want {
+		t.Errorf("Health after one collapse = %v, want %v", got, want)
+	}
+}
+
+// TestHealthClampsToZeroOnFinalCollapse verifies that when Health is at or
+// below healthMin before the final collapse, it clamps to 0.0 rather than
+// going negative.
+func TestHealthClampsToZeroOnFinalCollapse(t *testing.T) {
+	const col, row = 2, 2
+	g := newTestGame(stateCollapsing, 100, col, row)
+	// Set health to healthMin — the threshold at which the clamp fires.
+	g.grid.Cells[col][row].Health = healthMin
+	g.advanceState(100 + collapseTicks)
+	got := g.grid.Cells[col][row].Health
+	if got != 0.0 {
+		t.Errorf("Health after final collapse = %v, want 0.0 (clamped)", got)
 	}
 }
