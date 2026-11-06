@@ -91,7 +91,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		for r := 0; r < g.grid.Rows; r++ {
 			cx := float32(c*cellSize) + float32(cellSize)/2
 			cy := float32(r*cellSize) + float32(cellSize)/2
-			radius := float32(cellSize) / 2
+			radius := float32(cellSize)/2 - 2
 			vector.DrawFilledCircle(screen, cx, cy, radius, g.grid.Colors[c][r], true)
 		}
 	}
