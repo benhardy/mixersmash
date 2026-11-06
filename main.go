@@ -407,10 +407,14 @@ func (g *Game) Update() error {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			px, py := ebiten.CursorPosition()
 			col, row := cellFromPixel(px, py, cellSize)
-			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				recolor(&g.grid.Cells[col][row])
-				g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
+			if col < 0 || col >= g.grid.Cols || row < 0 || row >= g.grid.Rows {
+				return nil
 			}
+			if g.grid.Cells[col][row].Health <= 0 {
+				return nil
+			}
+			recolor(&g.grid.Cells[col][row])
+			g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
 			clearHighlight(g)
 			g.currentState = stateCollapsing
 			g.actionCol = col
