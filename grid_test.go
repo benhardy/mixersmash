@@ -366,3 +366,108 @@ func TestHealthClampsToZeroOnFinalCollapse(t *testing.T) {
 		t.Errorf("Health after final collapse = %v, want 0.0 (clamped)", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// nearestHealthyCell
+// ---------------------------------------------------------------------------
+
+// makeTestCells builds a cols×rows Cell grid with all cells dead (Health=0)
+// except those listed in healthy.  healthy entries are (col, row) pairs.
+func makeTestCells(cols, rows int, healthy [][2]int) [][]Cell {
+	cells := make([][]Cell, cols)
+	for c := 0; c < cols; c++ {
+		cells[c] = make([]Cell, rows)
+		for r := 0; r < rows; r++ {
+			cells[c][r] = Cell{Color: color.RGBA{R: 255, G: 255, B: 255, A: 255}, Health: 0}
+		}
+	}
+	for _, cr := range healthy {
+		cells[cr[0]][cr[1]].Health = 1.0
+	}
+	return cells
+}
+
+// TestNearestHealthyCellCursorInHealthyCell verifies that when the cursor sits
+// inside a healthy cell, that cell is returned immediately (priority rule).
+func TestNearestHealthyCellCursorInHealthyCell(t *testing.T) {
+	const cs = 32
+	// 4×4 grid; make cell (1,1) healthy.
+	cells := makeTestCells(4, 4, [][2]int{{1, 1}})
+
+	// Cursor at centre of cell (1,1): pixel (48, 48) for cs=32.
+	cursorX := 1*cs + cs/2
+	cursorY := 1*cs + cs/2
+
+	col, row, found := nearestHealthyCell(cells, cursorX, cursorY, cs)
+	if !found {
+		t.Fatal("nearestHealthyCell returned found=false, want true")
+	}
+	if col != 1 || row != 1 {
+		t.Errorf("nearestHealthyCell = (%d, %d), want (1, 1)", col, row)
+	}
+}
+
+// TestNearestHealthyCellCursorInDeadCell verifies that when the cursor is in a
+// dead cell the function scans and returns the nearest healthy cell by distance.
+func TestNearestHealthyCellCursorInDeadCell(t *testing.T) {
+	const cs = 32
+	// 4×4 grid; cell (0,0) is dead, cell (2,0) and cell (3,3) are healthy.
+	// Cursor inside cell (0,0); centre of (0,0) is (16,16).
+	// Centre of (2,0) = (80,16) → distance = 64.
+	// Centre of (3,3) = (112,112) → distance ≈ 136.  So (2,0) wins.
+	cells := makeTestCells(4, 4, [][2]int{{2, 0}, {3, 3}})
+
+	cursorX := cs / 2 // 16 — inside cell (0,0)
+	cursorY := cs / 2 // 16
+
+	col, row, found := nearestHealthyCell(cells, cursorX, cursorY, cs)
+	if !found {
+		t.Fatal("nearestHealthyCell returned found=false, want true")
+	}
+	if col != 2 || row != 0 {
+		t.Errorf("nearestHealthyCell = (%d, %d), want (2, 0)", col, row)
+	}
+}
+
+// TestNearestHealthyCellAllDead verifies that found is false when every cell
+// has Health == 0.
+func TestNearestHealthyCellAllDead(t *testing.T) {
+	const cs = 32
+	cells := makeTestCells(4, 4, [][2]int{}) // no healthy cells
+
+	_, _, found := nearestHealthyCell(cells, cs, cs, cs)
+	if found {
+		t.Error("nearestHealthyCell returned found=true for an all-dead grid, want false")
+	}
+}
+
+// TestNearestHealthyCellCursorOutOfBounds verifies that a cursor position
+// outside the grid (negative or beyond the grid edge) still returns the
+// nearest healthy cell by distance rather than panicking or returning found=false.
+func TestNearestHealthyCellCursorOutOfBounds(t *testing.T) {
+	const cs = 32
+	// 4×4 grid; only cell (0,0) is healthy (centre at pixel (16,16)).
+	cells := makeTestCells(4, 4, [][2]int{{0, 0}})
+
+	cases := []struct {
+		name    string
+		cx, cy  int
+	}{
+		{"negative x", -10, 16},
+		{"negative y", 16, -10},
+		{"both negative", -50, -50},
+		{"beyond x edge", 200, 16},
+		{"beyond y edge", 16, 200},
+	}
+
+	for _, tc := range cases {
+		col, row, found := nearestHealthyCell(cells, tc.cx, tc.cy, cs)
+		if !found {
+			t.Errorf("%s: found=false, want true", tc.name)
+			continue
+		}
+		if col != 0 || row != 0 {
+			t.Errorf("%s: nearestHealthyCell = (%d, %d), want (0, 0)", tc.name, col, row)
+		}
+	}
+}
