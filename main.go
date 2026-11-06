@@ -18,33 +18,51 @@ const (
 	gridCols     = windowWidth / cellSize  // 25
 	gridRows     = windowHeight / cellSize // 18
 
-	stateWaiting = 1
+	stateWaiting    = 1
 	stateCollapsing = 2
-	stateSpawning = 3
+	stateSpawning   = 3
 
 	collapseTicks = int64(5)
-	spawnTicks = int64(10)
+	spawnTicks    = int64(10)
 
 	healthDecrement = float32(0.2)
 	healthMin       = float32(0.2)
+
+	glowWidth = float32(6)
 )
 
+const glowShaderSrc = `//kage:unit pixels
+package main
+
+var Center vec2
+var InnerRadius float
+var OuterRadius float
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+    dist := length(dstPos.xy - Center)
+    if dist < InnerRadius || dist > OuterRadius {
+        return vec4(0, 0, 0, 0)
+    }
+    alpha := 1.0 - (dist-InnerRadius)/(OuterRadius-InnerRadius)
+    return vec4(1, 1, 1, alpha)
+}
+`
 
 // randomColor returns a random opaque colour (A=255).
 // will be a subset of web-safe colours
 func randomColor() color.RGBA {
-    for {
-        col := color.RGBA{
-            R: uint8(51*(rand.Intn(4)+2)),
-            G: uint8(51*(rand.Intn(4)+2)),
-            B: uint8(51*(rand.Intn(4)+2)),
-            A: 255,
-        }
-        if col.R >= 102 || col.G >= 102 || col.B >= 102 {
-            return col
-        }
-        // go again if color is too dark (yeah i know this is not optimal)
-    }
+	for {
+		col := color.RGBA{
+			R: uint8(51 * (rand.Intn(4) + 2)),
+			G: uint8(51 * (rand.Intn(4) + 2)),
+			B: uint8(51 * (rand.Intn(4) + 2)),
+			A: 255,
+		}
+		if col.R >= 102 || col.G >= 102 || col.B >= 102 {
+			return col
+		}
+		// go again if color is too dark (yeah i know this is not optimal)
+	}
 }
 
 // recolor returns a random opaque colour guaranteed to differ from current.
@@ -119,14 +137,14 @@ func nearestHealthyCell(cells [][]Cell, cursorX, cursorY, cellSize int) (col, ro
 }
 
 type Cell struct {
-    Color  color.RGBA
-    Health float32
+	Color  color.RGBA
+	Health float32
 }
 
 // Grid holds the grid dimensions and per-cell colours.
 type Grid struct {
-	Cols   int
-	Rows   int
+	Cols  int
+	Rows  int
 	Cells [][]Cell
 }
 
@@ -136,29 +154,30 @@ func NewGrid(cols, rows int) *Grid {
 	for c := 0; c < cols; c++ {
 		cells[c] = make([]Cell, rows)
 		for r := 0; r < rows; r++ {
-			cells[c][r] = Cell {
-			    Color: randomColor(),
-			    Health: 1.0,
-            }
+			cells[c][r] = Cell{
+				Color:  randomColor(),
+				Health: 1.0,
+			}
 		}
 	}
 	return &Grid{
-		Cols:   cols,
-		Rows:   rows,
+		Cols:  cols,
+		Rows:  rows,
 		Cells: cells,
 	}
 }
 
 // Game is the Ebitengine game state.
 type Game struct {
-	grid   *Grid
-	canvas *ebiten.Image
-    currentState int     // which state are we in?
-    startTick int64 // when did the current state start?
-    actionRow int // the row any given action is happening
-    actionCol int // the column an action is happening
-	highlightCol int // col of currently highlighted cell; -1 = none
-	highlightRow int // row of currently highlighted cell; -1 = none
+	grid         *Grid
+	canvas       *ebiten.Image
+	currentState int   // which state are we in?
+	startTick    int64 // when did the current state start?
+	actionRow    int   // the row any given action is happening
+	actionCol    int   // the column an action is happening
+	highlightCol int   // col of currently highlighted cell; -1 = none
+	highlightRow int   // row of currently highlighted cell; -1 = none
+	glowShader   *ebiten.Shader
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -185,22 +204,48 @@ func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
 
 // drawCell erases the cell's bounding rectangle on canvas with black and
 // redraws the antialiased circle for (col, row) using clr.  When highlighted
-// is true, a white 1.5px antialiased border is drawn at the natural (full)
-// circle edge regardless of current cellFullness or Health.
-func drawCell(canvas *ebiten.Image, col, row int, cell *Cell, cs int, cellFullness float32, highlighted bool) {
-	x := float32(col * cs)
-	y := float32(row * cs)
+// is true, a radial gradient glow ring is rendered via a Kage shader — white
+// opaque at the circle edge fading to transparent outward over glowWidth px.
+// The clear always covers the expanded rect (cellSize + 2*glowWidth on each
+// side) so residual glow pixels from previous draws are always cleaned up;
+// adjacent cells' own drawCell calls will overdraw any bleed into their area.
+func (g *Game) drawCell(col, row int, cell *Cell, cs int, cellFullness float32, highlighted bool) {
 	csFloat := float32(cs)
-	vector.DrawFilledRect(canvas, x, y, csFloat, csFloat, color.Black, false)
+	expand := glowWidth
+
+	// Always clear the expanded rect to remove any residual glow pixels.
+	ex := float32(col*cs) - expand
+	ey := float32(row*cs) - expand
+	ew := csFloat + 2*expand
+	eh := csFloat + 2*expand
+	vector.DrawFilledRect(g.canvas, ex, ey, ew, eh, color.Black, false)
+
+	if cell.Health <= 0 {
+		return
+	}
 	halfCs := csFloat / 2
-	cx := x + halfCs
-	cy := y + halfCs
-	maxRadius := (halfCs - 2)
+	cx := float32(col*cs) + halfCs
+	cy := float32(row*cs) + halfCs
+	maxRadius := halfCs - 2
 	radius := maxRadius * cellFullness * cell.Health
 	clr := cell.Color
-	vector.DrawFilledCircle(canvas, cx, cy, radius, clr, true)
-	if highlighted {
-		vector.StrokeCircle(canvas, cx, cy, maxRadius, 1.5, color.White, true)
+	vector.DrawFilledCircle(g.canvas, cx, cy, radius, clr, true)
+
+	if highlighted && radius > 0 && g.glowShader != nil {
+		outerR := radius + glowWidth
+		x0 := cx - outerR
+		y0 := cy - outerR
+		w := int(outerR * 2)
+		h := int(outerR * 2)
+		opts := &ebiten.DrawRectShaderOptions{}
+		opts.GeoM.Translate(float64(x0), float64(y0))
+		opts.Uniforms = map[string]any{
+			"Center":      []float32{cx, cy},
+			"InnerRadius": float32(radius),
+			"OuterRadius": float32(outerR),
+		}
+		opts.Blend = ebiten.BlendSourceOver
+		g.canvas.DrawRectShader(w, h, g.glowShader, opts)
 	}
 }
 
@@ -212,7 +257,7 @@ func (g *Game) advanceState(tick int64) {
 		elapsed := elapsedFraction(tick, g.startTick, collapseTicks)
 		actionCell := &g.grid.Cells[g.actionCol][g.actionRow]
 		if g.canvas != nil {
-			drawCell(g.canvas, g.actionCol, g.actionRow, actionCell, cellSize, 1.0-elapsed, false)
+			g.drawCell(g.actionCol, g.actionRow, actionCell, cellSize, 1.0-elapsed, false)
 		}
 		if elapsed >= 1.0 {
 			if actionCell.Health > healthMin {
@@ -226,7 +271,7 @@ func (g *Game) advanceState(tick int64) {
 	} else if g.currentState == stateSpawning {
 		elapsed := elapsedFraction(tick, g.startTick, spawnTicks)
 		if g.canvas != nil {
-			drawCell(g.canvas, g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], cellSize, elapsed, false)
+			g.drawCell(g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], cellSize, elapsed, false)
 		}
 		if elapsed >= 1.0 {
 			g.currentState = stateWaiting
@@ -235,8 +280,8 @@ func (g *Game) advanceState(tick int64) {
 	}
 }
 
-// clearHighlight removes the white highlight border from the currently
-// highlighted cell (if any) and resets highlightCol/Row to -1.
+// clearHighlight removes the glow highlight from the currently highlighted
+// cell (if any) and resets highlightCol/Row to -1.
 func clearHighlight(g *Game) {
 	if g.highlightCol == -1 {
 		return
@@ -244,7 +289,7 @@ func clearHighlight(g *Game) {
 	if g.canvas != nil {
 		c := g.highlightCol
 		r := g.highlightRow
-		drawCell(g.canvas, c, r, &g.grid.Cells[c][r], cellSize, 1.0, false)
+		g.drawCell(c, r, &g.grid.Cells[c][r], cellSize, 1.0, false)
 	}
 	g.highlightCol = -1
 	g.highlightRow = -1
@@ -269,12 +314,12 @@ func updateHighlight(g *Game) {
 		c := g.highlightCol
 		r := g.highlightRow
 		if g.canvas != nil {
-			drawCell(g.canvas, c, r, &g.grid.Cells[c][r], cellSize, 1.0, false)
+			g.drawCell(c, r, &g.grid.Cells[c][r], cellSize, 1.0, false)
 		}
 	}
 	if found {
 		if g.canvas != nil {
-			drawCell(g.canvas, newCol, newRow, &g.grid.Cells[newCol][newRow], cellSize, 1.0, true)
+			g.drawCell(newCol, newRow, &g.grid.Cells[newCol][newRow], cellSize, 1.0, true)
 		}
 		g.highlightCol = newCol
 		g.highlightRow = newRow
@@ -286,32 +331,41 @@ func updateHighlight(g *Game) {
 
 // Update handles input each tick.
 func (g *Game) Update() error {
-    if g.currentState == stateWaiting {
-        updateHighlight(g)
-        if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-            px, py := ebiten.CursorPosition()
-            col, row := cellFromPixel(px, py, cellSize)
-            if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-                recolor(&g.grid.Cells[col][row])
-                drawCell(g.canvas, col, row, &g.grid.Cells[col][row], cellSize, 1.0, false)
-            }
-            clearHighlight(g)
-            g.currentState = stateCollapsing
-            g.actionCol = col
-            g.actionRow = row
-            g.startTick = ebiten.Tick()
-        }
-    } else {
-        g.advanceState(ebiten.Tick())
-        // After stateSpawning completes, the previously highlighted cell may
-        // now be dead; re-evaluate the highlight on the next waiting tick.
-        // (highlightCol/Row are already -1 since clearHighlight ran on click.)
-    }
+	if g.currentState == stateWaiting {
+		updateHighlight(g)
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			px, py := ebiten.CursorPosition()
+			col, row := cellFromPixel(px, py, cellSize)
+			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
+				recolor(&g.grid.Cells[col][row])
+				g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0, false)
+			}
+			clearHighlight(g)
+			g.currentState = stateCollapsing
+			g.actionCol = col
+			g.actionRow = row
+			g.startTick = ebiten.Tick()
+		}
+	} else {
+		g.advanceState(ebiten.Tick())
+		// After stateSpawning completes, the previously highlighted cell may
+		// now be dead; re-evaluate the highlight on the next waiting tick.
+		// (highlightCol/Row are already -1 since clearHighlight ran on click.)
+	}
 	return nil
 }
 
 // Draw blits the offscreen canvas to the screen in a single call.
+// On the first call it also compiles the glow shader (ebiten must be
+// initialised before NewShader can be called).
 func (g *Game) Draw(screen *ebiten.Image) {
+	if g.glowShader == nil {
+		s, err := ebiten.NewShader([]byte(glowShaderSrc))
+		if err != nil {
+			log.Fatal("glow shader compile error:", err)
+		}
+		g.glowShader = s
+	}
 	screen.DrawImage(g.canvas, nil)
 }
 
@@ -328,15 +382,17 @@ func main() {
 	grid := NewGrid(gridCols, gridRows)
 	canvas := ebiten.NewImage(windowWidth, windowHeight)
 	canvas.Fill(color.Black)
-	for c := 0; c < grid.Cols; c++ {
-		for r := 0; r < grid.Rows; r++ {
-			drawCell(canvas, c, r, &grid.Cells[c][r], cellSize, 1.0, false)
-		}
-	}
 
 	game := newGameState(grid)
 	game.canvas = canvas
 	game.startTick = ebiten.Tick()
+
+	for c := 0; c < grid.Cols; c++ {
+		for r := 0; r < grid.Rows; r++ {
+			game.drawCell(c, r, &grid.Cells[c][r], cellSize, 1.0, false)
+		}
+	}
+
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
