@@ -373,6 +373,11 @@ func (g *Game) isSourceCorner(col, row int) bool {
 	return false
 }
 
+// isTargetCorner reports whether (col, row) is the target corner.
+func (g *Game) isTargetCorner(col, row int) bool {
+	return col == g.targetCorner[0] && row == g.targetCorner[1]
+}
+
 // elapsedFraction returns how far through a phase we are as a 0→1 float32.
 // currentTick is the game tick at the time of evaluation, startTick is when
 // the phase began, and durationTicks is the total length of the phase.
@@ -508,8 +513,15 @@ func (g *Game) Update() error {
 		dstSnap := snap[dc][dr]
 		srcHealth := g.grid.Cells[sc][sr].Health
 		dstHealth := g.grid.Cells[dc][dr].Health
-		g.grid.Cells[dc][dr].Color = lerpColor(dstSnap, srcSnap, flowRate*srcHealth)
-		g.grid.Cells[sc][sr].Color = lerpColor(srcSnap, dstSnap, flowRate*dstHealth)
+		// dst receives from src — skip if src is the target (target never emits)
+		if !g.isTargetCorner(sc, sr) {
+			g.grid.Cells[dc][dr].Color = lerpColor(dstSnap, srcSnap, flowRate*srcHealth)
+		}
+		// src receives from dst — skip if dst is the target (target never emits)
+		//                       — skip if src is a source corner (re-pinned anyway, make explicit)
+		if !g.isTargetCorner(dc, dr) && !g.isSourceCorner(sc, sr) {
+			g.grid.Cells[sc][sr].Color = lerpColor(srcSnap, dstSnap, flowRate*dstHealth)
+		}
 	}
 
 	// Re-pin sources after propagation (bidirectional lerp may have pulled them slightly).
