@@ -28,6 +28,8 @@ const (
     healthDecrement = float32(0.2)
     healthMin       = float32(0.2)
     healthEpsilon   = float32(0.001)
+
+    respawnCells = true // set false to leave gaps at top instead of spawning new cells
 )
 
 const glowShaderSrc = `//kage:unit pixels
@@ -310,9 +312,11 @@ func (g *Game) buildDropAnims(removedCols []int) {
             g.grid.Cells[col][m[1]] = snapshot[m[0]]
         }
 
-        // Write new random cells into the top slots (0..len(holeRows)-1).
-        for i := 0; i < len(holeRows); i++ {
-            g.grid.Cells[col][i] = Cell{Color: randomColor(), Health: 1.0}
+        if respawnCells {
+            // Write new random cells into the top slots (0..len(holeRows)-1).
+            for i := 0; i < len(holeRows); i++ {
+                g.grid.Cells[col][i] = Cell{Color: randomColor(), Health: 1.0}
+            }
         }
 
         // Create MoveAnims for moved alive cells — clear only their old (vacated) positions.
@@ -326,14 +330,16 @@ func (g *Game) buildDropAnims(removedCols []int) {
             g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
         }
 
-        // Create MoveAnims for new cells animating in from above screen.
-        for i := 0; i < len(holeRows); i++ {
-            cell := g.grid.Cells[col][i]
-            fx := float32(col*cellSize + cellSize/2)
-            fy := float32(-cellSize / 2)
-            tx, ty := cellCenter(col, i)
-            g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, cell})
-            // The canvas position for row i was vacated by the moved cell above — already cleared.
+        if respawnCells {
+            // Create MoveAnims for new cells animating in from above screen.
+            for i := 0; i < len(holeRows); i++ {
+                cell := g.grid.Cells[col][i]
+                fx := float32(col*cellSize + cellSize/2)
+                fy := float32(-cellSize / 2)
+                tx, ty := cellCenter(col, i)
+                g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, cell})
+                // The canvas position for row i was vacated by the moved cell above — already cleared.
+            }
         }
     }
 }
