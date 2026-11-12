@@ -239,6 +239,33 @@ func (g *Game) drawCell(col, row int, cell *Cell, cs int, cellFullness float32) 
     vector.DrawFilledCircle(g.canvas, cx, cy, radius, clr, true)
 }
 
+// gravityMoves returns the [oldRow, newRow] mapping for cells in a column of numRows
+// when holes appear at holeRows. Only returns entries for cells that actually change row.
+// Cells not in holeRows are "alive" and compact downward; holeRows are removed.
+func gravityMoves(numRows int, holeRows []int) [][2]int {
+    // Build a set of hole rows for fast lookup
+    holeSet := make(map[int]bool, len(holeRows))
+    for _, r := range holeRows {
+        holeSet[r] = true
+    }
+    // Collect alive rows top-to-bottom
+    var alive []int
+    for r := 0; r < numRows; r++ {
+        if !holeSet[r] {
+            alive = append(alive, r)
+        }
+    }
+    newCount := numRows - len(alive) // number of new cells needed at top
+    var moves [][2]int
+    for i, oldRow := range alive {
+        newRow := newCount + i
+        if oldRow != newRow {
+            moves = append(moves, [2]int{oldRow, newRow})
+        }
+    }
+    return moves
+}
+
 // rowCell is a helper pairing a row index with its cell, used in buildDropAnims.
 type rowCell struct {
     row  int
@@ -247,8 +274,11 @@ type rowCell struct {
 
 // buildDropAnims computes MoveAnim entries for each affected column: alive cells
 // compact downward, and new random cells fall from above the screen top.
+// Only canvas positions that cells are vacating are cleared — not the whole column.
 func (g *Game) buildDropAnims(removedCols []int) {
-    g.moveAnims = g.moveAnims[:0]
+    if cap(g.moveAnims) > 0 {
+        g.moveAnims = g.moveAnims[:0]
+    }
     seen := make(map[int]bool)
     for _, col := range removedCols {
         if seen[col] {
@@ -256,40 +286,54 @@ func (g *Game) buildDropAnims(removedCols []int) {
         }
         seen[col] = true
 
-        // Collect alive cells in top-to-bottom order, tracking their current row.
-        var alive []rowCell
+        // Find which rows in this column are dead (holes just created this round).
+        var holeRows []int
         for row := 0; row < g.grid.Rows; row++ {
-            if g.grid.Cells[col][row].Health > 0 {
-                alive = append(alive, rowCell{row, g.grid.Cells[col][row]})
+            if g.grid.Cells[col][row].Health <= 0 {
+                holeRows = append(holeRows, row)
             }
         }
-
-        newCount := g.grid.Rows - len(alive)
-
-        // Build MoveAnims for alive cells moving from their old row to their new row.
-        for i, rc := range alive {
-            newRow := newCount + i
-            if rc.row != newRow {
-                fx, fy := cellCenter(col, rc.row)
-                tx, ty := cellCenter(col, newRow)
-                g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, rc.cell})
-            }
-            g.grid.Cells[col][newRow] = rc.cell
+        if len(holeRows) == 0 {
+            continue
         }
 
-        // Add new random cells at the top, animating in from above the screen.
-        for i := 0; i < newCount; i++ {
-            newCell := Cell{Color: randomColor(), Health: 1.0}
-            g.grid.Cells[col][i] = newCell
+        moves := gravityMoves(g.grid.Rows, holeRows)
+
+        // Apply grid moves using a snapshot to avoid aliasing.
+        snapshot := make([]Cell, g.grid.Rows)
+        for row := 0; row < g.grid.Rows; row++ {
+            snapshot[row] = g.grid.Cells[col][row]
+        }
+
+        // Write moved alive cells to their new positions.
+        for _, m := range moves {
+            g.grid.Cells[col][m[1]] = snapshot[m[0]]
+        }
+
+        // Write new random cells into the top slots (0..len(holeRows)-1).
+        for i := 0; i < len(holeRows); i++ {
+            g.grid.Cells[col][i] = Cell{Color: randomColor(), Health: 1.0}
+        }
+
+        // Create MoveAnims for moved alive cells — clear only their old (vacated) positions.
+        for _, m := range moves {
+            cell := g.grid.Cells[col][m[1]]
+            fx, fy := cellCenter(col, m[0])
+            tx, ty := cellCenter(col, m[1])
+            g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, cell})
+            // Clear the vacated canvas position.
+            x0, y0 := col*cellSize, m[0]*cellSize
+            g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+        }
+
+        // Create MoveAnims for new cells animating in from above screen.
+        for i := 0; i < len(holeRows); i++ {
+            cell := g.grid.Cells[col][i]
             fx := float32(col*cellSize + cellSize/2)
             fy := float32(-cellSize / 2)
             tx, ty := cellCenter(col, i)
-            g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, newCell})
-        }
-
-        // Clear entire column on canvas so animations render over blank cells.
-        for row := 0; row < g.grid.Rows; row++ {
-            g.canvas.SubImage(image.Rect(col*cellSize, row*cellSize, (col+1)*cellSize, (row+1)*cellSize)).(*ebiten.Image).Clear()
+            g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, cell})
+            // The canvas position for row i was vacated by the moved cell above — already cleared.
         }
     }
 }
