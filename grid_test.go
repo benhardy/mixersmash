@@ -830,10 +830,10 @@ func TestScoreForKill(t *testing.T) {
 // creaturePalette — structure and palette-level invariants
 // ---------------------------------------------------------------------------
 
-// TestCreaturePaletteMinLength verifies the palette has at least 29 entries.
+// TestCreaturePaletteMinLength verifies the palette has at least 64 entries.
 func TestCreaturePaletteMinLength(t *testing.T) {
-	if len(creaturePalette) < 29 {
-		t.Errorf("creaturePalette has %d entries, want at least 29", len(creaturePalette))
+	if len(creaturePalette) < 64 {
+		t.Errorf("creaturePalette has %d entries, want at least 64", len(creaturePalette))
 	}
 }
 
@@ -866,11 +866,56 @@ func TestCreaturePaletteGlyphsUniqueAndNonZero(t *testing.T) {
 	}
 }
 
+// TestCreaturePaletteChannelValues verifies that every R, G, B channel value of
+// every palette entry is a member of the 5-level set {102, 140, 178, 217, 255}.
+func TestCreaturePaletteChannelValues(t *testing.T) {
+	allowed := map[uint8]bool{102: true, 140: true, 178: true, 217: true, 255: true}
+	for i, e := range creaturePalette {
+		for _, ch := range []struct {
+			name string
+			val  uint8
+		}{
+			{"R", e.Color.R},
+			{"G", e.Color.G},
+			{"B", e.Color.B},
+		} {
+			if !allowed[ch.val] {
+				t.Errorf("creaturePalette[%d] (%q) channel %s = %d, not in {102,140,178,217,255}",
+					i, e.Name, ch.name, ch.val)
+			}
+		}
+	}
+}
+
+// TestCreaturePaletteChannelRange verifies that the minimum channel value used
+// across all palette entries is exactly 102 (floor preserved) and that 255 is
+// also present (full range exercised).
+func TestCreaturePaletteChannelRange(t *testing.T) {
+	var minVal uint8 = 255
+	has255 := false
+	for _, e := range creaturePalette {
+		for _, ch := range []uint8{e.Color.R, e.Color.G, e.Color.B} {
+			if ch < minVal {
+				minVal = ch
+			}
+			if ch == 255 {
+				has255 = true
+			}
+		}
+	}
+	if minVal != 102 {
+		t.Errorf("minimum channel value across palette = %d, want exactly 102", minVal)
+	}
+	if !has255 {
+		t.Errorf("no palette entry uses channel value 255; full 5-level range not exercised")
+	}
+}
+
 // TestCreaturePaletteRequiredNames verifies that the palette contains at least
 // one entry whose Name contains each required creature name (case-insensitive).
 func TestCreaturePaletteRequiredNames(t *testing.T) {
 	required := []string{
-		"kangaroo", "kiwi", "koala", "wombat", "pine", "fern", "flower",
+		"kangaroo", "koala", "parrot", "hedgehog", "pine", "fern", "flower",
 		"cat", "wolf", "goat", "horse", "butterfly", "cherry", "banana",
 		"snake", "dragon", "rat", "ghost", "rooster", "fish", "dolphin",
 		"octopus", "palm", "monkey", "bat", "jellyfish", "mosquito", "wheat", "pig",

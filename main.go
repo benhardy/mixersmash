@@ -367,8 +367,11 @@ func (g *Game) glyphCachedImage(clr color.RGBA) *ebiten.Image {
 	text.Draw(glyphImg, str, face, &drawOpts)
 
 	// Step 2: build a circular mask (white circle, transparent outside).
+	// Use antialias=false to avoid the stencil-buffer callback path, and inset
+	// the radius by 1 px so no glyph pixel leaks past the drawn circle edge when
+	// the cached image is scaled down at draw time.
 	maskImg := ebiten.NewImage(sz, sz)
-	vector.DrawFilledCircle(maskImg, half, half, half, color.White, true)
+	vector.DrawFilledCircle(maskImg, half, half, half-1, color.White, false)
 
 	// Step 3: apply the mask to the glyph image using destination-in compositing:
 	// keeps destination (glyph) pixels where source (mask) alpha > 0, clips the rest.
