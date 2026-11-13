@@ -686,52 +686,71 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	screen.Fill(color.Black)
 
-	// Victim hint line — drawn behind circles
-	if g.hoverCol != -1 && g.victimHintCol != -1 {
-		fromX, fromY := cellCenter(g.victimHintCol, g.victimHintRow)
-		toX, toY := cellCenter(g.hoverCol, g.hoverRow)
-		dx := toX - fromX
-		dy := toY - fromY
-		length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-		if length > 0 {
-			ux := dx / length
-			uy := dy / length
-			const dotSpacing = float32(8) // px between dot centres
-			const dotRadius = float32(4.0)
-			// Offset advances at 20 px/sec = 20/60 px per tick
-			rawOff := float64(ebiten.Tick()) * (20.0 / 60.0)
-			offset := float32(math.Mod(rawOff, float64(dotSpacing)))
-			vc := g.grid.Cells[g.victimHintCol][g.victimHintRow].Color
-			dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
-			for pos := offset; pos < length; pos += dotSpacing {
-				vector.DrawFilledCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
-			}
+	g.drawVictimLine(screen)
+	g.drawCanvas(screen)
+	g.drawTargetBounce(screen)
+	g.drawMoveAnims(screen)
+}
+
+// drawVictimLine draws the animated dotted hint line behind the circles,
+// from the victim cell toward the hovered cell.
+func (g *Game) drawVictimLine(screen *ebiten.Image) {
+	if g.hoverCol == -1 || g.victimHintCol == -1 {
+		return
+	}
+	fromX, fromY := cellCenter(g.victimHintCol, g.victimHintRow)
+	toX, toY := cellCenter(g.hoverCol, g.hoverRow)
+	dx := toX - fromX
+	dy := toY - fromY
+	length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	if length > 0 {
+		ux := dx / length
+		uy := dy / length
+		const dotSpacing = float32(8) // px between dot centres
+		const dotRadius = float32(4.0)
+		// Offset advances at 20 px/sec = 20/60 px per tick
+		rawOff := float64(ebiten.Tick()) * (20.0 / 60.0)
+		offset := float32(math.Mod(rawOff, float64(dotSpacing)))
+		vc := g.grid.Cells[g.victimHintCol][g.victimHintRow].Color
+		dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
+		for pos := offset; pos < length; pos += dotSpacing {
+			vector.DrawFilledCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
 		}
 	}
+}
 
+// drawCanvas blits the persistent offscreen canvas to the screen.
+func (g *Game) drawCanvas(screen *ebiten.Image) {
 	screen.DrawImage(g.canvas, nil)
+}
 
-	if g.targetAnimating {
-		t := elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks)
-		if t > 1.0 {
-			t = 1.0
-		}
-		var r float32
-		if t < 0.5 {
-			lt := t * 2                // 0→1 in phase 1
-			eased := 1 - (1-lt)*(1-lt) // ease-out: fast start, slow at peak
-			r = g.targetAnimStartR + (g.targetAnimPeakR-g.targetAnimStartR)*eased
-		} else {
-			lt := (t - 0.5) * 2 // 0→1 in phase 2
-			eased := lt * lt    // ease-in: slow at peak, fast at end
-			r = g.targetAnimPeakR + (g.targetAnimEndR-g.targetAnimPeakR)*eased
-		}
-		cx, cy := cellCenter(g.actionCol, g.actionRow)
-		if r > 0 {
-			vector.DrawFilledCircle(screen, cx, cy, r, g.targetAnimColor, true)
-		}
+// drawTargetBounce renders the target cell bounce animation.
+func (g *Game) drawTargetBounce(screen *ebiten.Image) {
+	if !g.targetAnimating {
+		return
 	}
+	t := elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks)
+	if t > 1.0 {
+		t = 1.0
+	}
+	var r float32
+	if t < 0.5 {
+		lt := t * 2                // 0→1 in phase 1
+		eased := 1 - (1-lt)*(1-lt) // ease-out: fast start, slow at peak
+		r = g.targetAnimStartR + (g.targetAnimPeakR-g.targetAnimStartR)*eased
+	} else {
+		lt := (t - 0.5) * 2 // 0→1 in phase 2
+		eased := lt * lt    // ease-in: slow at peak, fast at end
+		r = g.targetAnimPeakR + (g.targetAnimEndR-g.targetAnimPeakR)*eased
+	}
+	cx, cy := cellCenter(g.actionCol, g.actionRow)
+	if r > 0 {
+		vector.DrawFilledCircle(screen, cx, cy, r, g.targetAnimColor, true)
+	}
+}
 
+// drawMoveAnims renders in-motion cells for shuffle, drop, and victim-move animations.
+func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 	if len(g.moveAnims) > 0 {
 		var t float32
 		ticks := int64(shuffleTicks)
