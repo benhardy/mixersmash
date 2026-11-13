@@ -10,6 +10,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	text "github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
@@ -193,7 +194,7 @@ func NewGrid(cols, rows int) *Grid {
 		cells[c] = make([]Cell, rows)
 		for r := 0; r < rows; r++ {
 			cells[c][r] = Cell{
-				Color:  randomColor(),
+				Color:  paletteColor(),
 				Health: 1.0,
 			}
 		}
@@ -245,6 +246,9 @@ type Game struct {
 	targetAnimPeakR  float32
 	targetAnimEndR   float32
 	targetAnimColor  color.RGBA
+
+	// glyph rendering
+	glyphFont *text.GoTextFaceSource
 }
 
 // scoreForKill returns the points earned for a single kill.
@@ -320,6 +324,34 @@ func cellCenter(col, row int) (float32, float32) {
 	return float32(col*cellSize + cellSize/2), float32(row*cellSize + cellSize/2)
 }
 
+// drawGlyph draws the creature glyph for clr centred at (cx, cy) sized to
+// fill roughly 80% of radius, tinted to darkerShade(clr).  Does nothing if
+// glyphFont is nil or no glyph is mapped to clr.
+func (g *Game) drawGlyph(dst *ebiten.Image, cx, cy, radius float32, clr color.RGBA) {
+	if g.glyphFont == nil {
+		return
+	}
+	glyph := glyphForColor(clr)
+	if glyph == 0 {
+		return
+	}
+	size := float64(radius) * 1.6
+	if size < 1 {
+		return
+	}
+	face := &text.GoTextFace{
+		Source: g.glyphFont,
+		Size:   size,
+	}
+	str := string(glyph)
+	w, h := text.Measure(str, face, 0)
+	tint := darkerShade(clr)
+	var opts text.DrawOptions
+	opts.ColorScale.ScaleWithColor(tint)
+	opts.GeoM.Translate(float64(cx)-w/2, float64(cy)-h/2)
+	text.Draw(dst, str, face, &opts)
+}
+
 // drawCell erases the cell's bounding rectangle on canvas with black and
 // redraws the antialiased circle for (col, row).  No glow is drawn here;
 // glow is composited onto the screen each frame in Draw().
@@ -341,6 +373,7 @@ func (g *Game) drawCell(col, row int, cell *Cell, cs int, cellFullness float32) 
 	radius := maxRadius * cellFullness * cell.Health
 	clr := cell.Color
 	vector.DrawFilledCircle(g.canvas, cx, cy, radius, clr, true)
+	g.drawGlyph(g.canvas, cx, cy, radius, clr)
 }
 
 // gravityMoves returns the [oldRow, newRow] mapping for cells in a column of numRows
@@ -426,7 +459,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		if respawnCells {
 			// Write new random cells into the top slots (0..len(holeRows)-1).
 			for i := 0; i < len(holeRows); i++ {
-				g.grid.Cells[col][i] = Cell{Color: randomColor(), Health: 1.0}
+				g.grid.Cells[col][i] = Cell{Color: paletteColor(), Health: 1.0}
 				spawned++
 			}
 		}
@@ -854,6 +887,7 @@ func (g *Game) drawTargetBounce(screen *ebiten.Image) {
 	cx, cy := cellCenter(g.actionCol, g.actionRow)
 	if r > 0 {
 		vector.DrawFilledCircle(screen, cx, cy, r, g.targetAnimColor, true)
+		g.drawGlyph(screen, cx, cy, r, g.targetAnimColor)
 	}
 }
 
@@ -893,6 +927,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			r := maxR * anim.Cell.Health
 			if r > 0 {
 				vector.DrawFilledCircle(screen, cx, cy, r, anim.Cell.Color, true)
+				g.drawGlyph(screen, cx, cy, r, anim.Cell.Color)
 			}
 		}
 	}
@@ -925,6 +960,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			radius := float32(cellSize/2-2) * v.cell.Health * (1 - t)
 			if radius > 0 {
 				vector.DrawFilledCircle(screen, cx, cy, radius, v.cell.Color, true)
+				g.drawGlyph(screen, cx, cy, radius, v.cell.Color)
 			}
 		}
 	}
@@ -946,6 +982,12 @@ func main() {
 	game := newGameState(grid)
 	game.canvas = canvas
 	game.animStart = ebiten.Tick()
+
+	glyphFont, err := loadGlyphFont()
+	if err != nil {
+		log.Fatal("load glyph font:", err)
+	}
+	game.glyphFont = glyphFont
 
 	for c := 0; c < grid.Cols; c++ {
 		for r := 0; r < grid.Rows; r++ {

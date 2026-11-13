@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -822,6 +823,140 @@ func TestScoreForKill(t *testing.T) {
 					tc.victimColors, tc.targetColor, got, tc.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// creaturePalette — structure and palette-level invariants
+// ---------------------------------------------------------------------------
+
+// TestCreaturePaletteMinLength verifies the palette has at least 29 entries.
+func TestCreaturePaletteMinLength(t *testing.T) {
+	if len(creaturePalette) < 29 {
+		t.Errorf("creaturePalette has %d entries, want at least 29", len(creaturePalette))
+	}
+}
+
+// TestCreaturePaletteColorsUnique verifies that no two entries share the same
+// color.RGBA value.
+func TestCreaturePaletteColorsUnique(t *testing.T) {
+	seen := make(map[color.RGBA]int)
+	for i, e := range creaturePalette {
+		if prev, ok := seen[e.Color]; ok {
+			t.Errorf("creaturePalette[%d] and creaturePalette[%d] share color %v",
+				prev, i, e.Color)
+		}
+		seen[e.Color] = i
+	}
+}
+
+// TestCreaturePaletteGlyphsUniqueAndNonZero verifies that every entry has a
+// distinct, non-zero glyph rune.
+func TestCreaturePaletteGlyphsUniqueAndNonZero(t *testing.T) {
+	seen := make(map[rune]int)
+	for i, e := range creaturePalette {
+		if e.Glyph == 0 {
+			t.Errorf("creaturePalette[%d] (%q) has zero Glyph", i, e.Name)
+		}
+		if prev, ok := seen[e.Glyph]; ok {
+			t.Errorf("creaturePalette[%d] and creaturePalette[%d] share glyph %q",
+				prev, i, e.Glyph)
+		}
+		seen[e.Glyph] = i
+	}
+}
+
+// TestCreaturePaletteRequiredNames verifies that the palette contains at least
+// one entry whose Name contains each required creature name (case-insensitive).
+func TestCreaturePaletteRequiredNames(t *testing.T) {
+	required := []string{
+		"kangaroo", "kiwi", "koala", "wombat", "pine", "fern", "flower",
+		"cat", "wolf", "goat", "horse", "butterfly", "cherry", "banana",
+		"snake", "dragon", "rat", "ghost", "rooster", "fish", "dolphin",
+		"octopus", "palm", "monkey", "bat", "jellyfish", "mosquito", "wheat", "pig",
+	}
+	for _, req := range required {
+		found := false
+		for _, e := range creaturePalette {
+			if strings.Contains(strings.ToLower(e.Name), req) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("creaturePalette has no entry whose Name contains %q", req)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// darkerShade
+// ---------------------------------------------------------------------------
+
+// TestDarkerShade verifies the floor(channel*0.65) formula and that alpha is
+// always forced to 255 regardless of input alpha.
+func TestDarkerShade(t *testing.T) {
+	cases := []struct {
+		name  string
+		input color.RGBA
+		want  color.RGBA
+	}{
+		{
+			name:  "mixed channels",
+			input: color.RGBA{R: 200, G: 100, B: 50, A: 255},
+			want:  color.RGBA{R: 130, G: 65, B: 32, A: 255},
+		},
+		{
+			name:  "all 255",
+			input: color.RGBA{R: 255, G: 255, B: 255, A: 255},
+			want:  color.RGBA{R: 165, G: 165, B: 165, A: 255},
+		},
+		{
+			name:  "all zero",
+			input: color.RGBA{R: 0, G: 0, B: 0, A: 255},
+			want:  color.RGBA{R: 0, G: 0, B: 0, A: 255},
+		},
+		{
+			name:  "alpha forced to 255 when input alpha differs",
+			input: color.RGBA{R: 200, G: 100, B: 50, A: 100},
+			want:  color.RGBA{R: 130, G: 65, B: 32, A: 255},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := darkerShade(tc.input)
+			if got != tc.want {
+				t.Errorf("darkerShade(%v) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// glyphForColor
+// ---------------------------------------------------------------------------
+
+// TestGlyphForColorFound verifies that glyphForColor returns the correct glyph
+// for the first palette entry's colour.
+func TestGlyphForColorFound(t *testing.T) {
+	if len(creaturePalette) == 0 {
+		t.Fatal("creaturePalette is empty")
+	}
+	first := creaturePalette[0]
+	got := glyphForColor(first.Color)
+	if got != first.Glyph {
+		t.Errorf("glyphForColor(%v) = %q, want %q", first.Color, got, first.Glyph)
+	}
+}
+
+// TestGlyphForColorNotFound verifies that glyphForColor returns rune(0) for a
+// colour that is not in the palette.
+func TestGlyphForColorNotFound(t *testing.T) {
+	absent := color.RGBA{R: 1, G: 2, B: 3, A: 255}
+	got := glyphForColor(absent)
+	if got != rune(0) {
+		t.Errorf("glyphForColor(%v) = %q, want rune(0)", absent, got)
 	}
 }
 
