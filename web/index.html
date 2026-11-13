@@ -33,7 +33,7 @@
                 if (typeof WebAssembly.instantiateStreaming === "function") {
                     try {
                         const result = await WebAssembly.instantiateStreaming(
-                            fetch("go2d.wasm"),
+                            fetch("mixersmash.wasm"),
                             go.importObject
                         );
                         return result;
@@ -46,7 +46,7 @@
                 }
 
                 // ArrayBuffer fallback.
-                const resp = await fetch("go2d.wasm");
+                const resp = await fetch("mixersmash.wasm");
                 const bytes = await resp.arrayBuffer();
                 return WebAssembly.instantiate(bytes, go.importObject);
             }
@@ -55,7 +55,7 @@
                 const result = await loadWasm();
                 go.run(result.instance);
             } catch (err) {
-                console.error("Failed to load go2d.wasm:", err);
+                console.error("Failed to load mixersmash.wasm:", err);
             }
         })();
     </script>

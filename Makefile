@@ -1,19 +1,19 @@
-.PHONY: all linux wasm serve test clean
+.PHONY: all mac linux wasm serve test clean
 
-all: go2d_darwin_arm64
+mac: mixersmash_darwin_arm64
 
-go2d_darwin_arm64:
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o go2d_darwin_arm64 .
+mixersmash_darwin_arm64:
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o mixersmash_darwin_arm64 .
 
-linux: go2d_linux_amd64
+linux: mixersmash_linux_amd64
 
-go2d_linux_amd64:
-	GOOS=linux GOARCH=amd64 go build -o go2d_linux_amd64 .
+mixersmash_linux_amd64:
+	GOOS=linux GOARCH=amd64 go build -o mixersmash_linux_amd64 .
 
 # wasm builds the WebAssembly binary and copies the Go JS shim into web/.
 # Go 1.24+ ships wasm_exec.js under lib/wasm/; older Go uses misc/wasm/.
 wasm:
-	GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -o web/go2d.wasm .
+	GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -o web/mixersmash.wasm .
 	@if [ -f "$(shell go env GOROOT)/lib/wasm/wasm_exec.js" ]; then \
 		cp "$(shell go env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js; \
 	else \
@@ -30,5 +30,5 @@ test:
 	go test ./...
 
 clean:
-	rm -f go2d_darwin_arm64 go2d_linux_amd64
-	rm -f web/go2d.wasm web/wasm_exec.js
+	rm -f mixersmash_darwin_arm64 mixersmash_linux_amd64
+	rm -f web/mixersmash.wasm web/wasm_exec.js

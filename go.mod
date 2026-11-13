@@ -1,4 +1,4 @@
-module go2d
+module mixersmash
 
 go 1.26.5
 

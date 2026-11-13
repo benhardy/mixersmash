@@ -18,8 +18,8 @@ const (
 	windowWidth  = 800
 	windowHeight = 600
 	cellSize     = 64
-	gridCols     = windowWidth / cellSize  // 25
-	gridRows     = windowHeight / cellSize // 18
+	gridCols     = windowWidth / cellSize  // 12
+	gridRows     = windowHeight / cellSize // 9
 
 	stateWaiting      = 1
 	stateShuffling    = 2
