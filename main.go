@@ -597,8 +597,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		maxR := float32(cellSize/2 - 2)
 		for _, anim := range g.moveAnims {
-			cx := anim.FromX + t*(anim.ToX-anim.FromX)
-			cy := anim.FromY + t*(anim.ToY-anim.FromY)
+			// Use quadratic ease-in for drop (gravity), linear for shuffle
+			posT := t
+			if g.currentState == stateDropping {
+				posT = t * t
+			}
+			cx := anim.FromX + posT*(anim.ToX-anim.FromX)
+			cy := anim.FromY + posT*(anim.ToY-anim.FromY)
 			r := maxR * anim.Cell.Health
 			if r > 0 {
 				vector.DrawFilledCircle(screen, cx, cy, r, anim.Cell.Color, true)
