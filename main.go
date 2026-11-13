@@ -248,7 +248,8 @@ type Game struct {
 	targetAnimColor  color.RGBA
 
 	// glyph rendering
-	glyphFont *text.GoTextFaceSource
+	glyphFont  *text.GoTextFaceSource
+	glyphCache map[color.RGBA]*ebiten.Image
 }
 
 // scoreForKill returns the points earned for a single kill.
@@ -324,21 +325,35 @@ func cellCenter(col, row int) (float32, float32) {
 	return float32(col*cellSize + cellSize/2), float32(row*cellSize + cellSize/2)
 }
 
-// drawGlyph draws the creature glyph for clr centred at (cx, cy) sized to
-// fill roughly 80% of radius, tinted to darkerShade(clr).  Does nothing if
-// glyphFont is nil or no glyph is mapped to clr.
-func (g *Game) drawGlyph(dst *ebiten.Image, cx, cy, radius float32, clr color.RGBA) {
+// glyphCacheRefSize is the side length (pixels) of the square offscreen image
+// used to pre-render each glyph at 2× super-sample resolution.
+// maxR = cellSize/2 - 2 = 30; diameter = 60; 2× = 120.
+const glyphCacheRefSize = 120
+
+// glyphCachedImage returns a pre-rendered, circle-clipped *ebiten.Image for clr,
+// building and caching it on first call.  Returns nil if the font is not loaded
+// or no glyph is mapped to clr.
+func (g *Game) glyphCachedImage(clr color.RGBA) *ebiten.Image {
 	if g.glyphFont == nil {
-		return
+		return nil
 	}
 	glyph := glyphForColor(clr)
 	if glyph == 0 {
-		return
+		return nil
 	}
-	size := float64(radius) * 1.6
-	if size < 1 {
-		return
+	if g.glyphCache == nil {
+		g.glyphCache = make(map[color.RGBA]*ebiten.Image, len(creaturePalette))
 	}
+	if img, ok := g.glyphCache[clr]; ok {
+		return img
+	}
+
+	const sz = glyphCacheRefSize
+	const half = float32(sz) / 2
+
+	// Step 1: render tinted glyph into an offscreen image.
+	glyphImg := ebiten.NewImage(sz, sz)
+	size := float64(sz) * 0.75 // glyph occupies ~75% of the square
 	face := &text.GoTextFace{
 		Source: g.glyphFont,
 		Size:   size,
@@ -346,10 +361,44 @@ func (g *Game) drawGlyph(dst *ebiten.Image, cx, cy, radius float32, clr color.RG
 	str := string(glyph)
 	w, h := text.Measure(str, face, 0)
 	tint := darkerShade(clr)
-	var opts text.DrawOptions
-	opts.ColorScale.ScaleWithColor(tint)
-	opts.GeoM.Translate(float64(cx)-w/2, float64(cy)-h/2)
-	text.Draw(dst, str, face, &opts)
+	var drawOpts text.DrawOptions
+	drawOpts.ColorScale.ScaleWithColor(tint)
+	drawOpts.GeoM.Translate(float64(half)-w/2, float64(half)-h/2)
+	text.Draw(glyphImg, str, face, &drawOpts)
+
+	// Step 2: build a circular mask (white circle, transparent outside).
+	maskImg := ebiten.NewImage(sz, sz)
+	vector.DrawFilledCircle(maskImg, half, half, half, color.White, true)
+
+	// Step 3: apply the mask to the glyph image using destination-in compositing:
+	// keeps destination (glyph) pixels where source (mask) alpha > 0, clips the rest.
+	var maskOpts ebiten.DrawImageOptions
+	maskOpts.Blend = ebiten.BlendDestinationIn
+	glyphImg.DrawImage(maskImg, &maskOpts)
+
+	g.glyphCache[clr] = glyphImg
+	return glyphImg
+}
+
+// drawGlyph draws the pre-rendered, circle-clipped glyph for clr centred at
+// (cx, cy) scaled to fit within radius.  Does nothing if the font is not loaded
+// or no glyph is mapped to clr.
+func (g *Game) drawGlyph(dst *ebiten.Image, cx, cy, radius float32, clr color.RGBA) {
+	if radius < 1 {
+		return
+	}
+	img := g.glyphCachedImage(clr)
+	if img == nil {
+		return
+	}
+	// Scale the reference image (glyphCacheRefSize × glyphCacheRefSize) so that
+	// its inscribed circle matches the requested radius.
+	scale := float64(radius*2) / float64(glyphCacheRefSize)
+	var opts ebiten.DrawImageOptions
+	opts.GeoM.Scale(scale, scale)
+	// Centre: top-left of scaled image = (cx - radius, cy - radius).
+	opts.GeoM.Translate(float64(cx)-float64(radius), float64(cy)-float64(radius))
+	dst.DrawImage(img, &opts)
 }
 
 // drawCell erases the cell's bounding rectangle on canvas with black and
