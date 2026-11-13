@@ -200,6 +200,10 @@ type Game struct {
 	glowShader   *ebiten.Shader
 	cellCount    int // number of live cells currently in the grid
 
+	// hover hint fields
+	hoverCol,      hoverRow      int // cell under cursor (-1 = none)
+	victimHintCol, victimHintRow int // closest-colour neighbour of hovered cell (-1 = none)
+
 	// victim movement animation fields
 	victimFromX, victimFromY float32
 	victimToX, victimToY     float32
@@ -215,14 +219,18 @@ type Game struct {
 // calling this.
 func newGameState(grid *Grid) *Game {
 	return &Game{
-		grid:         grid,
-		currentState: stateWaiting,
-		animStart:    0,
-		actionCol:    -1,
-		actionRow:    -1,
-		cellCount:    grid.Cols * grid.Rows,
-		victimCol:    -1,
-		victimRow:    -1,
+		grid:          grid,
+		currentState:  stateWaiting,
+		animStart:     0,
+		actionCol:     -1,
+		actionRow:     -1,
+		cellCount:     grid.Cols * grid.Rows,
+		hoverCol:      -1,
+		hoverRow:      -1,
+		victimHintCol: -1,
+		victimHintRow: -1,
+		victimCol:     -1,
+		victimRow:     -1,
 	}
 }
 
@@ -378,6 +386,25 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 // Update handles input each tick.
 func (g *Game) Update() error {
 	ebiten.SetWindowTitle(fmt.Sprintf("go2d — cells: %d", g.cellCount))
+
+	// Reset hover every tick; recompute below if conditions are met.
+	g.hoverCol, g.hoverRow = -1, -1
+	g.victimHintCol, g.victimHintRow = -1, -1
+
+	if g.currentState == stateWaiting {
+		mx, my := ebiten.CursorPosition()
+		hc := mx / cellSize
+		hr := my / cellSize
+		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
+			if g.grid.Cells[hc][hr].Health > 0 {
+				g.hoverCol, g.hoverRow = hc, hr
+				nc, nr, found := closestColorNeighbor(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				if found {
+					g.victimHintCol, g.victimHintRow = nc, nr
+				}
+			}
+		}
+	}
 
 	if g.currentState == stateWaiting {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
@@ -604,6 +631,29 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.glowShader = s
 	}
 	screen.Fill(color.Black)
+
+	// Victim hint line — drawn behind circles
+	if g.hoverCol != -1 && g.victimHintCol != -1 {
+		fromX, fromY := cellCenter(g.victimHintCol, g.victimHintRow)
+		toX, toY := cellCenter(g.hoverCol, g.hoverRow)
+		dx := toX - fromX
+		dy := toY - fromY
+		length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+		if length > 0 {
+			ux := dx / length
+			uy := dy / length
+			const dotSpacing = float32(12) // px between dot centres
+			const dotRadius = float32(1.5)
+			// Offset advances at 10 px/sec = 10/60 px per tick
+			rawOff := float64(ebiten.Tick()) * (10.0 / 60.0)
+			offset := float32(math.Mod(rawOff, float64(dotSpacing)))
+			dotCol := color.RGBA{255, 255, 255, 160}
+			for pos := offset; pos < length; pos += dotSpacing {
+				vector.DrawFilledCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
+			}
+		}
+	}
+
 	screen.DrawImage(g.canvas, nil)
 
 	if len(g.moveAnims) > 0 {
