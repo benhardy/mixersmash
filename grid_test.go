@@ -707,6 +707,124 @@ func TestGravityMovesAllHoles(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// scoreForKill
+// ---------------------------------------------------------------------------
+
+// TestScoreForKill verifies the pure scoring function across the full
+// multi-victim matrix.
+//
+// Formula:
+//
+//	N   = len(victimColors)
+//	base       = 5
+//	additional = max(0, N-1) * 20
+//	sameColour = 30 * N  if N>=2 and all victims share the exact same color.RGBA, else 0
+//	targetColour = 40 * M  where M = count of victims whose color == targetColor
+//	total = base + additional + sameColour + targetColour
+func TestScoreForKill(t *testing.T) {
+	red := color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	blue := color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	green := color.RGBA{R: 0, G: 200, B: 0, A: 255}
+	target := red
+
+	cases := []struct {
+		name         string
+		victimColors []color.RGBA
+		targetColor  color.RGBA
+		want         int
+	}{
+		{
+			// N=0: base=5, additional=0, sameColour=0, targetColour=0 → 5
+			name:         "N=0 no victims",
+			victimColors: []color.RGBA{},
+			targetColor:  target,
+			want:         5,
+		},
+		{
+			// N=1 victim != target: base=5, additional=0, sameColour=0, targetColour=0 → 5
+			name:         "N=1 victim colour != target",
+			victimColors: []color.RGBA{blue},
+			targetColor:  target,
+			want:         5,
+		},
+		{
+			// N=1 victim == target: base=5, additional=0, sameColour=0, targetColour=40 → 45
+			name:         "N=1 victim colour == target",
+			victimColors: []color.RGBA{red},
+			targetColor:  target,
+			want:         45,
+		},
+		{
+			// N=2 distinct colours, neither == target: base=5, additional=20, sameColour=0, targetColour=0 → 25
+			name:         "N=2 distinct colours neither == target",
+			victimColors: []color.RGBA{blue, green},
+			targetColor:  target,
+			want:         25,
+		},
+		{
+			// N=3 distinct colours, none == target: base=5, additional=40, sameColour=0, targetColour=0 → 45
+			name:         "N=3 distinct colours none == target",
+			victimColors: []color.RGBA{blue, green, color.RGBA{R: 100, G: 100, B: 100, A: 255}},
+			targetColor:  target,
+			want:         45,
+		},
+		{
+			// N=2 both same colour != target: base=5, additional=20, sameColour=60, targetColour=0 → 85
+			name:         "N=2 both same colour != target",
+			victimColors: []color.RGBA{blue, blue},
+			targetColor:  target,
+			want:         85,
+		},
+		{
+			// N=3 all same colour != target: base=5, additional=40, sameColour=90, targetColour=0 → 135
+			name:         "N=3 all same colour != target",
+			victimColors: []color.RGBA{blue, blue, blue},
+			targetColor:  target,
+			want:         135,
+		},
+		{
+			// N=3 all same colour AND == target: base=5, additional=40, sameColour=90, targetColour=120 → 255
+			name:         "N=3 all same colour and == target (worked example)",
+			victimColors: []color.RGBA{red, red, red},
+			targetColor:  target,
+			want:         255,
+		},
+		{
+			// N=2 same colour, both == target: base=5, additional=20, sameColour=60, targetColour=80 → 165
+			name:         "N=2 same colour both == target",
+			victimColors: []color.RGBA{red, red},
+			targetColor:  target,
+			want:         165,
+		},
+		{
+			// N=3 mixed: two == target, one different, not all-same: base=5, additional=40, sameColour=0, targetColour=80 → 125
+			name:         "N=3 mixed two == target one different not all-same",
+			victimColors: []color.RGBA{red, red, blue},
+			targetColor:  target,
+			want:         125,
+		},
+		{
+			// N=2 distinct, exactly one == target: base=5, additional=20, sameColour=0, targetColour=40 → 65
+			name:         "N=2 distinct exactly one == target",
+			victimColors: []color.RGBA{red, blue},
+			targetColor:  target,
+			want:         65,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := scoreForKill(tc.victimColors, tc.targetColor)
+			if got != tc.want {
+				t.Errorf("scoreForKill(%v, %v) = %d, want %d",
+					tc.victimColors, tc.targetColor, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestClosestColorNeighborSkipsDead verifies that a neighbour with Health==0
 // is not returned even if it would be the closest by colour.
 func TestClosestColorNeighborSkipsDead(t *testing.T) {

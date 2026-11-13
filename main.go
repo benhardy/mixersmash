@@ -227,7 +227,9 @@ type Game struct {
 	actionRow    int        // the row any given action is happening
 	moveAnims    []MoveAnim // used for both shuffle and drop phases
 	glowShader   *ebiten.Shader
-	cellCount    int // number of live cells currently in the grid
+	cellCount    int        // number of live cells currently in the grid
+	score        int        // cumulative score
+	targetColor  color.RGBA // colour of the most recently killed target cell
 
 	// hover hint fields
 	hoverCol, hoverRow int      // cell under cursor (-1 = none)
@@ -243,6 +245,48 @@ type Game struct {
 	targetAnimPeakR  float32
 	targetAnimEndR   float32
 	targetAnimColor  color.RGBA
+}
+
+// scoreForKill returns the points earned for a single kill.
+// victimColors holds the colours of all victims absorbed; targetColor is the
+// colour of the target cell that died.
+//
+// Formula:
+//
+//	N            = len(victimColors)
+//	base         = 5
+//	additional   = max(0, N-1) * 20
+//	sameColour   = 30*N  if N>=2 and all victim colours are the exact same color.RGBA, else 0
+//	targetColour = 40 * M  where M = count of victims whose colour == targetColor
+//	total        = base + additional + sameColour + targetColour
+func scoreForKill(victimColors []color.RGBA, targetColor color.RGBA) int {
+	n := len(victimColors)
+	base := 5
+	additional := 0
+	if n > 1 {
+		additional = (n - 1) * 20
+	}
+	sameColour := 0
+	if n >= 2 {
+		allSame := true
+		for i := 1; i < n; i++ {
+			if victimColors[i] != victimColors[0] {
+				allSame = false
+				break
+			}
+		}
+		if allSame {
+			sameColour = 30 * n
+		}
+	}
+	m := 0
+	for _, c := range victimColors {
+		if c == targetColor {
+			m++
+		}
+	}
+	targetColour := 40 * m
+	return base + additional + sameColour + targetColour
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -502,6 +546,8 @@ func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrl
 // animate into it (transitioning to stateVictimMoving), or falls straight to
 // stateDropping when no victim exists.
 func (g *Game) handleTargetDeath(col, row int, cell *Cell) {
+	// Capture target colour before the cell is cleared.
+	g.targetColor = g.grid.Cells[col][row].Color
 	// Redraw immediately so cell disappears.
 	g.drawCell(col, row, cell, cellSize, 1.0)
 	g.cellCount-- // decrement for the clicked cell
@@ -534,7 +580,8 @@ func (g *Game) handleTargetDeath(col, row int, cell *Cell) {
 		g.animStart = ebiten.Tick()
 		g.currentState = stateVictimMoving
 	} else {
-		// No victim — go straight to drop.
+		// No victim — score the kill and go straight to drop.
+		g.score += scoreForKill(nil, g.targetColor)
 		spawned := g.buildDropAnims([]int{col})
 		if respawnCells {
 			g.cellCount += spawned
@@ -636,7 +683,12 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 func (g *Game) updateVictimMoving() error {
 	t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
 	if t >= 1.0 {
-		// All victims arrived — kill them and trigger drop.
+		// All victims arrived — score the kill, kill them, and trigger drop.
+		victimColors := make([]color.RGBA, len(g.victims))
+		for i, v := range g.victims {
+			victimColors[i] = v.cell.Color
+		}
+		g.score += scoreForKill(victimColors, g.targetColor)
 		colSet := map[int]bool{g.actionCol: true}
 		for _, v := range g.victims {
 			g.grid.Cells[v.col][v.row].Health = 0
@@ -700,7 +752,7 @@ func (g *Game) updateDropping() error {
 
 // Update handles input each tick.
 func (g *Game) Update() error {
-	ebiten.SetWindowTitle(fmt.Sprintf("go2d — cells: %d", g.cellCount))
+	ebiten.SetWindowTitle(fmt.Sprintf("go2d — cells: %d  score: %d", g.cellCount, g.score))
 
 	// Reset hover every tick; recompute below if conditions are met.
 	g.hoverCol, g.hoverRow = -1, -1
