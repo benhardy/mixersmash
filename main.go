@@ -153,9 +153,12 @@ type Cell struct {
 
 // MoveAnim describes the animated movement of a cell from one pixel position to
 // another during shuffle or drop phases. FromX/FromY and ToX/ToY are pixel centres.
+// CtrlX/CtrlY is the quadratic Bézier control point used during shuffle; zero
+// value falls back to straight-line interpolation (used for drops).
 type MoveAnim struct {
 	FromX, FromY float32
 	ToX, ToY     float32
+	CtrlX, CtrlY float32 // quadratic Bézier control point; zero = straight line
 	Cell         Cell
 }
 
@@ -351,7 +354,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 			cell := g.grid.Cells[col][m[1]]
 			fx, fy := cellCenter(col, m[0])
 			tx, ty := cellCenter(col, m[1])
-			g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, cell})
+			g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
 			// Clear the vacated canvas position.
 			x0, y0 := col*cellSize, m[0]*cellSize
 			g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
@@ -364,7 +367,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 				fx := float32(col*cellSize + cellSize/2)
 				fy := float32(-cellSize / 2)
 				tx, ty := cellCenter(col, i)
-				g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, cell})
+				g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
 				// The canvas position for row i was vacated by the moved cell above — already cleared.
 			}
 		}
@@ -491,7 +494,25 @@ func (g *Game) Update() error {
 					dst := aliveNeighbors[perm[i]]
 					fx, fy := cellCenter(src.col, src.row)
 					tx, ty := cellCenter(dst[0], dst[1])
-					anims[i] = MoveAnim{fx, fy, tx, ty, src.cell}
+					dx := tx - fx
+					dy := ty - fy
+					dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+					var ctrlX, ctrlY float32
+					if dist > 0 {
+						pX := -dy / dist
+						pY := dx / dist
+						sign := float32(1)
+						if rand.Intn(2) == 0 {
+							sign = -1
+						}
+						offset := sign * dist * (0.3 + rand.Float32()*0.7)
+						ctrlX = (fx+tx)*0.5 + pX*offset
+						ctrlY = (fy+ty)*0.5 + pY*offset
+					} else {
+						ctrlX = fx
+						ctrlY = fy
+					}
+					anims[i] = MoveAnim{fx, fy, tx, ty, ctrlX, ctrlY, src.cell}
 				}
 
 				// Clear source positions on canvas.
@@ -597,13 +618,25 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		maxR := float32(cellSize/2 - 2)
 		for _, anim := range g.moveAnims {
-			// Use quadratic ease-in for drop (gravity), linear for shuffle
-			posT := t
-			if g.currentState == stateDropping {
-				posT = t * t
+			var cx, cy float32
+			if g.currentState == stateShuffling {
+				// Quadratic ease-in-out
+				var et float32
+				if t < 0.5 {
+					et = 2 * t * t
+				} else {
+					et = 1 - 2*(1-t)*(1-t)
+				}
+				// Quadratic Bézier with eased t
+				u := 1 - et
+				cx = u*u*anim.FromX + 2*u*et*anim.CtrlX + et*et*anim.ToX
+				cy = u*u*anim.FromY + 2*u*et*anim.CtrlY + et*et*anim.ToY
+			} else {
+				// Drop: quadratic ease-in (gravity), straight line
+				posT := t * t
+				cx = anim.FromX + posT*(anim.ToX-anim.FromX)
+				cy = anim.FromY + posT*(anim.ToY-anim.FromY)
 			}
-			cx := anim.FromX + posT*(anim.ToX-anim.FromX)
-			cy := anim.FromY + posT*(anim.ToY-anim.FromY)
 			r := maxR * anim.Cell.Health
 			if r > 0 {
 				vector.DrawFilledCircle(screen, cx, cy, r, anim.Cell.Color, true)
