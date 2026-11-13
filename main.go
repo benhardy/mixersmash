@@ -5,6 +5,7 @@ import (
     "image"
     "image/color"
     "log"
+    "math"
     "math/rand"
 
     "github.com/hajimehoshi/ebiten/v2"
@@ -19,12 +20,14 @@ const (
     gridCols     = windowWidth / cellSize  // 25
     gridRows     = windowHeight / cellSize // 18
 
-    stateWaiting   = 1
-    stateShuffling = 2
-    stateDropping  = 3
+    stateWaiting      = 1
+    stateShuffling    = 2
+    stateDropping     = 3
+    stateVictimMoving = 4
 
-    shuffleTicks = 18 // 0.3s at 60tps
-    dropTicks    = 18 // 0.3s at 60tps
+    shuffleTicks = 18            // 0.3s at 60tps
+    dropTicks    = 18            // 0.3s at 60tps
+    victimTicks  = int64(24)     // 0.4s at 60tps
 
     healthDecrement = float32(0.2)
     healthMin       = float32(0.2)
@@ -193,6 +196,15 @@ type Game struct {
     moveAnims    []MoveAnim // used for both shuffle and drop phases
     glowShader   *ebiten.Shader
     cellCount    int        // number of live cells currently in the grid
+
+    // victim movement animation fields
+    victimFromX, victimFromY float32
+    victimToX,   victimToY   float32
+    victimCell               Cell
+    victimPathType           int     // 0=straight, 1=arc, 2=spiral
+    victimCtrlX, victimCtrlY float32 // Bezier control point for arc
+    victimSpiralTurns        float32 // signed: positive=CCW, negative=CW
+    victimCol,   victimRow   int     // victim's original grid position
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -206,6 +218,8 @@ func newGameState(grid *Grid) *Game {
         actionCol:    -1,
         actionRow:    -1,
         cellCount:    grid.Cols * grid.Rows,
+        victimCol:    -1,
+        victimRow:    -1,
     }
 }
 
@@ -389,24 +403,62 @@ func (g *Game) Update() error {
 
             if cell.Health <= 0 {
                 // DEATH PATH
-                affectedCols := []int{col}
                 g.cellCount-- // decrement for the clicked cell
                 ncol, nrow, found := closestColorNeighbor(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
                 if found {
-                    g.grid.Cells[ncol][nrow].Health = 0
-                    g.drawCell(ncol, nrow, &g.grid.Cells[ncol][nrow], cellSize, 1.0)
-                    g.cellCount-- // decrement for the killed neighbour
-                    // Track the neighbor's column too if different.
-                    if ncol != col {
-                        affectedCols = append(affectedCols, ncol)
+                    // Set up victim animation — do NOT kill victim or call buildDropAnims yet.
+                    g.victimCol, g.victimRow = ncol, nrow
+                    g.victimCell = g.grid.Cells[ncol][nrow] // snapshot before any change
+                    g.victimFromX, g.victimFromY = cellCenter(ncol, nrow)
+                    g.victimToX, g.victimToY = cellCenter(col, row)
+
+                    // Choose random path type.
+                    g.victimPathType = rand.Intn(3)
+                    dx := g.victimToX - g.victimFromX
+                    dy := g.victimToY - g.victimFromY
+                    dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+
+                    if g.victimPathType == 1 { // Bezier arc: control point perpendicular to the line
+                        midX := (g.victimFromX + g.victimToX) * 0.5
+                        midY := (g.victimFromY + g.victimToY) * 0.5
+                        var pX, pY float32
+                        if dist > 0 {
+                            pX = -dy / dist
+                            pY = dx / dist
+                        }
+                        sign := float32(1)
+                        if rand.Intn(2) == 0 {
+                            sign = -1
+                        }
+                        offset := sign * dist * (0.5 + rand.Float32()*1.0)
+                        g.victimCtrlX = midX + pX*offset
+                        g.victimCtrlY = midY + pY*offset
+                    }
+                    if g.victimPathType == 2 { // logarithmic spiral
+                        turns := float32(0.5 + rand.Float32()*1.0) // 0.5–1.5 turns
+                        if rand.Intn(2) == 0 {
+                            turns = -turns
+                        }
+                        g.victimSpiralTurns = turns
+                    }
+
+                    // Clear victim's canvas position (it is now an overlay animation).
+                    x0, y0 := ncol*cellSize, nrow*cellSize
+                    g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+
+                    g.animStart = ebiten.Tick()
+                    g.currentState = stateVictimMoving
+                } else {
+                    // No victim — go straight to drop.
+                    spawned := g.buildDropAnims([]int{col})
+                    if respawnCells {
+                        g.cellCount += spawned
+                    }
+                    if len(g.moveAnims) > 0 {
+                        g.animStart = ebiten.Tick()
+                        g.currentState = stateDropping
                     }
                 }
-                spawned := g.buildDropAnims(affectedCols)
-                if respawnCells {
-                    g.cellCount += spawned
-                }
-                g.currentState = stateDropping
-                g.animStart = ebiten.Tick()
             } else {
                 // SURVIVAL PATH — shuffle alive neighbours only
                 neighbors := eightNeighbors(col, row, g.grid.Cols, g.grid.Rows)
@@ -456,6 +508,30 @@ func (g *Game) Update() error {
                 g.moveAnims = anims
                 g.currentState = stateShuffling
                 g.animStart = ebiten.Tick()
+            }
+        }
+        return nil
+    }
+
+    if g.currentState == stateVictimMoving {
+        t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
+        if t >= 1.0 {
+            // Victim arrived — kill it and trigger drop.
+            g.grid.Cells[g.victimCol][g.victimRow].Health = 0
+            g.cellCount--
+            affectedCols := []int{g.actionCol}
+            if g.victimCol != g.actionCol {
+                affectedCols = append(affectedCols, g.victimCol)
+            }
+            spawned := g.buildDropAnims(affectedCols)
+            if respawnCells {
+                g.cellCount += spawned
+            }
+            if len(g.moveAnims) > 0 {
+                g.animStart = ebiten.Tick()
+                g.currentState = stateDropping
+            } else {
+                g.currentState = stateWaiting
             }
         }
         return nil
@@ -527,6 +603,38 @@ func (g *Game) Draw(screen *ebiten.Image) {
             if r > 0 {
                 vector.DrawFilledCircle(screen, cx, cy, r, anim.Cell.Color, true)
             }
+        }
+    }
+
+    if g.currentState == stateVictimMoving {
+        t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
+        if t > 1.0 {
+            t = 1.0
+        }
+
+        var cx, cy float32
+        switch g.victimPathType {
+        case 0: // straight line
+            cx = g.victimFromX + t*(g.victimToX-g.victimFromX)
+            cy = g.victimFromY + t*(g.victimToY-g.victimFromY)
+        case 1: // quadratic Bezier arc
+            u := float32(1) - t
+            cx = u*u*g.victimFromX + 2*u*t*g.victimCtrlX + t*t*g.victimToX
+            cy = u*u*g.victimFromY + 2*u*t*g.victimCtrlY + t*t*g.victimToY
+        case 2: // inward spiral (radius shrinks, angle rotates)
+            ddx := g.victimFromX - g.victimToX
+            ddy := g.victimFromY - g.victimToY
+            r0 := float32(math.Sqrt(float64(ddx*ddx + ddy*ddy)))
+            theta0 := float32(math.Atan2(float64(ddy), float64(ddx)))
+            r := r0 * (1 - t)
+            theta := theta0 + g.victimSpiralTurns*2*float32(math.Pi)*t
+            cx = g.victimToX + r*float32(math.Cos(float64(theta)))
+            cy = g.victimToY + r*float32(math.Sin(float64(theta)))
+        }
+
+        radius := float32(cellSize/2-2) * g.victimCell.Health * (1 - t)
+        if radius > 0 {
+            vector.DrawFilledCircle(screen, cx, cy, radius, g.victimCell.Color, true)
         }
     }
 }
