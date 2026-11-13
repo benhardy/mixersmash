@@ -938,7 +938,7 @@ func TestCreaturePaletteRequiredNames(t *testing.T) {
 // darkerShade
 // ---------------------------------------------------------------------------
 
-// TestDarkerShade verifies the floor(channel*0.65) formula and that alpha is
+// TestDarkerShade verifies the floor(channel*0.35) formula and that alpha is
 // always forced to 255 regardless of input alpha.
 func TestDarkerShade(t *testing.T) {
 	cases := []struct {
@@ -949,12 +949,12 @@ func TestDarkerShade(t *testing.T) {
 		{
 			name:  "mixed channels",
 			input: color.RGBA{R: 200, G: 100, B: 50, A: 255},
-			want:  color.RGBA{R: 130, G: 65, B: 32, A: 255},
+			want:  color.RGBA{R: 70, G: 35, B: 17, A: 255},
 		},
 		{
 			name:  "all 255",
 			input: color.RGBA{R: 255, G: 255, B: 255, A: 255},
-			want:  color.RGBA{R: 165, G: 165, B: 165, A: 255},
+			want:  color.RGBA{R: 89, G: 89, B: 89, A: 255},
 		},
 		{
 			name:  "all zero",
@@ -964,7 +964,7 @@ func TestDarkerShade(t *testing.T) {
 		{
 			name:  "alpha forced to 255 when input alpha differs",
 			input: color.RGBA{R: 200, G: 100, B: 50, A: 100},
-			want:  color.RGBA{R: 130, G: 65, B: 32, A: 255},
+			want:  color.RGBA{R: 70, G: 35, B: 17, A: 255},
 		},
 	}
 	for _, tc := range cases {

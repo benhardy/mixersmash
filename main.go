@@ -54,6 +54,41 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 }
 `
 
+// gelShaderSrc is a Kage fragment shader that renders an Aqua-style gel body.
+// srcPos is in pixel coordinates (0,0)→(Size.x,Size.y) because of //kage:unit pixels.
+// Output is premultiplied RGBA.
+const gelShaderSrc = `//kage:unit pixels
+package main
+
+var Size vec2
+var BaseColor vec3
+var Hover float
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+    center := Size * 0.5
+    radius := min(center.x, center.y)
+    p := (srcPos - center) / radius
+    dist := length(p)
+    pixelWidth := 1.5 / radius
+    alpha := 1.0 - smoothstep(1.0-pixelWidth, 1.0, dist)
+    if alpha <= 0.0 { return vec4(0.0) }
+    t := clamp((p.y+1.0)*0.5, 0.0, 1.0)
+    topColor := BaseColor * 0.35
+    bottomColor := mix(BaseColor, vec3(1.0), 0.35)
+    col := mix(topColor, bottomColor, pow(t, 1.3))
+    bottomGlow := smoothstep(0.1, 0.95, p.y) * (1.0 - smoothstep(0.65, 1.0, dist))
+    col += mix(BaseColor, vec3(1.0), 0.65) * bottomGlow * (0.55 + Hover*0.2)
+    glossP := vec2(p.x*1.18, (p.y+0.44)*1.85)
+    glossDist := length(glossP)
+    glossMask := 1.0 - smoothstep(0.72, 0.78, glossDist)
+    glossFade := clamp(1.0-(p.y+0.92)*1.15, 0.0, 1.0)
+    col = mix(col, vec3(1.0), glossMask*glossFade*0.85)
+    rim := smoothstep(0.90, 0.98, dist) * (1.0 - smoothstep(0.98, 1.0, dist))
+    col += mix(BaseColor, vec3(1.0), 0.5) * rim * 0.45
+    return vec4(col*alpha, alpha)
+}
+`
+
 // colorDistanceRedmean returns a perceptually-weighted colour distance using the
 // "redmean" approximation, which adapts RGB channel weights based on average redness.
 func colorDistanceRedmean(a, b color.RGBA) float32 {
@@ -228,6 +263,7 @@ type Game struct {
 	actionRow    int        // the row any given action is happening
 	moveAnims    []MoveAnim // used for both shuffle and drop phases
 	glowShader   *ebiten.Shader
+	gelShader    *ebiten.Shader
 	cellCount    int        // number of live cells currently in the grid
 	score        int        // cumulative score
 	targetColor  color.RGBA // colour of the most recently killed target cell
@@ -331,11 +367,19 @@ func cellCenter(col, row int) (float32, float32) {
 const compositeSpriteRefSize = 120
 
 // compositeCachedSprite returns a pre-rendered composite *ebiten.Image for clr,
-// building and caching it on first call.  The image is a full opaque square
-// filled with clr, with the creature glyph drawn centred in a darker tint,
-// then an antialiased circular mask applied (antialias=true) so edge pixels
-// carry partial alpha for a smooth circle boundary.  Returns nil if the font
-// is not loaded or no glyph is mapped to clr.
+// building and caching it on first call.  The image carries a circa-2003 Apple
+// Aqua jelly-button look rendered via the gel fragment shader:
+//
+//  1. Gel body — rendered by gelShaderSrc via DrawRectShader (BlendSourceOver).
+//     The shader owns the circular edge (soft antialiased rim); no separate
+//     mask is applied to the body.
+//  2. Creature glyph, tinted darkerShade(clr), clipped to the circle.
+//     The glyph is drawn into a temp image, masked with a filled-circle
+//     BlendDestinationIn pass, then composited over the body with
+//     BlendSourceOver.  This keeps the shader's smooth rim intact.
+//
+// Returns nil if the gel shader could not be compiled, the font is not loaded,
+// or no glyph is mapped to clr.
 func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 	if g.glyphFont == nil {
 		return nil
@@ -351,36 +395,72 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 		return img
 	}
 
+	// Compile the gel shader once per game instance (lazy, mirrors glowShader).
+	if g.gelShader == nil {
+		s, err := ebiten.NewShader([]byte(gelShaderSrc))
+		if err != nil {
+			log.Printf("gel shader compile error: %v", err)
+			return nil
+		}
+		g.gelShader = s
+	}
+
 	const sz = compositeSpriteRefSize
 	const half = float32(sz) / 2
 
-	// Step 1: fill the entire square with the base colour (fully opaque).
 	composite := ebiten.NewImage(sz, sz)
-	composite.Fill(clr)
 
-	// Step 2: draw the creature glyph centred, tinted to darkerShade(clr).
-	size := float64(sz) * 0.75 // glyph occupies ~75% of the square
+	// ------------------------------------------------------------------ //
+	// Layer 1: gel body via fragment shader.
+	// DrawRectShader with //kage:unit pixels: srcPos runs (0,0)→(sz,sz).
+	// Size uniform = {sz, sz} so the shader computes center = Size*0.5 = {half,half}.
+	// BaseColor is normalised to [0,1]. Hover = 0 for the baked sprite.
+	// The shader already returns premultiplied vec4(col*alpha, alpha) and
+	// produces a smooth antialiased circular rim — no additional mask needed
+	// on the body.
+	// ------------------------------------------------------------------ //
+	var gelOpts ebiten.DrawRectShaderOptions
+	gelOpts.Blend = ebiten.BlendSourceOver
+	gelOpts.Uniforms = map[string]any{
+		"Size":      []float32{float32(sz), float32(sz)},
+		"BaseColor": []float32{float32(clr.R) / 255.0, float32(clr.G) / 255.0, float32(clr.B) / 255.0},
+		"Hover":     float32(0),
+	}
+	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
+
+	// ------------------------------------------------------------------ //
+	// Layer 2: creature glyph, tinted darkerShade(clr), clipped to circle.
+	// Draw the glyph into a temp image, apply a filled-circle
+	// BlendDestinationIn mask so wide glyphs (e.g. octopus) are clipped,
+	// then composite the result over the shader body with BlendSourceOver.
+	// The body's smooth shader rim is not touched by this pass.
+	// ------------------------------------------------------------------ //
+	glyphImg := ebiten.NewImage(sz, sz)
+	glyphSize := float64(sz) * 0.75
 	face := &text.GoTextFace{
 		Source: g.glyphFont,
-		Size:   size,
+		Size:   glyphSize,
 	}
 	str := string(glyph)
 	w, h := text.Measure(str, face, 0)
 	tint := darkerShade(clr)
 	var drawOpts text.DrawOptions
 	drawOpts.ColorScale.ScaleWithColor(tint)
-	drawOpts.GeoM.Translate(float64(half)-w/2, float64(half)-h/2)
-	text.Draw(composite, str, face, &drawOpts)
+	nudgeY := float64(sz) * 0.03
+	drawOpts.GeoM.Translate(float64(half)-w/2, float64(half)-h/2+nudgeY)
+	text.Draw(glyphImg, str, face, &drawOpts)
 
-	// Step 3 (final): apply an antialiased circular mask using
-	// destination-in compositing.  antialias=true gives edge pixels partial
-	// alpha (CPU-side soft path), so the circle boundary is genuinely smooth
-	// at the sprite's native resolution before any scaling.
+	// Clip the glyph image to the circle.
 	maskImg := ebiten.NewImage(sz, sz)
 	vector.DrawFilledCircle(maskImg, half, half, half-1, color.White, true)
 	var maskOpts ebiten.DrawImageOptions
 	maskOpts.Blend = ebiten.BlendDestinationIn
-	composite.DrawImage(maskImg, &maskOpts)
+	glyphImg.DrawImage(maskImg, &maskOpts)
+
+	// Composite clipped glyph over the gel body.
+	var glyphOpts ebiten.DrawImageOptions
+	glyphOpts.Blend = ebiten.BlendSourceOver
+	composite.DrawImage(glyphImg, &glyphOpts)
 
 	g.glyphCache[clr] = composite
 	return composite
