@@ -325,15 +325,19 @@ func cellCenter(col, row int) (float32, float32) {
 	return float32(col*cellSize + cellSize/2), float32(row*cellSize + cellSize/2)
 }
 
-// glyphCacheRefSize is the side length (pixels) of the square offscreen image
-// used to pre-render each glyph at 2× super-sample resolution.
-// maxR = cellSize/2 - 2 = 30; diameter = 60; 2× = 120.
-const glyphCacheRefSize = 120
+// compositeSpriteRefSize is the side length (pixels) of the square offscreen
+// image used to pre-render each composite creature sprite at 2× super-sample
+// resolution.  maxR = cellSize/2 - 2 = 30; diameter = 60; 2× = 120.
+const compositeSpriteRefSize = 120
 
-// glyphCachedImage returns a pre-rendered, circle-clipped *ebiten.Image for clr,
-// building and caching it on first call.  Returns nil if the font is not loaded
-// or no glyph is mapped to clr.
-func (g *Game) glyphCachedImage(clr color.RGBA) *ebiten.Image {
+// compositeCachedSprite returns a pre-rendered composite *ebiten.Image for clr,
+// building and caching it on first call.  The image is a full opaque square
+// filled with clr, with the creature glyph drawn centred in a darker tint,
+// then a hard circular mask applied so corners become fully transparent.
+// When blitted at scale (diameter/120), the 2× linear downscale produces a
+// smooth antialiased circle edge.  Returns nil if the font is not loaded or
+// no glyph is mapped to clr.
+func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 	if g.glyphFont == nil {
 		return nil
 	}
@@ -348,11 +352,14 @@ func (g *Game) glyphCachedImage(clr color.RGBA) *ebiten.Image {
 		return img
 	}
 
-	const sz = glyphCacheRefSize
+	const sz = compositeSpriteRefSize
 	const half = float32(sz) / 2
 
-	// Step 1: render tinted glyph into an offscreen image.
-	glyphImg := ebiten.NewImage(sz, sz)
+	// Step 1: fill the entire square with the base colour (fully opaque).
+	composite := ebiten.NewImage(sz, sz)
+	composite.Fill(clr)
+
+	// Step 2: draw the creature glyph centred, tinted to darkerShade(clr).
 	size := float64(sz) * 0.75 // glyph occupies ~75% of the square
 	face := &text.GoTextFace{
 		Source: g.glyphFont,
@@ -364,42 +371,39 @@ func (g *Game) glyphCachedImage(clr color.RGBA) *ebiten.Image {
 	var drawOpts text.DrawOptions
 	drawOpts.ColorScale.ScaleWithColor(tint)
 	drawOpts.GeoM.Translate(float64(half)-w/2, float64(half)-h/2)
-	text.Draw(glyphImg, str, face, &drawOpts)
+	text.Draw(composite, str, face, &drawOpts)
 
-	// Step 2: build a circular mask (white circle, transparent outside).
-	// Use antialias=false to avoid the stencil-buffer callback path, and inset
-	// the radius by 1 px so no glyph pixel leaks past the drawn circle edge when
-	// the cached image is scaled down at draw time.
+	// Step 3 (final): apply an antialiased circular mask using
+	// destination-in compositing.  The mask is a hard white circle with the
+	// radius inset by 1 px; corners become fully transparent.  The smooth
+	// on-screen edge comes from the 2× linear downscale at blit time.
 	maskImg := ebiten.NewImage(sz, sz)
 	vector.DrawFilledCircle(maskImg, half, half, half-1, color.White, false)
-
-	// Step 3: apply the mask to the glyph image using destination-in compositing:
-	// keeps destination (glyph) pixels where source (mask) alpha > 0, clips the rest.
 	var maskOpts ebiten.DrawImageOptions
 	maskOpts.Blend = ebiten.BlendDestinationIn
-	glyphImg.DrawImage(maskImg, &maskOpts)
+	composite.DrawImage(maskImg, &maskOpts)
 
-	g.glyphCache[clr] = glyphImg
-	return glyphImg
+	g.glyphCache[clr] = composite
+	return composite
 }
 
-// drawGlyph draws the pre-rendered, circle-clipped glyph for clr centred at
-// (cx, cy) scaled to fit within radius.  Does nothing if the font is not loaded
-// or no glyph is mapped to clr.
-func (g *Game) drawGlyph(dst *ebiten.Image, cx, cy, radius float32, clr color.RGBA) {
+// drawCompositeSprite blits the pre-rendered composite creature sprite for clr
+// centred at (cx, cy) scaled so its inscribed circle matches radius.  Does
+// nothing if radius < 1, the font is not loaded, or no glyph is mapped to clr.
+func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, clr color.RGBA) {
 	if radius < 1 {
 		return
 	}
-	img := g.glyphCachedImage(clr)
+	img := g.compositeCachedSprite(clr)
 	if img == nil {
 		return
 	}
-	// Scale the reference image (glyphCacheRefSize × glyphCacheRefSize) so that
-	// its inscribed circle matches the requested radius.
-	scale := float64(radius*2) / float64(glyphCacheRefSize)
+	// Scale so the sprite's inscribed circle (diameter = compositeSpriteRefSize)
+	// matches the requested radius.
+	scale := float64(radius*2) / float64(compositeSpriteRefSize)
 	var opts ebiten.DrawImageOptions
 	opts.GeoM.Scale(scale, scale)
-	// Centre: top-left of scaled image = (cx - radius, cy - radius).
+	// Top-left of the scaled image: (cx - radius, cy - radius).
 	opts.GeoM.Translate(float64(cx)-float64(radius), float64(cy)-float64(radius))
 	dst.DrawImage(img, &opts)
 }
@@ -424,8 +428,7 @@ func (g *Game) drawCell(col, row int, cell *Cell, cs int, cellFullness float32) 
 	maxRadius := halfCs - 2
 	radius := maxRadius * cellFullness * cell.Health
 	clr := cell.Color
-	vector.DrawFilledCircle(g.canvas, cx, cy, radius, clr, true)
-	g.drawGlyph(g.canvas, cx, cy, radius, clr)
+	g.drawCompositeSprite(g.canvas, cx, cy, radius, clr)
 }
 
 // gravityMoves returns the [oldRow, newRow] mapping for cells in a column of numRows
@@ -938,8 +941,7 @@ func (g *Game) drawTargetBounce(screen *ebiten.Image) {
 	}
 	cx, cy := cellCenter(g.actionCol, g.actionRow)
 	if r > 0 {
-		vector.DrawFilledCircle(screen, cx, cy, r, g.targetAnimColor, true)
-		g.drawGlyph(screen, cx, cy, r, g.targetAnimColor)
+		g.drawCompositeSprite(screen, cx, cy, r, g.targetAnimColor)
 	}
 }
 
@@ -978,8 +980,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			r := maxR * anim.Cell.Health
 			if r > 0 {
-				vector.DrawFilledCircle(screen, cx, cy, r, anim.Cell.Color, true)
-				g.drawGlyph(screen, cx, cy, r, anim.Cell.Color)
+				g.drawCompositeSprite(screen, cx, cy, r, anim.Cell.Color)
 			}
 		}
 	}
@@ -1011,8 +1012,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			radius := float32(cellSize/2-2) * v.cell.Health * (1 - t)
 			if radius > 0 {
-				vector.DrawFilledCircle(screen, cx, cy, radius, v.cell.Color, true)
-				g.drawGlyph(screen, cx, cy, radius, v.cell.Color)
+				g.drawCompositeSprite(screen, cx, cy, radius, v.cell.Color)
 			}
 		}
 	}
