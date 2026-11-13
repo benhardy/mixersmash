@@ -56,13 +56,13 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 // colorDistanceRedmean returns a perceptually-weighted colour distance using the
 // "redmean" approximation, which adapts RGB channel weights based on average redness.
 func colorDistanceRedmean(a, b color.RGBA) float32 {
-    rBar := (float32(a.R) + float32(b.R)) / 2
-    dR := float32(a.R) - float32(b.R)
-    dG := float32(a.G) - float32(b.G)
-    dB := float32(a.B) - float32(b.B)
-    return float32(math.Sqrt(float64(
-        (2+rBar/256)*dR*dR + 4*dG*dG + (2+(255-rBar)/256)*dB*dB,
-    )))
+	rBar := (float32(a.R) + float32(b.R)) / 2
+	dR := float32(a.R) - float32(b.R)
+	dG := float32(a.G) - float32(b.G)
+	dB := float32(a.B) - float32(b.B)
+	return float32(math.Sqrt(float64(
+		(2+rBar/256)*dR*dR + 4*dG*dG + (2+(255-rBar)/256)*dB*dB,
+	)))
 }
 
 // randomColor returns a random opaque colour (A=255).
@@ -190,7 +190,7 @@ type Game struct {
 	cellCount    int // number of live cells currently in the grid
 
 	// hover hint fields
-	hoverCol,      hoverRow      int // cell under cursor (-1 = none)
+	hoverCol, hoverRow           int // cell under cursor (-1 = none)
 	victimHintCol, victimHintRow int // closest-colour neighbour of hovered cell (-1 = none)
 
 	// victim movement animation fields
@@ -216,11 +216,11 @@ type Game struct {
 // calling this.
 func newGameState(grid *Grid) *Game {
 	return &Game{
-		grid:          grid,
-		currentState:  stateWaiting,
-		animStart:     0,
-		actionCol:     -1,
-		actionRow:     -1,
+		grid:            grid,
+		currentState:    stateWaiting,
+		animStart:       0,
+		actionCol:       -1,
+		actionRow:       -1,
 		cellCount:       grid.Cols * grid.Rows,
 		hoverCol:        -1,
 		hoverRow:        -1,
@@ -381,6 +381,250 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 	return spawned
 }
 
+// updateWaiting handles hover recompute and click processing while in stateWaiting.
+func (g *Game) updateWaiting() error {
+	// Hover recompute.
+	mx, my := ebiten.CursorPosition()
+	hc := mx / cellSize
+	hr := my / cellSize
+	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
+		if g.grid.Cells[hc][hr].Health > 0 {
+			g.hoverCol, g.hoverRow = hc, hr
+			nc, nr, found := closestColorNeighbor(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+			if found {
+				g.victimHintCol, g.victimHintRow = nc, nr
+			}
+		}
+	}
+
+	// Click handling.
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		px, py := ebiten.CursorPosition()
+		col, row := cellFromPixel(px, py, cellSize)
+		if col < 0 || col >= g.grid.Cols || row < 0 || row >= g.grid.Rows {
+			return nil
+		}
+		cell := &g.grid.Cells[col][row]
+		if cell.Health <= 0 {
+			return nil
+		}
+
+		oldHealth := cell.Health
+		cell.Health -= healthDecrement
+		if cell.Health <= healthMin {
+			cell.Health = 0
+		}
+		if cell.Health < healthEpsilon {
+			cell.Health = 0.0
+		}
+
+		g.actionCol = col
+		g.actionRow = row
+
+		if cell.Health <= 0 {
+			// DEATH PATH — redraw immediately so cell disappears.
+			g.drawCell(col, row, cell, cellSize, 1.0)
+			g.cellCount-- // decrement for the clicked cell
+			ncol, nrow, found := closestColorNeighbor(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
+			if found {
+				// Set up victim animation — do NOT kill victim or call buildDropAnims yet.
+				g.victimCol, g.victimRow = ncol, nrow
+				g.victimCell = g.grid.Cells[ncol][nrow] // snapshot before any change
+				g.victimFromX, g.victimFromY = cellCenter(ncol, nrow)
+				g.victimToX, g.victimToY = cellCenter(col, row)
+
+				// Choose random path type.
+				g.victimPathType = rand.Intn(3)
+				dx := g.victimToX - g.victimFromX
+				dy := g.victimToY - g.victimFromY
+				dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+
+				if g.victimPathType == 1 { // Bezier arc: control point perpendicular to the line
+					midX := (g.victimFromX + g.victimToX) * 0.5
+					midY := (g.victimFromY + g.victimToY) * 0.5
+					var pX, pY float32
+					if dist > 0 {
+						pX = -dy / dist
+						pY = dx / dist
+					}
+					sign := float32(1)
+					if rand.Intn(2) == 0 {
+						sign = -1
+					}
+					offset := sign * dist * (0.5 + rand.Float32()*1.0)
+					g.victimCtrlX = midX + pX*offset
+					g.victimCtrlY = midY + pY*offset
+				}
+				if g.victimPathType == 2 { // logarithmic spiral
+					turns := float32(0.5 + rand.Float32()*1.0) // 0.5–1.5 turns
+					if rand.Intn(2) == 0 {
+						turns = -turns
+					}
+					g.victimSpiralTurns = turns
+				}
+
+				// Clear victim's canvas position (it is now an overlay animation).
+				x0, y0 := ncol*cellSize, nrow*cellSize
+				g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+
+				g.animStart = ebiten.Tick()
+				g.currentState = stateVictimMoving
+			} else {
+				// No victim — go straight to drop.
+				spawned := g.buildDropAnims([]int{col})
+				if respawnCells {
+					g.cellCount += spawned
+				}
+				if len(g.moveAnims) > 0 {
+					g.animStart = ebiten.Tick()
+					g.currentState = stateDropping
+				}
+			}
+		} else {
+			// SURVIVAL PATH — shuffle alive neighbours, then set up bounce animation.
+			neighbors := eightNeighbors(col, row, g.grid.Cols, g.grid.Rows)
+			// Only shuffle alive cells — empty slots stay put.
+			var aliveNeighbors [][2]int
+			for _, n := range neighbors {
+				if g.grid.Cells[n[0]][n[1]].Health > 0 {
+					aliveNeighbors = append(aliveNeighbors, n)
+				}
+			}
+			if len(aliveNeighbors) == 0 {
+				return nil
+			}
+
+			// Set up bounce animation now that we know a shuffle will proceed.
+			maxR := float32(cellSize/2 - 2)
+			x0, y0 := col*cellSize, row*cellSize
+			g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+			g.targetAnimating = true
+			g.targetAnimStart = ebiten.Tick()
+			g.targetAnimStartR = maxR * oldHealth
+			g.targetAnimPeakR = maxR * oldHealth * 1.1
+			g.targetAnimEndR = maxR * cell.Health
+			g.targetAnimColor = g.grid.Cells[col][row].Color
+			perm := rand.Perm(len(aliveNeighbors))
+
+			// Collect neighbour cells before rearranging.
+			type neighborCell struct {
+				col, row int
+				cell     Cell
+			}
+			orig := make([]neighborCell, len(aliveNeighbors))
+			for i, n := range aliveNeighbors {
+				orig[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
+			}
+
+			// Build MoveAnims: aliveNeighbor i moves to position perm[i].
+			anims := make([]MoveAnim, len(aliveNeighbors))
+			for i := range aliveNeighbors {
+				src := orig[i]
+				dst := aliveNeighbors[perm[i]]
+				fx, fy := cellCenter(src.col, src.row)
+				tx, ty := cellCenter(dst[0], dst[1])
+				dx := tx - fx
+				dy := ty - fy
+				dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+				var ctrlX, ctrlY float32
+				if dist > 0 {
+					pX := -dy / dist
+					pY := dx / dist
+					sign := float32(1)
+					if rand.Intn(2) == 0 {
+						sign = -1
+					}
+					offset := sign * dist * (0.3 + rand.Float32()*0.7)
+					ctrlX = (fx+tx)*0.5 + pX*offset
+					ctrlY = (fy+ty)*0.5 + pY*offset
+				} else {
+					ctrlX = fx
+					ctrlY = fy
+				}
+				anims[i] = MoveAnim{fx, fy, tx, ty, ctrlX, ctrlY, src.cell}
+			}
+
+			// Clear source positions on canvas.
+			for _, n := range aliveNeighbors {
+				g.canvas.SubImage(image.Rect(n[0]*cellSize, n[1]*cellSize, (n[0]+1)*cellSize, (n[1]+1)*cellSize)).(*ebiten.Image).Clear()
+			}
+
+			// Write cells to their permuted destinations in the grid.
+			for i := range aliveNeighbors {
+				dst := aliveNeighbors[perm[i]]
+				g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
+			}
+
+			g.moveAnims = anims
+			g.currentState = stateShuffling
+			g.animStart = ebiten.Tick()
+		}
+	}
+	return nil
+}
+
+// updateVictimMoving advances the victim movement animation and transitions to
+// stateDropping (or stateWaiting) when the animation completes.
+func (g *Game) updateVictimMoving() error {
+	t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
+	if t >= 1.0 {
+		// Victim arrived — kill it and trigger drop.
+		g.grid.Cells[g.victimCol][g.victimRow].Health = 0
+		g.cellCount--
+		affectedCols := []int{g.actionCol}
+		if g.victimCol != g.actionCol {
+			affectedCols = append(affectedCols, g.victimCol)
+		}
+		spawned := g.buildDropAnims(affectedCols)
+		if respawnCells {
+			g.cellCount += spawned
+		}
+		if len(g.moveAnims) > 0 {
+			g.animStart = ebiten.Tick()
+			g.currentState = stateDropping
+		} else {
+			g.currentState = stateWaiting
+		}
+	}
+	return nil
+}
+
+// updateShuffling waits for the shuffle animation to complete, then commits
+// final cell positions and returns to stateWaiting.
+func (g *Game) updateShuffling() error {
+	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, shuffleTicks)
+	if elapsed >= 1.0 {
+		for _, anim := range g.moveAnims {
+			col := int(anim.ToX) / cellSize
+			row := int(anim.ToY) / cellSize
+			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
+				g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
+			}
+		}
+		g.moveAnims = nil
+		g.currentState = stateWaiting
+	}
+	return nil
+}
+
+// updateDropping waits for the drop animation to complete, then commits final
+// cell positions and returns to stateWaiting.
+func (g *Game) updateDropping() error {
+	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, dropTicks)
+	if elapsed >= 1.0 {
+		for _, anim := range g.moveAnims {
+			col := int(anim.ToX) / cellSize
+			row := int(anim.ToY) / cellSize
+			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
+				g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
+			}
+		}
+		g.moveAnims = nil
+		g.currentState = stateWaiting
+	}
+	return nil
+}
+
 // Update handles input each tick.
 func (g *Game) Update() error {
 	ebiten.SetWindowTitle(fmt.Sprintf("go2d — cells: %d", g.cellCount))
@@ -396,243 +640,16 @@ func (g *Game) Update() error {
 		}
 	}
 
-	if g.currentState == stateWaiting {
-		mx, my := ebiten.CursorPosition()
-		hc := mx / cellSize
-		hr := my / cellSize
-		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
-			if g.grid.Cells[hc][hr].Health > 0 {
-				g.hoverCol, g.hoverRow = hc, hr
-				nc, nr, found := closestColorNeighbor(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
-				if found {
-					g.victimHintCol, g.victimHintRow = nc, nr
-				}
-			}
-		}
+	switch g.currentState {
+	case stateWaiting:
+		return g.updateWaiting()
+	case stateVictimMoving:
+		return g.updateVictimMoving()
+	case stateShuffling:
+		return g.updateShuffling()
+	case stateDropping:
+		return g.updateDropping()
 	}
-
-	if g.currentState == stateWaiting {
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			px, py := ebiten.CursorPosition()
-			col, row := cellFromPixel(px, py, cellSize)
-			if col < 0 || col >= g.grid.Cols || row < 0 || row >= g.grid.Rows {
-				return nil
-			}
-			cell := &g.grid.Cells[col][row]
-			if cell.Health <= 0 {
-				return nil
-			}
-
-			oldHealth := cell.Health
-			cell.Health -= healthDecrement
-			if cell.Health <= healthMin {
-				cell.Health = 0
-			}
-			if cell.Health < healthEpsilon {
-				cell.Health = 0.0
-			}
-
-			g.actionCol = col
-			g.actionRow = row
-
-			if cell.Health <= 0 {
-				// DEATH PATH — redraw immediately so cell disappears.
-				g.drawCell(col, row, cell, cellSize, 1.0)
-				g.cellCount-- // decrement for the clicked cell
-				ncol, nrow, found := closestColorNeighbor(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
-				if found {
-					// Set up victim animation — do NOT kill victim or call buildDropAnims yet.
-					g.victimCol, g.victimRow = ncol, nrow
-					g.victimCell = g.grid.Cells[ncol][nrow] // snapshot before any change
-					g.victimFromX, g.victimFromY = cellCenter(ncol, nrow)
-					g.victimToX, g.victimToY = cellCenter(col, row)
-
-					// Choose random path type.
-					g.victimPathType = rand.Intn(3)
-					dx := g.victimToX - g.victimFromX
-					dy := g.victimToY - g.victimFromY
-					dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-
-					if g.victimPathType == 1 { // Bezier arc: control point perpendicular to the line
-						midX := (g.victimFromX + g.victimToX) * 0.5
-						midY := (g.victimFromY + g.victimToY) * 0.5
-						var pX, pY float32
-						if dist > 0 {
-							pX = -dy / dist
-							pY = dx / dist
-						}
-						sign := float32(1)
-						if rand.Intn(2) == 0 {
-							sign = -1
-						}
-						offset := sign * dist * (0.5 + rand.Float32()*1.0)
-						g.victimCtrlX = midX + pX*offset
-						g.victimCtrlY = midY + pY*offset
-					}
-					if g.victimPathType == 2 { // logarithmic spiral
-						turns := float32(0.5 + rand.Float32()*1.0) // 0.5–1.5 turns
-						if rand.Intn(2) == 0 {
-							turns = -turns
-						}
-						g.victimSpiralTurns = turns
-					}
-
-					// Clear victim's canvas position (it is now an overlay animation).
-					x0, y0 := ncol*cellSize, nrow*cellSize
-					g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
-
-					g.animStart = ebiten.Tick()
-					g.currentState = stateVictimMoving
-				} else {
-					// No victim — go straight to drop.
-					spawned := g.buildDropAnims([]int{col})
-					if respawnCells {
-						g.cellCount += spawned
-					}
-					if len(g.moveAnims) > 0 {
-						g.animStart = ebiten.Tick()
-						g.currentState = stateDropping
-					}
-				}
-			} else {
-				// SURVIVAL PATH — shuffle alive neighbours, then set up bounce animation.
-				neighbors := eightNeighbors(col, row, g.grid.Cols, g.grid.Rows)
-				// Only shuffle alive cells — empty slots stay put.
-				var aliveNeighbors [][2]int
-				for _, n := range neighbors {
-					if g.grid.Cells[n[0]][n[1]].Health > 0 {
-						aliveNeighbors = append(aliveNeighbors, n)
-					}
-				}
-				if len(aliveNeighbors) == 0 {
-					return nil
-				}
-
-				// Set up bounce animation now that we know a shuffle will proceed.
-				maxR := float32(cellSize/2 - 2)
-				x0, y0 := col*cellSize, row*cellSize
-				g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
-				g.targetAnimating = true
-				g.targetAnimStart = ebiten.Tick()
-				g.targetAnimStartR = maxR * oldHealth
-				g.targetAnimPeakR = maxR * oldHealth * 1.1
-				g.targetAnimEndR = maxR * cell.Health
-				g.targetAnimColor = g.grid.Cells[col][row].Color
-				perm := rand.Perm(len(aliveNeighbors))
-
-				// Collect neighbour cells before rearranging.
-				type neighborCell struct {
-					col, row int
-					cell     Cell
-				}
-				orig := make([]neighborCell, len(aliveNeighbors))
-				for i, n := range aliveNeighbors {
-					orig[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
-				}
-
-				// Build MoveAnims: aliveNeighbor i moves to position perm[i].
-				anims := make([]MoveAnim, len(aliveNeighbors))
-				for i := range aliveNeighbors {
-					src := orig[i]
-					dst := aliveNeighbors[perm[i]]
-					fx, fy := cellCenter(src.col, src.row)
-					tx, ty := cellCenter(dst[0], dst[1])
-					dx := tx - fx
-					dy := ty - fy
-					dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-					var ctrlX, ctrlY float32
-					if dist > 0 {
-						pX := -dy / dist
-						pY := dx / dist
-						sign := float32(1)
-						if rand.Intn(2) == 0 {
-							sign = -1
-						}
-						offset := sign * dist * (0.3 + rand.Float32()*0.7)
-						ctrlX = (fx+tx)*0.5 + pX*offset
-						ctrlY = (fy+ty)*0.5 + pY*offset
-					} else {
-						ctrlX = fx
-						ctrlY = fy
-					}
-					anims[i] = MoveAnim{fx, fy, tx, ty, ctrlX, ctrlY, src.cell}
-				}
-
-				// Clear source positions on canvas.
-				for _, n := range aliveNeighbors {
-					g.canvas.SubImage(image.Rect(n[0]*cellSize, n[1]*cellSize, (n[0]+1)*cellSize, (n[1]+1)*cellSize)).(*ebiten.Image).Clear()
-				}
-
-				// Write cells to their permuted destinations in the grid.
-				for i := range aliveNeighbors {
-					dst := aliveNeighbors[perm[i]]
-					g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
-				}
-
-				g.moveAnims = anims
-				g.currentState = stateShuffling
-				g.animStart = ebiten.Tick()
-			}
-		}
-		return nil
-	}
-
-	if g.currentState == stateVictimMoving {
-		t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
-		if t >= 1.0 {
-			// Victim arrived — kill it and trigger drop.
-			g.grid.Cells[g.victimCol][g.victimRow].Health = 0
-			g.cellCount--
-			affectedCols := []int{g.actionCol}
-			if g.victimCol != g.actionCol {
-				affectedCols = append(affectedCols, g.victimCol)
-			}
-			spawned := g.buildDropAnims(affectedCols)
-			if respawnCells {
-				g.cellCount += spawned
-			}
-			if len(g.moveAnims) > 0 {
-				g.animStart = ebiten.Tick()
-				g.currentState = stateDropping
-			} else {
-				g.currentState = stateWaiting
-			}
-		}
-		return nil
-	}
-
-	if g.currentState == stateShuffling {
-		elapsed := elapsedFraction(ebiten.Tick(), g.animStart, shuffleTicks)
-		if elapsed >= 1.0 {
-			for _, anim := range g.moveAnims {
-				col := int(anim.ToX) / cellSize
-				row := int(anim.ToY) / cellSize
-				if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-					g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
-				}
-			}
-			g.moveAnims = nil
-			g.currentState = stateWaiting
-		}
-		return nil
-	}
-
-	if g.currentState == stateDropping {
-		elapsed := elapsedFraction(ebiten.Tick(), g.animStart, dropTicks)
-		if elapsed >= 1.0 {
-			for _, anim := range g.moveAnims {
-				col := int(anim.ToX) / cellSize
-				row := int(anim.ToY) / cellSize
-				if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-					g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
-				}
-			}
-			g.moveAnims = nil
-			g.currentState = stateWaiting
-		}
-		return nil
-	}
-
 	return nil
 }
 
@@ -680,12 +697,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		var r float32
 		if t < 0.5 {
-			lt := t * 2             // 0→1 in phase 1
+			lt := t * 2                // 0→1 in phase 1
 			eased := 1 - (1-lt)*(1-lt) // ease-out: fast start, slow at peak
 			r = g.targetAnimStartR + (g.targetAnimPeakR-g.targetAnimStartR)*eased
 		} else {
-			lt := (t - 0.5) * 2    // 0→1 in phase 2
-			eased := lt * lt        // ease-in: slow at peak, fast at end
+			lt := (t - 0.5) * 2 // 0→1 in phase 2
+			eased := lt * lt    // ease-in: slow at peak, fast at end
 			r = g.targetAnimPeakR + (g.targetAnimEndR-g.targetAnimPeakR)*eased
 		}
 		cx, cy := cellCenter(g.actionCol, g.actionRow)
