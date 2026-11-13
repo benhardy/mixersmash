@@ -966,7 +966,7 @@ func (g *Game) updateDropping() error {
 
 // Update handles input each tick.
 func (g *Game) Update() error {
-	ebiten.SetWindowTitle(fmt.Sprintf("go2d — cells: %d  score: %d", g.cellCount, g.score))
+	ebiten.SetWindowTitle(fmt.Sprintf("MixerSmash — cells: %d  score: %d", g.cellCount, g.score))
 
 	// Reset hover every tick; recompute below if conditions are met.
 	g.hoverCol, g.hoverRow = -1, -1
@@ -1244,6 +1244,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 func main() {
 	ebiten.SetWindowSize(windowWidth, windowHeight)
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle("go2d grid")
 	ebiten.SetWindowClosingHandled(false)
 
