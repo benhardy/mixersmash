@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>go2d</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <script src="wasm_exec.js"></script>
+    <script>
+        (async function () {
+            const go = new Go();
+
+            async function loadWasm() {
+                // Prefer streaming instantiation (requires correct MIME type: application/wasm).
+                // Fall back to ArrayBuffer instantiation for servers that serve .wasm as
+                // application/octet-stream or similar (common with simple static servers).
+                if (typeof WebAssembly.instantiateStreaming === "function") {
+                    try {
+                        const result = await WebAssembly.instantiateStreaming(
+                            fetch("go2d.wasm"),
+                            go.importObject
+                        );
+                        return result;
+                    } catch (streamErr) {
+                        console.warn(
+                            "WebAssembly.instantiateStreaming failed, falling back to ArrayBuffer instantiation:",
+                            streamErr
+                        );
+                    }
+                }
+
+                // ArrayBuffer fallback.
+                const resp = await fetch("go2d.wasm");
+                const bytes = await resp.arrayBuffer();
+                return WebAssembly.instantiate(bytes, go.importObject);
+            }
+
+            try {
+                const result = await loadWasm();
+                go.run(result.instance);
+            } catch (err) {
+                console.error("Failed to load go2d.wasm:", err);
+            }
+        })();
+    </script>
+</body>
+</html>
