@@ -25,9 +25,10 @@ const (
 	stateDropping     = 3
 	stateVictimMoving = 4
 
-	shuffleTicks = 18        // 0.3s at 60tps
-	dropTicks    = 18        // 0.3s at 60tps
-	victimTicks  = int64(24) // 0.4s at 60tps
+	shuffleTicks    = 18        // 0.3s at 60tps
+	dropTicks       = 18        // 0.3s at 60tps
+	victimTicks     = int64(24) // 0.4s at 60tps
+	targetAnimTicks = int64(15) // 0.25s at 60 TPS
 
 	healthDecrement = float32(0.2)
 	healthMin       = float32(0.2)
@@ -200,6 +201,14 @@ type Game struct {
 	victimCtrlX, victimCtrlY float32 // Bezier control point for arc
 	victimSpiralTurns        float32 // signed: positive=CCW, negative=CW
 	victimCol, victimRow     int     // victim's original grid position
+
+	// target cell bounce animation fields
+	targetAnimating  bool
+	targetAnimStart  int64
+	targetAnimStartR float32
+	targetAnimPeakR  float32
+	targetAnimEndR   float32
+	targetAnimColor  color.RGBA
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -212,13 +221,14 @@ func newGameState(grid *Grid) *Game {
 		animStart:     0,
 		actionCol:     -1,
 		actionRow:     -1,
-		cellCount:     grid.Cols * grid.Rows,
-		hoverCol:      -1,
-		hoverRow:      -1,
-		victimHintCol: -1,
-		victimHintRow: -1,
-		victimCol:     -1,
-		victimRow:     -1,
+		cellCount:       grid.Cols * grid.Rows,
+		hoverCol:        -1,
+		hoverRow:        -1,
+		victimHintCol:   -1,
+		victimHintRow:   -1,
+		victimCol:       -1,
+		victimRow:       -1,
+		targetAnimating: false,
 	}
 }
 
@@ -379,6 +389,13 @@ func (g *Game) Update() error {
 	g.hoverCol, g.hoverRow = -1, -1
 	g.victimHintCol, g.victimHintRow = -1, -1
 
+	if g.targetAnimating {
+		if elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks) >= 1.0 {
+			g.targetAnimating = false
+			g.drawCell(g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], cellSize, 1.0)
+		}
+	}
+
 	if g.currentState == stateWaiting {
 		mx, my := ebiten.CursorPosition()
 		hc := mx / cellSize
@@ -406,6 +423,7 @@ func (g *Game) Update() error {
 				return nil
 			}
 
+			oldHealth := cell.Health
 			cell.Health -= healthDecrement
 			if cell.Health <= healthMin {
 				cell.Health = 0
@@ -414,13 +432,12 @@ func (g *Game) Update() error {
 				cell.Health = 0.0
 			}
 
-			// Redraw the clicked cell immediately on the canvas.
-			g.drawCell(col, row, cell, cellSize, 1.0)
 			g.actionCol = col
 			g.actionRow = row
 
 			if cell.Health <= 0 {
-				// DEATH PATH
+				// DEATH PATH — redraw immediately so cell disappears.
+				g.drawCell(col, row, cell, cellSize, 1.0)
 				g.cellCount-- // decrement for the clicked cell
 				ncol, nrow, found := closestColorNeighbor(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
 				if found {
@@ -478,7 +495,7 @@ func (g *Game) Update() error {
 					}
 				}
 			} else {
-				// SURVIVAL PATH — shuffle alive neighbours only
+				// SURVIVAL PATH — shuffle alive neighbours, then set up bounce animation.
 				neighbors := eightNeighbors(col, row, g.grid.Cols, g.grid.Rows)
 				// Only shuffle alive cells — empty slots stay put.
 				var aliveNeighbors [][2]int
@@ -490,6 +507,17 @@ func (g *Game) Update() error {
 				if len(aliveNeighbors) == 0 {
 					return nil
 				}
+
+				// Set up bounce animation now that we know a shuffle will proceed.
+				maxR := float32(cellSize/2 - 2)
+				x0, y0 := col*cellSize, row*cellSize
+				g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+				g.targetAnimating = true
+				g.targetAnimStart = ebiten.Tick()
+				g.targetAnimStartR = maxR * oldHealth
+				g.targetAnimPeakR = maxR * oldHealth * 1.1
+				g.targetAnimEndR = maxR * cell.Health
+				g.targetAnimColor = g.grid.Cells[col][row].Color
 				perm := rand.Perm(len(aliveNeighbors))
 
 				// Collect neighbour cells before rearranging.
@@ -644,6 +672,27 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	screen.DrawImage(g.canvas, nil)
+
+	if g.targetAnimating {
+		t := elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks)
+		if t > 1.0 {
+			t = 1.0
+		}
+		var r float32
+		if t < 0.5 {
+			lt := t * 2             // 0→1 in phase 1
+			eased := 1 - (1-lt)*(1-lt) // ease-out: fast start, slow at peak
+			r = g.targetAnimStartR + (g.targetAnimPeakR-g.targetAnimStartR)*eased
+		} else {
+			lt := (t - 0.5) * 2    // 0→1 in phase 2
+			eased := lt * lt        // ease-in: slow at peak, fast at end
+			r = g.targetAnimPeakR + (g.targetAnimEndR-g.targetAnimPeakR)*eased
+		}
+		cx, cy := cellCenter(g.actionCol, g.actionRow)
+		if r > 0 {
+			vector.DrawFilledCircle(screen, cx, cy, r, g.targetAnimColor, true)
+		}
+	}
 
 	if len(g.moveAnims) > 0 {
 		var t float32
