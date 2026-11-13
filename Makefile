@@ -22,9 +22,9 @@ wasm:
 
 # serve starts a local HTTP server for the web/ directory.
 # A static file server is required: browsers cannot fetch .wasm via file://.
+# Run `make wasm` first to build the WebAssembly binary before serving.
 serve:
-	@echo "Serving at http://localhost:8080"
-	python3 -m http.server 8080 --directory web
+	go run web_server.go
 
 test:
 	go test ./...
