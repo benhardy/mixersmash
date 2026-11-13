@@ -1,6 +1,7 @@
 package main
 
 import (
+    "fmt"
     "image"
     "image/color"
     "log"
@@ -29,7 +30,7 @@ const (
     healthMin       = float32(0.2)
     healthEpsilon   = float32(0.001)
 
-    respawnCells = true // set false to leave gaps at top instead of spawning new cells
+    respawnCells = false // set false to leave gaps at top instead of spawning new cells
 )
 
 const glowShaderSrc = `//kage:unit pixels
@@ -191,6 +192,7 @@ type Game struct {
     actionRow    int        // the row any given action is happening
     moveAnims    []MoveAnim // used for both shuffle and drop phases
     glowShader   *ebiten.Shader
+    cellCount    int        // number of live cells currently in the grid
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -203,6 +205,7 @@ func newGameState(grid *Grid) *Game {
         animStart:    0,
         actionCol:    -1,
         actionRow:    -1,
+        cellCount:    grid.Cols * grid.Rows,
     }
 }
 
@@ -277,10 +280,12 @@ type rowCell struct {
 // buildDropAnims computes MoveAnim entries for each affected column: alive cells
 // compact downward, and new random cells fall from above the screen top.
 // Only canvas positions that cells are vacating are cleared — not the whole column.
-func (g *Game) buildDropAnims(removedCols []int) {
+// Returns the number of new cells spawned (non-zero only when respawnCells is true).
+func (g *Game) buildDropAnims(removedCols []int) int {
     if cap(g.moveAnims) > 0 {
         g.moveAnims = g.moveAnims[:0]
     }
+    spawned := 0
     seen := make(map[int]bool)
     for _, col := range removedCols {
         if seen[col] {
@@ -312,10 +317,18 @@ func (g *Game) buildDropAnims(removedCols []int) {
             g.grid.Cells[col][m[1]] = snapshot[m[0]]
         }
 
+        if !respawnCells {
+            // Zero the top slots that were vacated and are not being filled.
+            for i := 0; i < len(holeRows); i++ {
+                g.grid.Cells[col][i] = Cell{} // Health=0, invisible; canvas already cleared by vacating moves
+            }
+        }
+
         if respawnCells {
             // Write new random cells into the top slots (0..len(holeRows)-1).
             for i := 0; i < len(holeRows); i++ {
                 g.grid.Cells[col][i] = Cell{Color: randomColor(), Health: 1.0}
+                spawned++
             }
         }
 
@@ -342,10 +355,13 @@ func (g *Game) buildDropAnims(removedCols []int) {
             }
         }
     }
+    return spawned
 }
 
 // Update handles input each tick.
 func (g *Game) Update() error {
+    ebiten.SetWindowTitle(fmt.Sprintf("go2d — cells: %d", g.cellCount))
+
     if g.currentState == stateWaiting {
         if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
             px, py := ebiten.CursorPosition()
@@ -374,54 +390,66 @@ func (g *Game) Update() error {
             if cell.Health <= 0 {
                 // DEATH PATH
                 affectedCols := []int{col}
+                g.cellCount-- // decrement for the clicked cell
                 ncol, nrow, found := closestColorNeighbor(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
                 if found {
                     g.grid.Cells[ncol][nrow].Health = 0
                     g.drawCell(ncol, nrow, &g.grid.Cells[ncol][nrow], cellSize, 1.0)
+                    g.cellCount-- // decrement for the killed neighbour
                     // Track the neighbor's column too if different.
                     if ncol != col {
                         affectedCols = append(affectedCols, ncol)
                     }
                 }
-                g.buildDropAnims(affectedCols)
+                spawned := g.buildDropAnims(affectedCols)
+                if respawnCells {
+                    g.cellCount += spawned
+                }
                 g.currentState = stateDropping
                 g.animStart = ebiten.Tick()
             } else {
-                // SURVIVAL PATH — shuffle neighbours
+                // SURVIVAL PATH — shuffle alive neighbours only
                 neighbors := eightNeighbors(col, row, g.grid.Cols, g.grid.Rows)
-                if len(neighbors) == 0 {
+                // Only shuffle alive cells — empty slots stay put.
+                var aliveNeighbors [][2]int
+                for _, n := range neighbors {
+                    if g.grid.Cells[n[0]][n[1]].Health > 0 {
+                        aliveNeighbors = append(aliveNeighbors, n)
+                    }
+                }
+                if len(aliveNeighbors) == 0 {
                     return nil
                 }
-                perm := rand.Perm(len(neighbors))
+                perm := rand.Perm(len(aliveNeighbors))
 
                 // Collect neighbour cells before rearranging.
                 type neighborCell struct {
                     col, row int
                     cell     Cell
                 }
-                orig := make([]neighborCell, len(neighbors))
-                for i, n := range neighbors {
+                orig := make([]neighborCell, len(aliveNeighbors))
+                for i, n := range aliveNeighbors {
                     orig[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
                 }
 
-                // Build MoveAnims: neighbor i moves to position perm[i].
-                anims := make([]MoveAnim, len(neighbors))
-                for i := range neighbors {
+                // Build MoveAnims: aliveNeighbor i moves to position perm[i].
+                anims := make([]MoveAnim, len(aliveNeighbors))
+                for i := range aliveNeighbors {
                     src := orig[i]
-                    dst := neighbors[perm[i]]
+                    dst := aliveNeighbors[perm[i]]
                     fx, fy := cellCenter(src.col, src.row)
                     tx, ty := cellCenter(dst[0], dst[1])
                     anims[i] = MoveAnim{fx, fy, tx, ty, src.cell}
                 }
 
                 // Clear source positions on canvas.
-                for _, n := range neighbors {
+                for _, n := range aliveNeighbors {
                     g.canvas.SubImage(image.Rect(n[0]*cellSize, n[1]*cellSize, (n[0]+1)*cellSize, (n[1]+1)*cellSize)).(*ebiten.Image).Clear()
                 }
 
                 // Write cells to their permuted destinations in the grid.
-                for i := range neighbors {
-                    dst := neighbors[perm[i]]
+                for i := range aliveNeighbors {
+                    dst := aliveNeighbors[perm[i]]
                     g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
                 }
 
