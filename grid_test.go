@@ -214,26 +214,29 @@ func TestRandomColorNeverReturnsWhite(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// colorDistanceMax
+// colorDistanceRedmean
 // ---------------------------------------------------------------------------
 
-// TestColorDistanceMaxSame verifies that a colour compared with itself is 0.
-func TestColorDistanceMaxSame(t *testing.T) {
+// TestColorDistanceRedmeanSame verifies that a colour compared with itself is 0.
+func TestColorDistanceRedmeanSame(t *testing.T) {
 	c := color.RGBA{R: 100, G: 150, B: 200, A: 255}
-	got := colorDistanceMax(c, c)
-	if got != 0 {
-		t.Errorf("colorDistanceMax(c, c) = %d, want 0", got)
+	got := colorDistanceRedmean(c, c)
+	if got != 0.0 {
+		t.Errorf("colorDistanceRedmean(c, c) = %v, want 0.0", got)
 	}
 }
 
-// TestColorDistanceMaxChannels verifies that the function returns the maximum
-// channel difference: R diff=255, G diff=100, B diff=50 → 255.
-func TestColorDistanceMaxChannels(t *testing.T) {
-	a := color.RGBA{R: 255, G: 0, B: 0, A: 255}
-	b := color.RGBA{R: 0, G: 100, B: 50, A: 255}
-	got := colorDistanceMax(a, b)
-	if got != 255 {
-		t.Errorf("colorDistanceMax({255,0,0},{0,100,50}) = %d, want 255", got)
+// TestColorDistanceRedmeanGreenWeighted verifies that a pure green shift produces
+// a larger distance than an equal pure blue shift, since green is weighted 4× vs
+// blue's ~2× in the redmean formula.
+func TestColorDistanceRedmeanGreenWeighted(t *testing.T) {
+	black := color.RGBA{R: 0, G: 0, B: 0, A: 255}
+	green := color.RGBA{R: 0, G: 100, B: 0, A: 255}
+	blue := color.RGBA{R: 0, G: 0, B: 100, A: 255}
+	greenDist := colorDistanceRedmean(green, black)
+	blueDist := colorDistanceRedmean(blue, black)
+	if greenDist <= blueDist {
+		t.Errorf("expected green distance (%v) > blue distance (%v)", greenDist, blueDist)
 	}
 }
 

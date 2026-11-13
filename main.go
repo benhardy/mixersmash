@@ -52,28 +52,16 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 }
 `
 
-// colorDistanceMax returns the max absolute difference across the R, G, B
-// channels of two colours. Used for colour matching.
-func colorDistanceMax(a, b color.RGBA) int {
-	dr := int(a.R) - int(b.R)
-	if dr < 0 {
-		dr = -dr
-	}
-	dg := int(a.G) - int(b.G)
-	if dg < 0 {
-		dg = -dg
-	}
-	db := int(a.B) - int(b.B)
-	if db < 0 {
-		db = -db
-	}
-	if dr >= dg && dr >= db {
-		return dr
-	}
-	if dg >= db {
-		return dg
-	}
-	return db
+// colorDistanceRedmean returns a perceptually-weighted colour distance using the
+// "redmean" approximation, which adapts RGB channel weights based on average redness.
+func colorDistanceRedmean(a, b color.RGBA) float32 {
+    rBar := (float32(a.R) + float32(b.R)) / 2
+    dR := float32(a.R) - float32(b.R)
+    dG := float32(a.G) - float32(b.G)
+    dB := float32(a.B) - float32(b.B)
+    return float32(math.Sqrt(float64(
+        (2+rBar/256)*dR*dR + 4*dG*dG + (2+(255-rBar)/256)*dB*dB,
+    )))
 }
 
 // randomColor returns a random opaque colour (A=255).
@@ -122,12 +110,12 @@ func eightNeighbors(col, row, cols, rows int) [][2]int {
 }
 
 // closestColorNeighbor returns the (col, row) of the 8-neighbour of (col,row)
-// with Health > 0 that has minimum colorDistanceMax distance to
+// with Health > 0 that has minimum colorDistanceRedmean distance to
 // cells[col][row].Color. Returns found=false if no healthy neighbour exists.
 func closestColorNeighbor(cells [][]Cell, col, row, cols, rows int) (int, int, bool) {
 	neighbors := eightNeighbors(col, row, cols, rows)
 	target := cells[col][row].Color
-	bestDist := -1
+	bestDist := float32(-1)
 	bestCol, bestRow := 0, 0
 	found := false
 	for _, n := range neighbors {
@@ -135,7 +123,7 @@ func closestColorNeighbor(cells [][]Cell, col, row, cols, rows int) (int, int, b
 		if cells[nc][nr].Health <= 0 {
 			continue
 		}
-		dist := colorDistanceMax(target, cells[nc][nr].Color)
+		dist := colorDistanceRedmean(target, cells[nc][nr].Color)
 		if !found || dist < bestDist {
 			bestDist = dist
 			bestCol = nc
