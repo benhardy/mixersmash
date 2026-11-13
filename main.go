@@ -642,12 +642,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if length > 0 {
 			ux := dx / length
 			uy := dy / length
-			const dotSpacing = float32(12) // px between dot centres
-			const dotRadius = float32(1.5)
-			// Offset advances at 10 px/sec = 10/60 px per tick
-			rawOff := float64(ebiten.Tick()) * (10.0 / 60.0)
+			const dotSpacing = float32(8) // px between dot centres
+			const dotRadius = float32(4.0)
+			// Offset advances at 20 px/sec = 20/60 px per tick
+			rawOff := float64(ebiten.Tick()) * (20.0 / 60.0)
 			offset := float32(math.Mod(rawOff, float64(dotSpacing)))
-			dotCol := color.RGBA{255, 255, 255, 160}
+			vc := g.grid.Cells[g.victimHintCol][g.victimHintRow].Color
+			dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
 			for pos := offset; pos < length; pos += dotSpacing {
 				vector.DrawFilledCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
 			}
