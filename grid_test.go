@@ -89,6 +89,9 @@ func TestStateConstants(t *testing.T) {
 	if stateDropping != 3 {
 		t.Errorf("stateDropping = %d, want 3", stateDropping)
 	}
+	if stateColumnCollapsing != 5 {
+		t.Errorf("stateColumnCollapsing = %d, want 5", stateColumnCollapsing)
+	}
 }
 
 // TestTickConstants documents the duration of each animation phase in ticks.
@@ -1040,4 +1043,259 @@ func TestClosestColorNeighborSkipsDead(t *testing.T) {
 	// Suppress unused variable warning in case the compiler complains.
 	_ = col
 	_ = row
+}
+
+// ---------------------------------------------------------------------------
+// horizontalCollapseMoves
+// ---------------------------------------------------------------------------
+
+// movesAsSet converts a [][2]int slice into a map keyed by [2]int for
+// order-independent set comparisons.
+func movesAsSet(t *testing.T, moves [][2]int) map[[2]int]bool {
+	t.Helper()
+	s := make(map[[2]int]bool, len(moves))
+	for _, m := range moves {
+		s[m] = true
+	}
+	return s
+}
+
+// assertMoveSetsEqual fails the test if got and want differ as sets.
+func assertMoveSetsEqual(t *testing.T, got, want [][2]int) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("move count: got %d, want %d; got=%v want=%v", len(got), len(want), got, want)
+		return
+	}
+	wantSet := movesAsSet(t, want)
+	for _, m := range got {
+		if !wantSet[m] {
+			t.Errorf("unexpected move %v in result %v; want set %v", m, got, want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// applyColumnCollapse
+// ---------------------------------------------------------------------------
+
+// makeSnapshot builds a [][]Cell snapshot where each column is identifiable by
+// a unique Health value: column c gets Health = float32(c+1)*0.1 and a fixed
+// non-zero Color so live cells are distinguishable.  numRows rows per column.
+func makeSnapshot(numCols, numRows int) [][]Cell {
+	snapshot := make([][]Cell, numCols)
+	for c := 0; c < numCols; c++ {
+		snapshot[c] = make([]Cell, numRows)
+		for r := 0; r < numRows; r++ {
+			snapshot[c][r] = Cell{
+				Color:  color.RGBA{R: uint8(c*10 + 10), G: uint8(r*10 + 10), B: 50, A: 255},
+				Health: float32(c+1) * 0.1,
+			}
+		}
+	}
+	return snapshot
+}
+
+// colIdentical returns true when every cell in result[col] matches src[col].
+func colIdentical(result, src [][]Cell, col int) bool {
+	if len(result[col]) != len(src[col]) {
+		return false
+	}
+	for r := range result[col] {
+		if result[col][r] != src[col][r] {
+			return false
+		}
+	}
+	return true
+}
+
+// colZero returns true when every cell in result[col] is the zero Cell{}.
+func colZero(result [][]Cell, col int) bool {
+	for _, cell := range result[col] {
+		if cell != (Cell{}) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestApplyColumnCollapse is the regression guard for the column-collapse mutation.
+// It verifies three invariants for each scenario:
+//  1. Destination columns hold the correct source column's cells.
+//  2. Vacated columns (oldCols not in newCols) are zeroed.
+//  3. Unchanged columns (neither source nor destination) are preserved intact.
+func TestApplyColumnCollapse(t *testing.T) {
+	const numRows = 3
+
+	cases := []struct {
+		name          string
+		numCols       int
+		moves         [][2]int    // {oldCol, newCol}
+		wantDst       map[int]int // dstCol → expectedSrcCol
+		wantVacated   []int       // must be all-zero after apply
+		wantUnchanged []int       // must equal snapshot after apply
+	}{
+		{
+			// numCols=6, emptyCols=[2]: horizontalCollapseMoves gives {3→2,4→3,5→4}
+			// (leftEmpties=0, nonEmpty=[0,1,3,4,5] → map to [0,1,2,3,4]).
+			// Destinations: {2,3,4}. Vacated: {3,4,5} minus {2,3,4} = {5}.
+			// Unchanged: {0,1}.
+			name:          "left-side empty col 2 of 6",
+			numCols:       6,
+			moves:         [][2]int{{3, 2}, {4, 3}, {5, 4}},
+			wantDst:       map[int]int{2: 3, 3: 4, 4: 5},
+			wantVacated:   []int{5},
+			wantUnchanged: []int{0, 1},
+		},
+		{
+			// numCols=6, emptyCols=[3]: horizontalCollapseMoves gives {0→1} (leftEmpties=1,
+			// nonEmpty=[0,1,2,4,5] → map to [1,2,3,4,5]: only 0→1 differs).
+			// Destinations: {1}. Vacated: {0} minus {1} = {0}.
+			// Unchanged: {2,3,4,5} (they map to themselves so no move entry exists).
+			name:          "right-side empty col 3 of 6",
+			numCols:       6,
+			moves:         [][2]int{{0, 1}},
+			wantDst:       map[int]int{1: 0},
+			wantVacated:   []int{0},
+			wantUnchanged: []int{2, 3, 4, 5},
+		},
+		{
+			// numCols=6, emptyCols=[1,4]: moves = {0→1, 5→4} (leftEmpties=1,
+			// nonEmpty=[0,2,3,5] → [1,2,3,4]: 0→1 and 5→4 differ).
+			// Destinations: {1,4}. Vacated: {0,5} minus {1,4} = {0,5}.
+			// Unchanged: {2,3}.
+			name:          "one empty each side cols 1 and 4 of 6",
+			numCols:       6,
+			moves:         [][2]int{{0, 1}, {5, 4}},
+			wantDst:       map[int]int{1: 0, 4: 5},
+			wantVacated:   []int{0, 5},
+			wantUnchanged: []int{2, 3},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := makeSnapshot(tc.numCols, numRows)
+			result := applyColumnCollapse(snapshot, tc.moves)
+
+			// 1. Destination columns must hold the correct source data.
+			for dstCol, srcCol := range tc.wantDst {
+				for r := 0; r < numRows; r++ {
+					if result[dstCol][r] != snapshot[srcCol][r] {
+						t.Errorf("dst col %d row %d = %+v, want snapshot[%d][%d] = %+v",
+							dstCol, r, result[dstCol][r], srcCol, r, snapshot[srcCol][r])
+					}
+				}
+			}
+
+			// 2. Vacated columns must be all-zero.
+			for _, col := range tc.wantVacated {
+				if !colZero(result, col) {
+					t.Errorf("vacated col %d is not zero: %+v", col, result[col])
+				}
+			}
+
+			// 3. Unchanged columns must be identical to snapshot.
+			for _, col := range tc.wantUnchanged {
+				if !colIdentical(result, snapshot, col) {
+					t.Errorf("unchanged col %d was modified: got %+v, want %+v",
+						col, result[col], snapshot[col])
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// horizontalCollapseMoves
+// ---------------------------------------------------------------------------
+
+// TestHorizontalCollapseMoves verifies the pure-function mapping from (numCols,
+// emptyCols) to the [oldCol,newCol] pairs for columns that change position.
+//
+// Formula recap:
+//
+//	nonEmpty     = columns not in emptyCols, ascending order
+//	leftEmpties  = count of emptyCols entries with index < numCols/2
+//	nonEmpty[i]  maps to (leftEmpties + i)
+//	emit {nonEmpty[i], leftEmpties+i} only when they differ
+func TestHorizontalCollapseMoves(t *testing.T) {
+	cases := []struct {
+		name      string
+		numCols   int
+		emptyCols []int
+		want      [][2]int
+	}{
+		{
+			// No empty columns → nonEmpty=[0..11], leftEmpties=0, all map to
+			// themselves → no moves.
+			name:      "no empty cols",
+			numCols:   12,
+			emptyCols: nil,
+			want:      nil,
+		},
+		{
+			// emptyCols=[11] (right edge, 11>=6) → leftEmpties=0,
+			// nonEmpty=[0..10] → map to [0..10] → no changes.
+			name:      "right edge empty col 11 of 12",
+			numCols:   12,
+			emptyCols: []int{11},
+			want:      nil,
+		},
+		{
+			// emptyCols=[0] (left edge, 0<6) → leftEmpties=1,
+			// nonEmpty=[1..11] → map to [1..11] (leftEmpties+0=1, +1=2, … +10=11) → no changes.
+			name:      "left edge empty col 0 of 12",
+			numCols:   12,
+			emptyCols: []int{0},
+			want:      nil,
+		},
+		{
+			// numCols=4, emptyCols=[1] (1<2 → leftEmpties=1),
+			// nonEmpty=[0,2,3] → map to [1,2,3]: 0→1 differs; 2→2 same; 3→3 same.
+			// Exactly one move: {0,1}.
+			name:      "left-half empty col 1 of 4",
+			numCols:   4,
+			emptyCols: []int{1},
+			want:      [][2]int{{0, 1}},
+		},
+		{
+			// numCols=4, emptyCols=[2] (2>=2 → leftEmpties=0),
+			// nonEmpty=[0,1,3] → map to [0,1,2]: 0→0 same; 1→1 same; 3→2 differs.
+			// Exactly one move: {3,2}.
+			name:      "right-half empty col 2 of 4",
+			numCols:   4,
+			emptyCols: []int{2},
+			want:      [][2]int{{3, 2}},
+		},
+		{
+			// numCols=6, emptyCols=[1,4] (1<3 → 1 left; 4>=3 → 0 left; leftEmpties=1),
+			// nonEmpty=[0,2,3,5] → map to [1,2,3,4]: 0→1 differs; 2→2 same; 3→3 same; 5→4 differs.
+			// Moves: {0,1} and {5,4}.
+			name:      "one empty each side cols 1 and 4 of 6",
+			numCols:   6,
+			emptyCols: []int{1, 4},
+			want:      [][2]int{{0, 1}, {5, 4}},
+		},
+		{
+			// numCols=4, all columns empty → nonEmpty=[] → no moves.
+			name:      "all cols empty",
+			numCols:   4,
+			emptyCols: []int{0, 1, 2, 3},
+			want:      nil,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := horizontalCollapseMoves(tc.numCols, tc.emptyCols)
+			// Normalise nil vs empty for length check.
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			assertMoveSetsEqual(t, got, tc.want)
+		})
+	}
 }

@@ -21,10 +21,11 @@ const (
 	gridCols     = windowWidth / cellSize  // 12
 	gridRows     = windowHeight / cellSize // 9
 
-	stateWaiting      = 1
-	stateShuffling    = 2
-	stateDropping     = 3
-	stateVictimMoving = 4
+	stateWaiting          = 1
+	stateShuffling        = 2
+	stateDropping         = 3
+	stateVictimMoving     = 4
+	stateColumnCollapsing = 5
 
 	shuffleTicks    = 18        // 0.3s at 60tps
 	dropTicks       = 18        // 0.3s at 60tps
@@ -563,6 +564,61 @@ func gravityMoves(numRows int, holeRows []int) [][2]int {
 	return moves
 }
 
+// horizontalCollapseMoves returns the [oldCol, newCol] mapping for non-empty
+// columns when empty columns are removed and the remaining columns are packed
+// toward the centre.
+//
+// nonEmpty = columns in [0,numCols) not in emptyCols, ascending.
+// leftEmpties = count of emptyCols entries with index < numCols/2.
+// nonEmpty[i] maps to (leftEmpties + i).
+// Only pairs where oldCol != newCol are returned.
+func horizontalCollapseMoves(numCols int, emptyCols []int) [][2]int {
+	emptySet := make(map[int]bool, len(emptyCols))
+	for _, c := range emptyCols {
+		emptySet[c] = true
+	}
+	var nonEmpty []int
+	for c := 0; c < numCols; c++ {
+		if !emptySet[c] {
+			nonEmpty = append(nonEmpty, c)
+		}
+	}
+	half := numCols / 2
+	leftEmpties := 0
+	for _, c := range emptyCols {
+		if c < half {
+			leftEmpties++
+		}
+	}
+	var moves [][2]int
+	for i, oldCol := range nonEmpty {
+		newCol := leftEmpties + i
+		if oldCol != newCol {
+			moves = append(moves, [2]int{oldCol, newCol})
+		}
+	}
+	return moves
+}
+
+// emptyColumns returns the sorted indices of columns in which every cell has
+// Health <= 0.
+func (g *Game) emptyColumns() []int {
+	var result []int
+	for c := 0; c < g.grid.Cols; c++ {
+		empty := true
+		for r := 0; r < g.grid.Rows; r++ {
+			if g.grid.Cells[c][r].Health > 0 {
+				empty = false
+				break
+			}
+		}
+		if empty {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
 // rowCell is a helper pairing a row index with its cell, used in buildDropAnims.
 type rowCell struct {
 	row  int
@@ -660,6 +716,154 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		}
 	}
 	return spawned
+}
+
+// applyColumnCollapse returns a new column layout derived from snapshot by
+// applying the given moves. It is a pure function with no ebiten dependency.
+//
+// Algorithm:
+//  1. Start with every column copied from snapshot (preserves unchanged columns).
+//  2. For each move {oldCol, newCol}, set result[newCol] = snapshot[oldCol].
+//  3. Zero only the vacated columns: {oldCol for each move} MINUS {newCol for
+//     each move}. These are the edge columns that lost their content and were
+//     not themselves targeted as a destination.
+//
+// Columns that neither moved nor were landed on are preserved unchanged.
+func applyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
+	numCols := len(snapshot)
+	result := make([][]Cell, numCols)
+	for c := 0; c < numCols; c++ {
+		col := make([]Cell, len(snapshot[c]))
+		copy(col, snapshot[c])
+		result[c] = col
+	}
+
+	// Collect newCol values so we can compute the vacated set.
+	newColSet := make(map[int]bool, len(moves))
+	for _, m := range moves {
+		newColSet[m[1]] = true
+	}
+
+	// Apply moves: destination gets source column's data.
+	for _, m := range moves {
+		copy(result[m[1]], snapshot[m[0]])
+	}
+
+	// Zero vacated columns: sources that are not also destinations.
+	for _, m := range moves {
+		if !newColSet[m[0]] {
+			for r := range result[m[0]] {
+				result[m[0]][r] = Cell{}
+			}
+		}
+	}
+
+	return result
+}
+
+// buildCollapseAnims computes MoveAnim entries for the horizontal column-collapse
+// phase. Empty columns are detected, non-empty columns are packed toward the
+// centre, the grid is mutated in-place (via snapshot), cleared canvas strips are
+// emitted for affected columns, and horizontal MoveAnims are built.
+//
+// Returns true if stateColumnCollapsing was entered; false when no moves are
+// needed (caller falls through to stateWaiting).
+func (g *Game) buildCollapseAnims() bool {
+	emptyCols := g.emptyColumns()
+	moves := horizontalCollapseMoves(g.grid.Cols, emptyCols)
+	if len(moves) == 0 {
+		return false
+	}
+
+	// Snapshot entire Cells slice to avoid aliasing during column moves.
+	snapshot := make([][]Cell, g.grid.Cols)
+	for c := 0; c < g.grid.Cols; c++ {
+		snapshot[c] = make([]Cell, g.grid.Rows)
+		copy(snapshot[c], g.grid.Cells[c])
+	}
+
+	// Apply the pure column reassignment.
+	newCells := applyColumnCollapse(snapshot, moves)
+	for c := 0; c < g.grid.Cols; c++ {
+		copy(g.grid.Cells[c], newCells[c])
+	}
+
+	// Clear canvas strips for every column that is a move source OR destination.
+	// During the slide, stale painted cells at both source and destination positions
+	// would show through under the animating sprites, causing visible doubling.
+	// Columns not involved in any move are untouched.
+	dcs := g.deviceCellSize
+	cw := g.canvas.Bounds().Max.X
+	ch := g.canvas.Bounds().Max.Y
+	clearColSet := make(map[int]bool, len(moves)*2)
+	for _, m := range moves {
+		clearColSet[m[0]] = true
+		clearColSet[m[1]] = true
+	}
+	for col := range clearColSet {
+		x0 := col * dcs
+		x1 := x0 + dcs
+		if x1 > cw {
+			x1 = cw
+		}
+		if x0 < x1 {
+			g.canvas.SubImage(image.Rect(x0, 0, x1, ch)).(*ebiten.Image).Clear()
+		}
+	}
+
+	// Build horizontal MoveAnims.
+	if cap(g.moveAnims) > 0 {
+		g.moveAnims = g.moveAnims[:0]
+	}
+	for _, m := range moves {
+		oldCol, newCol := m[0], m[1]
+		for r := 0; r < g.grid.Rows; r++ {
+			cell := g.grid.Cells[newCol][r]
+			if cell.Health <= 0 {
+				continue
+			}
+			fx, fy := deviceCellCenter(oldCol, r, dcs)
+			tx, ty := deviceCellCenter(newCol, r, dcs)
+			g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
+		}
+	}
+
+	g.animStart = ebiten.Tick()
+	g.currentState = stateColumnCollapsing
+	return true
+}
+
+// settleAfterRemoval is called at every settle point that follows a cell
+// removal. It runs the horizontal collapse check: if empty columns exist,
+// buildCollapseAnims enters stateColumnCollapsing and returns true, so this
+// function does nothing further. Otherwise it sets currentState = stateWaiting.
+//
+// All removal→waiting paths funnel through this helper so the collapse check
+// is never skipped. The shuffle/survival path (no removal) must NOT call this.
+func (g *Game) settleAfterRemoval() {
+	if g.buildCollapseAnims() {
+		return
+	}
+	g.currentState = stateWaiting
+}
+
+// updateColumnCollapsing waits for the horizontal column-collapse animation to
+// complete, commits cell positions to canvas, and returns to stateWaiting.
+func (g *Game) updateColumnCollapsing() error {
+	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, dropTicks)
+	if elapsed >= 1.0 {
+		dcs := g.deviceCellSize
+		for _, anim := range g.moveAnims {
+			col := int(anim.ToX) / dcs
+			row := int(anim.ToY) / dcs
+			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
+				g.drawCell(col, row, &g.grid.Cells[col][row], dcs, 1.0)
+			}
+		}
+		g.moveAnims = nil
+		g.currentState = stateWaiting
+	}
+	return nil
 }
 
 // updateWaiting handles hover recompute and click processing while in stateWaiting.
@@ -800,6 +1004,8 @@ func (g *Game) handleTargetDeath(col, row int, cell *Cell) {
 		if len(g.moveAnims) > 0 {
 			g.animStart = ebiten.Tick()
 			g.currentState = stateDropping
+		} else {
+			g.settleAfterRemoval()
 		}
 	}
 }
@@ -920,7 +1126,7 @@ func (g *Game) updateVictimMoving() error {
 			g.animStart = ebiten.Tick()
 			g.currentState = stateDropping
 		} else {
-			g.currentState = stateWaiting
+			g.settleAfterRemoval()
 		}
 	}
 	return nil
@@ -946,7 +1152,8 @@ func (g *Game) updateShuffling() error {
 }
 
 // updateDropping waits for the drop animation to complete, then commits final
-// cell positions and returns to stateWaiting.
+// cell positions and returns to stateWaiting (or stateColumnCollapsing when
+// empty columns remain after the drop settles).
 func (g *Game) updateDropping() error {
 	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, dropTicks)
 	if elapsed >= 1.0 {
@@ -959,7 +1166,7 @@ func (g *Game) updateDropping() error {
 			}
 		}
 		g.moveAnims = nil
-		g.currentState = stateWaiting
+		g.settleAfterRemoval()
 	}
 	return nil
 }
@@ -988,6 +1195,8 @@ func (g *Game) Update() error {
 		return g.updateShuffling()
 	case stateDropping:
 		return g.updateDropping()
+	case stateColumnCollapsing:
+		return g.updateColumnCollapsing()
 	}
 	return nil
 }
@@ -1090,7 +1299,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 	if len(g.moveAnims) > 0 {
 		var t float32
 		ticks := int64(shuffleTicks)
-		if g.currentState == stateDropping {
+		if g.currentState == stateDropping || g.currentState == stateColumnCollapsing {
 			ticks = dropTicks
 		}
 		t = elapsedFraction(ebiten.Tick(), g.animStart, ticks)
