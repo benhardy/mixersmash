@@ -333,10 +333,9 @@ const compositeSpriteRefSize = 120
 // compositeCachedSprite returns a pre-rendered composite *ebiten.Image for clr,
 // building and caching it on first call.  The image is a full opaque square
 // filled with clr, with the creature glyph drawn centred in a darker tint,
-// then a hard circular mask applied so corners become fully transparent.
-// When blitted at scale (diameter/120), the 2× linear downscale produces a
-// smooth antialiased circle edge.  Returns nil if the font is not loaded or
-// no glyph is mapped to clr.
+// then an antialiased circular mask applied (antialias=true) so edge pixels
+// carry partial alpha for a smooth circle boundary.  Returns nil if the font
+// is not loaded or no glyph is mapped to clr.
 func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 	if g.glyphFont == nil {
 		return nil
@@ -374,11 +373,11 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 	text.Draw(composite, str, face, &drawOpts)
 
 	// Step 3 (final): apply an antialiased circular mask using
-	// destination-in compositing.  The mask is a hard white circle with the
-	// radius inset by 1 px; corners become fully transparent.  The smooth
-	// on-screen edge comes from the 2× linear downscale at blit time.
+	// destination-in compositing.  antialias=true gives edge pixels partial
+	// alpha (CPU-side soft path), so the circle boundary is genuinely smooth
+	// at the sprite's native resolution before any scaling.
 	maskImg := ebiten.NewImage(sz, sz)
-	vector.DrawFilledCircle(maskImg, half, half, half-1, color.White, false)
+	vector.DrawFilledCircle(maskImg, half, half, half-1, color.White, true)
 	var maskOpts ebiten.DrawImageOptions
 	maskOpts.Blend = ebiten.BlendDestinationIn
 	composite.DrawImage(maskImg, &maskOpts)
@@ -405,6 +404,9 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, cl
 	opts.GeoM.Scale(scale, scale)
 	// Top-left of the scaled image: (cx - radius, cy - radius).
 	opts.GeoM.Translate(float64(cx)-float64(radius), float64(cy)-float64(radius))
+	// FilterLinear interpolates smoothly when downscaling; the default
+	// FilterNearest would not antialias a fractional-scale blit.
+	opts.Filter = ebiten.FilterLinear
 	dst.DrawImage(img, &opts)
 }
 
