@@ -135,6 +135,34 @@ func closestColorNeighbor(cells [][]Cell, col, row, cols, rows int) (int, int, b
 	return bestCol, bestRow, found
 }
 
+// closestColorNeighbors returns all 8-neighbours of (col,row) with Health > 0
+// that share the exact minimum colorDistanceRedmean distance to
+// cells[col][row].Color. Tie is determined by exact float32 equality.
+// Returns an empty slice if no healthy neighbour exists.
+func closestColorNeighbors(cells [][]Cell, col, row, cols, rows int) [][2]int {
+	neighbors := eightNeighbors(col, row, cols, rows)
+	target := cells[col][row].Color
+	bestDist := float32(-1)
+	found := false
+	var result [][2]int
+	for _, n := range neighbors {
+		nc, nr := n[0], n[1]
+		if cells[nc][nr].Health <= 0 {
+			continue
+		}
+		dist := colorDistanceRedmean(target, cells[nc][nr].Color)
+		if !found || dist < bestDist {
+			bestDist = dist
+			result = result[:0]
+			result = append(result, [2]int{nc, nr})
+			found = true
+		} else if dist == bestDist {
+			result = append(result, [2]int{nc, nr})
+		}
+	}
+	return result
+}
+
 type Cell struct {
 	Color  color.RGBA
 	Health float32
@@ -177,6 +205,18 @@ func NewGrid(cols, rows int) *Grid {
 	}
 }
 
+// VictimAnim holds per-victim animation state for the stateVictimMoving phase.
+// All victims converge on the same target cell centre (toX, toY).
+type VictimAnim struct {
+	col, row     int     // victim's original grid position
+	cell         Cell    // snapshot of the victim cell before animation
+	fromX, fromY float32 // pixel start (victim cell centre)
+	toX, toY     float32 // pixel end (target cell centre, same for all victims)
+	pathType     int     // 0=straight, 1=arc, 2=spiral
+	ctrlX, ctrlY float32 // Bezier control point for arc path
+	spiralTurns  float32 // signed: positive=CCW, negative=CW
+}
+
 // Game is the Ebitengine game state.
 type Game struct {
 	grid         *Grid
@@ -190,17 +230,11 @@ type Game struct {
 	cellCount    int // number of live cells currently in the grid
 
 	// hover hint fields
-	hoverCol, hoverRow           int // cell under cursor (-1 = none)
-	victimHintCol, victimHintRow int // closest-colour neighbour of hovered cell (-1 = none)
+	hoverCol, hoverRow int      // cell under cursor (-1 = none)
+	victimHints        [][2]int // closest-colour neighbours of hovered cell (empty = none)
 
-	// victim movement animation fields
-	victimFromX, victimFromY float32
-	victimToX, victimToY     float32
-	victimCell               Cell
-	victimPathType           int     // 0=straight, 1=arc, 2=spiral
-	victimCtrlX, victimCtrlY float32 // Bezier control point for arc
-	victimSpiralTurns        float32 // signed: positive=CCW, negative=CW
-	victimCol, victimRow     int     // victim's original grid position
+	// victim movement animation fields (one entry per simultaneous victim)
+	victims []VictimAnim
 
 	// target cell bounce animation fields
 	targetAnimating  bool
@@ -224,10 +258,8 @@ func newGameState(grid *Grid) *Game {
 		cellCount:       grid.Cols * grid.Rows,
 		hoverCol:        -1,
 		hoverRow:        -1,
-		victimHintCol:   -1,
-		victimHintRow:   -1,
-		victimCol:       -1,
-		victimRow:       -1,
+		victimHints:     nil,
+		victims:         nil,
 		targetAnimating: false,
 	}
 }
@@ -390,10 +422,7 @@ func (g *Game) updateWaiting() error {
 	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 		if g.grid.Cells[hc][hr].Health > 0 {
 			g.hoverCol, g.hoverRow = hc, hr
-			nc, nr, found := closestColorNeighbor(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
-			if found {
-				g.victimHintCol, g.victimHintRow = nc, nr
-			}
+			g.victimHints = closestColorNeighbors(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
 		}
 	}
 
@@ -434,56 +463,74 @@ func (g *Game) updateWaiting() error {
 	return nil
 }
 
+// victimPathParams computes the path parameters for a single victim moving from
+// (fromX,fromY) to (toX,toY) and returns a partially-filled VictimAnim with
+// pathType, ctrlX, ctrlY, and spiralTurns set.
+func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrlY, spiralTurns float32) {
+	pathType = rand.Intn(3)
+	dx := toX - fromX
+	dy := toY - fromY
+	dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	if pathType == 1 { // Bezier arc: control point perpendicular to the line
+		midX := (fromX + toX) * 0.5
+		midY := (fromY + toY) * 0.5
+		var pX, pY float32
+		if dist > 0 {
+			pX = -dy / dist
+			pY = dx / dist
+		}
+		sign := float32(1)
+		if rand.Intn(2) == 0 {
+			sign = -1
+		}
+		offset := sign * dist * (0.5 + rand.Float32()*1.0)
+		ctrlX = midX + pX*offset
+		ctrlY = midY + pY*offset
+	}
+	if pathType == 2 { // logarithmic spiral
+		turns := float32(0.5 + rand.Float32()*1.0) // 0.5–1.5 turns
+		if rand.Intn(2) == 0 {
+			turns = -turns
+		}
+		spiralTurns = turns
+	}
+	return
+}
+
 // handleTargetDeath handles the death path after a cell's health has been
-// drained to zero: redraws the dead cell, selects a victim to animate into it
-// (transitioning to stateVictimMoving), or falls straight to stateDropping
-// when no victim exists.
+// drained to zero: redraws the dead cell, selects all tied-closest victims to
+// animate into it (transitioning to stateVictimMoving), or falls straight to
+// stateDropping when no victim exists.
 func (g *Game) handleTargetDeath(col, row int, cell *Cell) {
 	// Redraw immediately so cell disappears.
 	g.drawCell(col, row, cell, cellSize, 1.0)
 	g.cellCount-- // decrement for the clicked cell
-	ncol, nrow, found := closestColorNeighbor(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
-	if found {
-		// Set up victim animation — do NOT kill victim or call buildDropAnims yet.
-		g.victimCol, g.victimRow = ncol, nrow
-		g.victimCell = g.grid.Cells[ncol][nrow] // snapshot before any change
-		g.victimFromX, g.victimFromY = cellCenter(ncol, nrow)
-		g.victimToX, g.victimToY = cellCenter(col, row)
-
-		// Choose random path type.
-		g.victimPathType = rand.Intn(3)
-		dx := g.victimToX - g.victimFromX
-		dy := g.victimToY - g.victimFromY
-		dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-
-		if g.victimPathType == 1 { // Bezier arc: control point perpendicular to the line
-			midX := (g.victimFromX + g.victimToX) * 0.5
-			midY := (g.victimFromY + g.victimToY) * 0.5
-			var pX, pY float32
-			if dist > 0 {
-				pX = -dy / dist
-				pY = dx / dist
+	victimCoords := closestColorNeighbors(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
+	if len(victimCoords) > 0 {
+		toX, toY := cellCenter(col, row)
+		g.victims = g.victims[:0]
+		for _, vc := range victimCoords {
+			ncol, nrow := vc[0], vc[1]
+			fromX, fromY := cellCenter(ncol, nrow)
+			pt, cx, cy, st := victimPathParams(fromX, fromY, toX, toY)
+			v := VictimAnim{
+				col:         ncol,
+				row:         nrow,
+				cell:        g.grid.Cells[ncol][nrow], // snapshot
+				fromX:       fromX,
+				fromY:       fromY,
+				toX:         toX,
+				toY:         toY,
+				pathType:    pt,
+				ctrlX:       cx,
+				ctrlY:       cy,
+				spiralTurns: st,
 			}
-			sign := float32(1)
-			if rand.Intn(2) == 0 {
-				sign = -1
-			}
-			offset := sign * dist * (0.5 + rand.Float32()*1.0)
-			g.victimCtrlX = midX + pX*offset
-			g.victimCtrlY = midY + pY*offset
+			g.victims = append(g.victims, v)
+			// Clear victim's canvas position (it is now an overlay animation).
+			x0, y0 := ncol*cellSize, nrow*cellSize
+			g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
 		}
-		if g.victimPathType == 2 { // logarithmic spiral
-			turns := float32(0.5 + rand.Float32()*1.0) // 0.5–1.5 turns
-			if rand.Intn(2) == 0 {
-				turns = -turns
-			}
-			g.victimSpiralTurns = turns
-		}
-
-		// Clear victim's canvas position (it is now an overlay animation).
-		x0, y0 := ncol*cellSize, nrow*cellSize
-		g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
-
 		g.animStart = ebiten.Tick()
 		g.currentState = stateVictimMoving
 	} else {
@@ -589,13 +636,18 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 func (g *Game) updateVictimMoving() error {
 	t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
 	if t >= 1.0 {
-		// Victim arrived — kill it and trigger drop.
-		g.grid.Cells[g.victimCol][g.victimRow].Health = 0
-		g.cellCount--
-		affectedCols := []int{g.actionCol}
-		if g.victimCol != g.actionCol {
-			affectedCols = append(affectedCols, g.victimCol)
+		// All victims arrived — kill them and trigger drop.
+		colSet := map[int]bool{g.actionCol: true}
+		for _, v := range g.victims {
+			g.grid.Cells[v.col][v.row].Health = 0
+			colSet[v.col] = true
 		}
+		g.cellCount -= len(g.victims)
+		affectedCols := make([]int, 0, len(colSet))
+		for c := range colSet {
+			affectedCols = append(affectedCols, c)
+		}
+		g.victims = g.victims[:0]
 		spawned := g.buildDropAnims(affectedCols)
 		if respawnCells {
 			g.cellCount += spawned
@@ -652,7 +704,7 @@ func (g *Game) Update() error {
 
 	// Reset hover every tick; recompute below if conditions are met.
 	g.hoverCol, g.hoverRow = -1, -1
-	g.victimHintCol, g.victimHintRow = -1, -1
+	g.victimHints = g.victimHints[:0]
 
 	if g.targetAnimating {
 		if elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks) >= 1.0 {
@@ -692,26 +744,30 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawMoveAnims(screen)
 }
 
-// drawVictimLine draws the animated dotted hint line behind the circles,
-// from the victim cell toward the hovered cell.
+// drawVictimLine draws animated dotted hint lines behind the circles, one per
+// tied victim, each from that victim's cell toward the hovered cell.
 func (g *Game) drawVictimLine(screen *ebiten.Image) {
-	if g.hoverCol == -1 || g.victimHintCol == -1 {
+	if g.hoverCol == -1 || len(g.victimHints) == 0 {
 		return
 	}
-	fromX, fromY := cellCenter(g.victimHintCol, g.victimHintRow)
 	toX, toY := cellCenter(g.hoverCol, g.hoverRow)
-	dx := toX - fromX
-	dy := toY - fromY
-	length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-	if length > 0 {
+	const dotSpacing = float32(8) // px between dot centres
+	const dotRadius = float32(4.0)
+	// Offset advances at 20 px/sec = 20/60 px per tick
+	rawOff := float64(ebiten.Tick()) * (20.0 / 60.0)
+	offset := float32(math.Mod(rawOff, float64(dotSpacing)))
+	for _, hint := range g.victimHints {
+		hc, hr := hint[0], hint[1]
+		fromX, fromY := cellCenter(hc, hr)
+		dx := toX - fromX
+		dy := toY - fromY
+		length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+		if length <= 0 {
+			continue
+		}
 		ux := dx / length
 		uy := dy / length
-		const dotSpacing = float32(8) // px between dot centres
-		const dotRadius = float32(4.0)
-		// Offset advances at 20 px/sec = 20/60 px per tick
-		rawOff := float64(ebiten.Tick()) * (20.0 / 60.0)
-		offset := float32(math.Mod(rawOff, float64(dotSpacing)))
-		vc := g.grid.Cells[g.victimHintCol][g.victimHintRow].Color
+		vc := g.grid.Cells[hc][hr].Color
 		dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
 		for pos := offset; pos < length; pos += dotSpacing {
 			vector.DrawFilledCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
@@ -794,30 +850,30 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 		if t > 1.0 {
 			t = 1.0
 		}
-
-		var cx, cy float32
-		switch g.victimPathType {
-		case 0: // straight line
-			cx = g.victimFromX + t*(g.victimToX-g.victimFromX)
-			cy = g.victimFromY + t*(g.victimToY-g.victimFromY)
-		case 1: // quadratic Bezier arc
-			u := float32(1) - t
-			cx = u*u*g.victimFromX + 2*u*t*g.victimCtrlX + t*t*g.victimToX
-			cy = u*u*g.victimFromY + 2*u*t*g.victimCtrlY + t*t*g.victimToY
-		case 2: // inward spiral (radius shrinks, angle rotates)
-			ddx := g.victimFromX - g.victimToX
-			ddy := g.victimFromY - g.victimToY
-			r0 := float32(math.Sqrt(float64(ddx*ddx + ddy*ddy)))
-			theta0 := float32(math.Atan2(float64(ddy), float64(ddx)))
-			r := r0 * (1 - t)
-			theta := theta0 + g.victimSpiralTurns*2*float32(math.Pi)*t
-			cx = g.victimToX + r*float32(math.Cos(float64(theta)))
-			cy = g.victimToY + r*float32(math.Sin(float64(theta)))
-		}
-
-		radius := float32(cellSize/2-2) * g.victimCell.Health * (1 - t)
-		if radius > 0 {
-			vector.DrawFilledCircle(screen, cx, cy, radius, g.victimCell.Color, true)
+		for _, v := range g.victims {
+			var cx, cy float32
+			switch v.pathType {
+			case 0: // straight line
+				cx = v.fromX + t*(v.toX-v.fromX)
+				cy = v.fromY + t*(v.toY-v.fromY)
+			case 1: // quadratic Bezier arc
+				u := float32(1) - t
+				cx = u*u*v.fromX + 2*u*t*v.ctrlX + t*t*v.toX
+				cy = u*u*v.fromY + 2*u*t*v.ctrlY + t*t*v.toY
+			case 2: // inward spiral (radius shrinks, angle rotates)
+				ddx := v.fromX - v.toX
+				ddy := v.fromY - v.toY
+				r0 := float32(math.Sqrt(float64(ddx*ddx + ddy*ddy)))
+				theta0 := float32(math.Atan2(float64(ddy), float64(ddx)))
+				r := r0 * (1 - t)
+				theta := theta0 + v.spiralTurns*2*float32(math.Pi)*t
+				cx = v.toX + r*float32(math.Cos(float64(theta)))
+				cy = v.toY + r*float32(math.Sin(float64(theta)))
+			}
+			radius := float32(cellSize/2-2) * v.cell.Health * (1 - t)
+			if radius > 0 {
+				vector.DrawFilledCircle(screen, cx, cy, radius, v.cell.Color, true)
+			}
 		}
 	}
 }

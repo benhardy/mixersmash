@@ -330,6 +330,303 @@ func TestClosestColorNeighborFindsNearest(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// closestColorNeighbors (plural)
+// ---------------------------------------------------------------------------
+
+// makeUniformGrid returns a cols×rows grid of cells with the given colour and
+// Health 1.0.  Callers override specific cells after calling this helper.
+func makeUniformGrid(t *testing.T, cols, rows int, c color.RGBA) [][]Cell {
+	t.Helper()
+	cells := make([][]Cell, cols)
+	for col := range cells {
+		cells[col] = make([]Cell, rows)
+		for row := range cells[col] {
+			cells[col][row] = Cell{Color: c, Health: 1.0}
+		}
+	}
+	return cells
+}
+
+// pairsAsSet converts a [][2]int slice into a map keyed by [2]int for
+// order-independent set comparisons.
+func pairsAsSet(pairs [][2]int) map[[2]int]bool {
+	s := make(map[[2]int]bool, len(pairs))
+	for _, p := range pairs {
+		s[p] = true
+	}
+	return s
+}
+
+// TestClosestColorNeighborsSingleNearest verifies that when one neighbour is
+// strictly closer than all others, the plural function returns exactly that one.
+func TestClosestColorNeighborsSingleNearest(t *testing.T) {
+	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
+	// Kill all cells; selectively revive only the target and three neighbours.
+	for c := 0; c < 3; c++ {
+		for r := 0; r < 3; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+
+	// Target at (1,1): pure red.
+	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Health = 1.0
+
+	// Strictly closest: nearly-red at (2,2).
+	cells[2][2].Color = color.RGBA{R: 195, G: 5, B: 5, A: 255}
+	cells[2][2].Health = 1.0
+	// Farther: blue at (0,0).
+	cells[0][0].Color = color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	cells[0][0].Health = 1.0
+	// Farther: green at (1,0).
+	cells[1][0].Color = color.RGBA{R: 0, G: 200, B: 0, A: 255}
+	cells[1][0].Health = 1.0
+
+	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	if len(got) != 1 {
+		t.Fatalf("want exactly 1 result, got %d: %v", len(got), got)
+	}
+	if got[0] != [2]int{2, 2} {
+		t.Errorf("want {2,2}, got %v", got[0])
+	}
+}
+
+// TestClosestColorNeighborsTwoWayTie verifies that two neighbours sharing the
+// exact minimum redmean distance are both returned.
+func TestClosestColorNeighborsTwoWayTie(t *testing.T) {
+	// 3×3 grid with dead cells everywhere except the two tied neighbours and
+	// the target, so that no other live cell can influence the result.
+	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
+	// Kill all neighbours first.
+	for c := 0; c < 3; c++ {
+		for r := 0; r < 3; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+
+	// Target at (1,1).
+	cells[1][1].Color = color.RGBA{R: 200, G: 100, B: 100, A: 255}
+	cells[1][1].Health = 1.0
+
+	// Build two neighbours with identical colour so their distance to target
+	// is bitwise-equal (same float32).
+	tiedColor := color.RGBA{R: 190, G: 110, B: 90, A: 255}
+	cells[0][0].Color = tiedColor
+	cells[0][0].Health = 1.0
+	cells[2][0].Color = tiedColor
+	cells[2][0].Health = 1.0
+
+	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	if len(got) != 2 {
+		t.Fatalf("want 2 results (tied pair), got %d: %v", len(got), got)
+	}
+	want := pairsAsSet([][2]int{{0, 0}, {2, 0}})
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected result %v in tied pair", p)
+		}
+	}
+}
+
+// TestClosestColorNeighborsThreeWayTie verifies that three neighbours at the
+// exact same minimum distance are all returned.
+func TestClosestColorNeighborsThreeWayTie(t *testing.T) {
+	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
+	// Kill all neighbours.
+	for c := 0; c < 3; c++ {
+		for r := 0; r < 3; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+
+	// Target at (1,1).
+	cells[1][1].Color = color.RGBA{R: 200, G: 100, B: 100, A: 255}
+	cells[1][1].Health = 1.0
+
+	tiedColor := color.RGBA{R: 185, G: 115, B: 85, A: 255}
+	cells[0][0].Color = tiedColor
+	cells[0][0].Health = 1.0
+	cells[2][0].Color = tiedColor
+	cells[2][0].Health = 1.0
+	cells[0][2].Color = tiedColor
+	cells[0][2].Health = 1.0
+
+	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	if len(got) != 3 {
+		t.Fatalf("want 3 results (three-way tie), got %d: %v", len(got), got)
+	}
+	want := pairsAsSet([][2]int{{0, 0}, {2, 0}, {0, 2}})
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected result %v in three-way tie", p)
+		}
+	}
+}
+
+// TestClosestColorNeighborsTieNotAtMinimum verifies that when two neighbours tie
+// each other but a third is strictly closer, only the strictly-closest is returned.
+func TestClosestColorNeighborsTieNotAtMinimum(t *testing.T) {
+	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
+	for c := 0; c < 3; c++ {
+		for r := 0; r < 3; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+
+	// Target at (1,1): pure red.
+	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Health = 1.0
+
+	// Strictly closest: nearly red at (2,2).
+	cells[2][2].Color = color.RGBA{R: 198, G: 2, B: 2, A: 255}
+	cells[2][2].Health = 1.0
+
+	// Two neighbours that tie each other but are farther than (2,2).
+	tiedFarColor := color.RGBA{R: 100, G: 100, B: 100, A: 255}
+	cells[0][0].Color = tiedFarColor
+	cells[0][0].Health = 1.0
+	cells[2][0].Color = tiedFarColor
+	cells[2][0].Health = 1.0
+
+	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	if len(got) != 1 {
+		t.Fatalf("want exactly 1 result (strictly closest), got %d: %v", len(got), got)
+	}
+	if got[0] != [2]int{2, 2} {
+		t.Errorf("want {2,2}, got %v", got[0])
+	}
+}
+
+// TestClosestColorNeighborsSkipsDead verifies that neighbours with Health <= 0
+// are excluded even if their colour would tie or win.
+func TestClosestColorNeighborsSkipsDead(t *testing.T) {
+	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
+	for c := 0; c < 3; c++ {
+		for r := 0; r < 3; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+
+	// Target at (1,1): pure red.
+	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Health = 1.0
+
+	// Dead neighbour: perfect colour match, Health=0.
+	cells[2][2].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[2][2].Health = 0.0
+
+	// Also dead but negative health, same colour.
+	cells[0][0].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[0][0].Health = -1.0
+
+	// One live neighbour with a less-close colour.
+	cells[1][0].Color = color.RGBA{R: 150, G: 50, B: 50, A: 255}
+	cells[1][0].Health = 1.0
+
+	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	if len(got) != 1 {
+		t.Fatalf("want 1 live result, got %d: %v", len(got), got)
+	}
+	if got[0] == [2]int{2, 2} || got[0] == [2]int{0, 0} {
+		t.Errorf("dead cell returned: %v", got[0])
+	}
+	if got[0] != [2]int{1, 0} {
+		t.Errorf("want {1,0}, got %v", got[0])
+	}
+}
+
+// TestClosestColorNeighborsNoAlive verifies that an empty slice is returned
+// when no neighbour has Health > 0.
+func TestClosestColorNeighborsNoAlive(t *testing.T) {
+	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
+	// Kill all cells including potential neighbours.
+	for c := 0; c < 3; c++ {
+		for r := 0; r < 3; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+	// Keep only the target alive.
+	cells[1][1].Health = 1.0
+
+	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	if len(got) != 0 {
+		t.Fatalf("want empty slice, got %d results: %v", len(got), got)
+	}
+}
+
+// TestClosestColorNeighborsCornerTarget verifies that a corner target (0,0)
+// with only 3 valid neighbours still returns a correct result.
+func TestClosestColorNeighborsCornerTarget(t *testing.T) {
+	cells := makeUniformGrid(t, 5, 5, color.RGBA{128, 128, 128, 255})
+	// Kill all cells; selectively revive only the target and its 3 corner neighbours.
+	for c := 0; c < 5; c++ {
+		for r := 0; r < 5; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+
+	// Target at (0,0): pure red.
+	cells[0][0].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[0][0].Health = 1.0
+
+	// Among the 3 corner neighbours {(1,0),(0,1),(1,1)}, make (1,1) closest.
+	cells[1][1].Color = color.RGBA{R: 195, G: 5, B: 5, A: 255}
+	cells[1][1].Health = 1.0
+	cells[1][0].Color = color.RGBA{R: 0, G: 200, B: 0, A: 255}
+	cells[1][0].Health = 1.0
+	cells[0][1].Color = color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	cells[0][1].Health = 1.0
+
+	got := closestColorNeighbors(cells, 0, 0, 5, 5)
+	if len(got) != 1 {
+		t.Fatalf("want 1 result at corner, got %d: %v", len(got), got)
+	}
+	if got[0] != [2]int{1, 1} {
+		t.Errorf("want {1,1}, got %v", got[0])
+	}
+}
+
+// TestClosestColorNeighborsOrderIndependence verifies that the result set is
+// correct regardless of the internal neighbour scan order by checking set
+// membership rather than slice position.
+func TestClosestColorNeighborsOrderIndependence(t *testing.T) {
+	// 4×4 grid so the target at (1,1) has a full 8-neighbour ring.
+	cells := makeUniformGrid(t, 4, 4, color.RGBA{128, 128, 128, 255})
+	for c := 0; c < 4; c++ {
+		for r := 0; r < 4; r++ {
+			cells[c][r].Health = 0
+		}
+	}
+
+	// Target at (1,1).
+	cells[1][1].Color = color.RGBA{R: 200, G: 100, B: 50, A: 255}
+	cells[1][1].Health = 1.0
+
+	// Three tied winners placed at non-adjacent positions.
+	tiedColor := color.RGBA{R: 195, G: 105, B: 45, A: 255}
+	winners := [][2]int{{0, 0}, {2, 2}, {0, 2}}
+	for _, w := range winners {
+		cells[w[0]][w[1]].Color = tiedColor
+		cells[w[0]][w[1]].Health = 1.0
+	}
+
+	// One farther live cell.
+	cells[2][0].Color = color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	cells[2][0].Health = 1.0
+
+	got := closestColorNeighbors(cells, 1, 1, 4, 4)
+	if len(got) != 3 {
+		t.Fatalf("want 3 tied winners, got %d: %v", len(got), got)
+	}
+	wantSet := pairsAsSet(winners)
+	for _, p := range got {
+		if !wantSet[p] {
+			t.Errorf("unexpected result %v; expected one of %v", p, winners)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // gravityMoves
 // ---------------------------------------------------------------------------
 
