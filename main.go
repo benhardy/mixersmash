@@ -286,6 +286,12 @@ type Game struct {
 	// glyph rendering
 	glyphFont  *text.GoTextFaceSource
 	glyphCache map[color.RGBA]*ebiten.Image
+
+	// HiDPI render scale — set once per LayoutF call; derived from
+	// ebiten.Monitor().DeviceScaleFactor().
+	renderScale    float64 // current device scale factor (1.0 on standard displays)
+	deviceCellSize int     // device-pixel cell size, derived from rounded canvas dims
+	spriteRefSize  int     // device-pixel sprite bake diameter (≤512)
 }
 
 // scoreForKill returns the points earned for a single kill.
@@ -356,14 +362,22 @@ func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
 	return float32(currentTick-startTick) / float32(durationTicks)
 }
 
-// cellCenter returns the pixel centre of a grid cell.
+// cellCenter returns the logical pixel centre of a grid cell using the const
+// cellSize.  Kept pure so existing unit tests pass unchanged.
 func cellCenter(col, row int) (float32, float32) {
 	return float32(col*cellSize + cellSize/2), float32(row*cellSize + cellSize/2)
 }
 
-// compositeSpriteRefSize is the side length (pixels) of the square offscreen
-// image used to pre-render each composite creature sprite at 2× super-sample
-// resolution.  maxR = cellSize/2 - 2 = 30; diameter = 60; 2× = 120.
+// deviceCellCenter returns the device-pixel centre of a grid cell for the given
+// device cell size dcs.  Used wherever pixel coordinates must map to the
+// device-resolution canvas or screen.
+func deviceCellCenter(col, row, dcs int) (float32, float32) {
+	return float32(col*dcs + dcs/2), float32(row*dcs + dcs/2)
+}
+
+// compositeSpriteRefSize is the logical fallback side length used only before
+// the first LayoutF call sets g.spriteRefSize.  At runtime, spriteRefSize is
+// derived from deviceCellSize*2 (capped at 512) and updated on scale changes.
 const compositeSpriteRefSize = 120
 
 // compositeCachedSprite returns a pre-rendered composite *ebiten.Image for clr,
@@ -405,8 +419,13 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 		g.gelShader = s
 	}
 
-	const sz = compositeSpriteRefSize
-	const half = float32(sz) / 2
+	// Use the device-pixel bake size when available; fall back to the logical
+	// constant before the first LayoutF call initialises spriteRefSize.
+	sz := g.spriteRefSize
+	if sz <= 0 {
+		sz = compositeSpriteRefSize
+	}
+	half := float32(sz) / 2
 
 	composite := ebiten.NewImage(sz, sz)
 
@@ -477,9 +496,13 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, cl
 	if img == nil {
 		return
 	}
-	// Scale so the sprite's inscribed circle (diameter = compositeSpriteRefSize)
+	// Scale so the sprite's inscribed circle (diameter = sprite bake size)
 	// matches the requested radius.
-	scale := float64(radius*2) / float64(compositeSpriteRefSize)
+	refSz := g.spriteRefSize
+	if refSz <= 0 {
+		refSz = compositeSpriteRefSize
+	}
+	scale := float64(radius*2) / float64(refSz)
 	var opts ebiten.DrawImageOptions
 	opts.GeoM.Scale(scale, scale)
 	// Top-left of the scaled image: (cx - radius, cy - radius).
@@ -602,23 +625,35 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		}
 
 		// Create MoveAnims for moved alive cells — clear only their old (vacated) positions.
+		dcs := g.deviceCellSize
+		cw := g.canvas.Bounds().Max.X // guard against canvas size mismatch
+		ch := g.canvas.Bounds().Max.Y
 		for _, m := range moves {
 			cell := g.grid.Cells[col][m[1]]
-			fx, fy := cellCenter(col, m[0])
-			tx, ty := cellCenter(col, m[1])
+			fx, fy := deviceCellCenter(col, m[0], dcs)
+			tx, ty := deviceCellCenter(col, m[1], dcs)
 			g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
-			// Clear the vacated canvas position.
-			x0, y0 := col*cellSize, m[0]*cellSize
-			g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+			// Clear the vacated canvas position (clipped to canvas bounds).
+			x0, y0 := col*dcs, m[0]*dcs
+			x1, y1 := x0+dcs, y0+dcs
+			if x1 > cw {
+				x1 = cw
+			}
+			if y1 > ch {
+				y1 = ch
+			}
+			if x0 < x1 && y0 < y1 {
+				g.canvas.SubImage(image.Rect(x0, y0, x1, y1)).(*ebiten.Image).Clear()
+			}
 		}
 
 		if respawnCells {
 			// Create MoveAnims for new cells animating in from above screen.
 			for i := 0; i < len(holeRows); i++ {
 				cell := g.grid.Cells[col][i]
-				fx := float32(col*cellSize + cellSize/2)
-				fy := float32(-cellSize / 2)
-				tx, ty := cellCenter(col, i)
+				fx := float32(col*dcs + dcs/2)
+				fy := float32(-dcs / 2)
+				tx, ty := deviceCellCenter(col, i, dcs)
 				g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
 				// The canvas position for row i was vacated by the moved cell above — already cleared.
 			}
@@ -630,9 +665,14 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 // updateWaiting handles hover recompute and click processing while in stateWaiting.
 func (g *Game) updateWaiting() error {
 	// Hover recompute.
+	// CursorPosition returns device-pixel coords when LayoutF is in effect.
+	dcs := g.deviceCellSize
+	if dcs <= 0 {
+		dcs = cellSize
+	}
 	mx, my := ebiten.CursorPosition()
-	hc := mx / cellSize
-	hr := my / cellSize
+	hc := mx / dcs
+	hr := my / dcs
 	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 		if g.grid.Cells[hc][hr].Health > 0 {
 			g.hoverCol, g.hoverRow = hc, hr
@@ -646,7 +686,7 @@ func (g *Game) updateWaiting() error {
 	}
 	// Click handling.
 	px, py := ebiten.CursorPosition()
-	col, row := cellFromPixel(px, py, cellSize)
+	col, row := cellFromPixel(px, py, dcs)
 	if col < 0 || col >= g.grid.Cols || row < 0 || row >= g.grid.Rows {
 		return nil
 	}
@@ -719,15 +759,16 @@ func (g *Game) handleTargetDeath(col, row int, cell *Cell) {
 	// Capture target colour before the cell is cleared.
 	g.targetColor = g.grid.Cells[col][row].Color
 	// Redraw immediately so cell disappears.
-	g.drawCell(col, row, cell, cellSize, 1.0)
+	g.drawCell(col, row, cell, g.deviceCellSize, 1.0)
 	g.cellCount-- // decrement for the clicked cell
 	victimCoords := closestColorNeighbors(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
 	if len(victimCoords) > 0 {
-		toX, toY := cellCenter(col, row)
+		dcs := g.deviceCellSize
+		toX, toY := deviceCellCenter(col, row, dcs)
 		g.victims = g.victims[:0]
 		for _, vc := range victimCoords {
 			ncol, nrow := vc[0], vc[1]
-			fromX, fromY := cellCenter(ncol, nrow)
+			fromX, fromY := deviceCellCenter(ncol, nrow, dcs)
 			pt, cx, cy, st := victimPathParams(fromX, fromY, toX, toY)
 			v := VictimAnim{
 				col:         ncol,
@@ -744,8 +785,8 @@ func (g *Game) handleTargetDeath(col, row int, cell *Cell) {
 			}
 			g.victims = append(g.victims, v)
 			// Clear victim's canvas position (it is now an overlay animation).
-			x0, y0 := ncol*cellSize, nrow*cellSize
-			g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+			x0, y0 := ncol*dcs, nrow*dcs
+			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
 		}
 		g.animStart = ebiten.Tick()
 		g.currentState = stateVictimMoving
@@ -782,9 +823,10 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	}
 
 	// Set up bounce animation now that we know a shuffle will proceed.
-	maxR := float32(cellSize/2 - 2)
-	x0, y0 := col*cellSize, row*cellSize
-	g.canvas.SubImage(image.Rect(x0, y0, x0+cellSize, y0+cellSize)).(*ebiten.Image).Clear()
+	dcs := g.deviceCellSize
+	maxR := float32(dcs/2 - 2)
+	x0, y0 := col*dcs, row*dcs
+	g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
 	g.targetAnimating = true
 	g.targetAnimStart = ebiten.Tick()
 	g.targetAnimStartR = maxR * oldHealth
@@ -808,8 +850,8 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	for i := range aliveNeighbors {
 		src := orig[i]
 		dst := aliveNeighbors[perm[i]]
-		fx, fy := cellCenter(src.col, src.row)
-		tx, ty := cellCenter(dst[0], dst[1])
+		fx, fy := deviceCellCenter(src.col, src.row, dcs)
+		tx, ty := deviceCellCenter(dst[0], dst[1], dcs)
 		dx := tx - fx
 		dy := ty - fy
 		dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
@@ -833,7 +875,7 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 
 	// Clear source positions on canvas.
 	for _, n := range aliveNeighbors {
-		g.canvas.SubImage(image.Rect(n[0]*cellSize, n[1]*cellSize, (n[0]+1)*cellSize, (n[1]+1)*cellSize)).(*ebiten.Image).Clear()
+		g.canvas.SubImage(image.Rect(n[0]*dcs, n[1]*dcs, (n[0]+1)*dcs, (n[1]+1)*dcs)).(*ebiten.Image).Clear()
 	}
 
 	// Write cells to their permuted destinations in the grid.
@@ -889,11 +931,12 @@ func (g *Game) updateVictimMoving() error {
 func (g *Game) updateShuffling() error {
 	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, shuffleTicks)
 	if elapsed >= 1.0 {
+		dcs := g.deviceCellSize
 		for _, anim := range g.moveAnims {
-			col := int(anim.ToX) / cellSize
-			row := int(anim.ToY) / cellSize
+			col := int(anim.ToX) / dcs
+			row := int(anim.ToY) / dcs
 			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
+				g.drawCell(col, row, &g.grid.Cells[col][row], dcs, 1.0)
 			}
 		}
 		g.moveAnims = nil
@@ -907,11 +950,12 @@ func (g *Game) updateShuffling() error {
 func (g *Game) updateDropping() error {
 	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, dropTicks)
 	if elapsed >= 1.0 {
+		dcs := g.deviceCellSize
 		for _, anim := range g.moveAnims {
-			col := int(anim.ToX) / cellSize
-			row := int(anim.ToY) / cellSize
+			col := int(anim.ToX) / dcs
+			row := int(anim.ToY) / dcs
 			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				g.drawCell(col, row, &g.grid.Cells[col][row], cellSize, 1.0)
+				g.drawCell(col, row, &g.grid.Cells[col][row], dcs, 1.0)
 			}
 		}
 		g.moveAnims = nil
@@ -931,7 +975,7 @@ func (g *Game) Update() error {
 	if g.targetAnimating {
 		if elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks) >= 1.0 {
 			g.targetAnimating = false
-			g.drawCell(g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], cellSize, 1.0)
+			g.drawCell(g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], g.deviceCellSize, 1.0)
 		}
 	}
 
@@ -972,15 +1016,25 @@ func (g *Game) drawVictimLine(screen *ebiten.Image) {
 	if g.hoverCol == -1 || len(g.victimHints) == 0 {
 		return
 	}
-	toX, toY := cellCenter(g.hoverCol, g.hoverRow)
-	const dotSpacing = float32(8) // px between dot centres
-	const dotRadius = float32(4.0)
-	// Offset advances at 20 px/sec = 20/60 px per tick
-	rawOff := float64(ebiten.Tick()) * (20.0 / 60.0)
+	dcs := g.deviceCellSize
+	if dcs <= 0 {
+		dcs = cellSize
+	}
+	s := g.renderScale
+	if s <= 0 {
+		s = 1.0
+	}
+	toX, toY := deviceCellCenter(g.hoverCol, g.hoverRow, dcs)
+	// Dot spacing and radius scale with device scale so they appear the same
+	// physical size on all displays.
+	dotSpacing := float32(8) * float32(s)
+	dotRadius := float32(4.0) * float32(s)
+	// Offset advances at 20 logical px/sec = 20*s device px/sec = 20*s/60 device px/tick.
+	rawOff := float64(ebiten.Tick()) * (20.0 * s / 60.0)
 	offset := float32(math.Mod(rawOff, float64(dotSpacing)))
 	for _, hint := range g.victimHints {
 		hc, hr := hint[0], hint[1]
-		fromX, fromY := cellCenter(hc, hr)
+		fromX, fromY := deviceCellCenter(hc, hr, dcs)
 		dx := toX - fromX
 		dy := toY - fromY
 		length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
@@ -1021,7 +1075,11 @@ func (g *Game) drawTargetBounce(screen *ebiten.Image) {
 		eased := lt * lt    // ease-in: slow at peak, fast at end
 		r = g.targetAnimPeakR + (g.targetAnimEndR-g.targetAnimPeakR)*eased
 	}
-	cx, cy := cellCenter(g.actionCol, g.actionRow)
+	dcs := g.deviceCellSize
+	if dcs <= 0 {
+		dcs = cellSize
+	}
+	cx, cy := deviceCellCenter(g.actionCol, g.actionRow, dcs)
 	if r > 0 {
 		g.drawCompositeSprite(screen, cx, cy, r, g.targetAnimColor)
 	}
@@ -1039,7 +1097,11 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 		if t > 1.0 {
 			t = 1.0
 		}
-		maxR := float32(cellSize/2 - 2)
+		dcs := g.deviceCellSize
+		if dcs <= 0 {
+			dcs = cellSize
+		}
+		maxR := float32(dcs/2 - 2)
 		for _, anim := range g.moveAnims {
 			var cx, cy float32
 			if g.currentState == stateShuffling {
@@ -1092,7 +1154,11 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 				cx = v.toX + r*float32(math.Cos(float64(theta)))
 				cy = v.toY + r*float32(math.Sin(float64(theta)))
 			}
-			radius := float32(cellSize/2-2) * v.cell.Health * (1 - t)
+			dcs2 := g.deviceCellSize
+			if dcs2 <= 0 {
+				dcs2 = cellSize
+			}
+			radius := float32(dcs2/2-2) * v.cell.Health * (1 - t)
 			if radius > 0 {
 				g.drawCompositeSprite(screen, cx, cy, radius, v.cell.Color)
 			}
@@ -1100,7 +1166,78 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 	}
 }
 
-// Layout returns the logical screen dimensions.
+// deviceScale returns the current device scale factor using the non-deprecated
+// Monitor API (ebiten v2.6+).  Falls back to 1.0 when no monitor is available.
+func deviceScale() float64 {
+	m := ebiten.Monitor()
+	if m == nil {
+		return 1.0
+	}
+	s := m.DeviceScaleFactor()
+	if s <= 0 {
+		return 1.0
+	}
+	return s
+}
+
+// deviceCanvasDims returns the device-pixel canvas width and height for the
+// given logical window size and scale factor, rounded to the nearest integer.
+func deviceCanvasDims(s float64) (int, int) {
+	w := int(math.Round(float64(windowWidth) * s))
+	h := int(math.Round(float64(windowHeight) * s))
+	return w, h
+}
+
+// deviceCellSizeFor derives the device-pixel cell size from the rounded canvas
+// dimensions, dividing by the grid dimensions so tiles cover exactly.
+func deviceCellSizeFor(canvasW int) int {
+	dcs := canvasW / gridCols
+	if dcs < 1 {
+		dcs = 1
+	}
+	return dcs
+}
+
+// spriteRefSizeFor returns the device-pixel bake diameter for creature sprites.
+// Capped at 512 to avoid excessive GPU memory on very high-DPI displays.
+func spriteRefSizeFor(dcs int) int {
+	sz := int(math.Ceil(float64(dcs) * 2))
+	if sz > 512 {
+		sz = 512
+	}
+	if sz < 2 {
+		sz = 2
+	}
+	return sz
+}
+
+// LayoutF implements ebiten.LayoutFer, causing ebiten to call this instead of
+// Layout.  It returns the device-pixel screen size so that Draw receives a
+// device-sized *ebiten.Image.  When the scale factor changes (e.g. window moved
+// to a different monitor, or browser zoom), it reallocates the canvas and clears
+// the sprite cache so all cached sprites are rebaked at the new size.
+func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
+	s := deviceScale()
+	dw, dh := deviceCanvasDims(s)
+	if s != g.renderScale {
+		g.renderScale = s
+		g.deviceCellSize = deviceCellSizeFor(dw)
+		g.spriteRefSize = spriteRefSizeFor(g.deviceCellSize)
+		g.canvas = ebiten.NewImage(dw, dh)
+		// Clear sprite cache — sprites were baked at the old size.
+		g.glyphCache = nil
+		// Repaint all live cells into the new device-sized canvas.
+		for c := 0; c < g.grid.Cols; c++ {
+			for r := 0; r < g.grid.Rows; r++ {
+				g.drawCell(c, r, &g.grid.Cells[c][r], g.deviceCellSize, 1.0)
+			}
+		}
+	}
+	return float64(dw), float64(dh)
+}
+
+// Layout satisfies the ebiten.Game interface.  When LayoutF is implemented,
+// ebiten never calls Layout, but the method is required by the interface.
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return windowWidth, windowHeight
 }
@@ -1111,10 +1248,8 @@ func main() {
 	ebiten.SetWindowClosingHandled(false)
 
 	grid := NewGrid(gridCols, gridRows)
-	canvas := ebiten.NewImage(windowWidth, windowHeight)
 
 	game := newGameState(grid)
-	game.canvas = canvas
 	game.animStart = ebiten.Tick()
 
 	glyphFont, err := loadGlyphFont()
@@ -1123,9 +1258,17 @@ func main() {
 	}
 	game.glyphFont = glyphFont
 
+	// Initialise device-resolution canvas before RunGame so the first Draw is
+	// not blank.  LayoutF will repaint when the scale factor changes later.
+	s := deviceScale()
+	game.renderScale = s
+	dw, dh := deviceCanvasDims(s)
+	game.deviceCellSize = deviceCellSizeFor(dw)
+	game.spriteRefSize = spriteRefSizeFor(game.deviceCellSize)
+	game.canvas = ebiten.NewImage(dw, dh)
 	for c := 0; c < grid.Cols; c++ {
 		for r := 0; r < grid.Rows; r++ {
-			game.drawCell(c, r, &grid.Cells[c][r], cellSize, 1.0)
+			game.drawCell(c, r, &grid.Cells[c][r], game.deviceCellSize, 1.0)
 		}
 	}
 
