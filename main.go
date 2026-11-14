@@ -339,12 +339,8 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 			// Clear the vacated canvas position (clipped to canvas bounds).
 			x0, y0 := col*dcs, m[0]*dcs
 			x1, y1 := x0+dcs, y0+dcs
-			if x1 > cw {
-				x1 = cw
-			}
-			if y1 > ch {
-				y1 = ch
-			}
+			x1 = min(x1, cw)
+			y1 = min(y1, ch)
 			if x0 < x1 && y0 < y1 {
 				g.canvas.SubImage(image.Rect(x0, y0, x1, y1)).(*ebiten.Image).Clear()
 			}
@@ -407,9 +403,7 @@ func (g *Game) buildCollapseAnims() bool {
 	for col := range clearColSet {
 		x0 := col * dcs
 		x1 := x0 + dcs
-		if x1 > cw {
-			x1 = cw
-		}
+		x1 = min(x1, cw)
 		if x0 < x1 {
 			g.canvas.SubImage(image.Rect(x0, 0, x1, ch)).(*ebiten.Image).Clear()
 		}
@@ -904,9 +898,7 @@ func (g *Game) drawTargetBounce(screen *ebiten.Image) {
 		return
 	}
 	t := elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks)
-	if t > 1.0 {
-		t = 1.0
-	}
+	t = min(t, 1.0)
 	var r float32
 	if t < 0.5 {
 		lt := t * 2              // 0→1 in phase 1
@@ -936,9 +928,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			ticks = dropTicks
 		}
 		t = elapsedFraction(ebiten.Tick(), g.animStart, ticks)
-		if t > 1.0 {
-			t = 1.0
-		}
+		t = min(t, 1.0)
 		dcs := g.deviceCellSize
 		if dcs <= 0 {
 			dcs = cellSize
@@ -964,9 +954,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 
 	if g.currentState == stateVictimMoving {
 		t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
-		if t > 1.0 {
-			t = 1.0
-		}
+		t = min(t, 1.0)
 		for _, v := range g.victims {
 			var cx, cy float32
 			switch v.pathType {

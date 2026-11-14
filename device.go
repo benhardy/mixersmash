@@ -32,9 +32,7 @@ func deviceCanvasDims(s float64) (int, int) {
 // dimensions, dividing by the grid dimensions so tiles cover exactly.
 func deviceCellSizeFor(canvasW int) int {
 	dcs := canvasW / gridCols
-	if dcs < 1 {
-		dcs = 1
-	}
+	dcs = max(dcs, 1)
 	return dcs
 }
 
@@ -42,12 +40,8 @@ func deviceCellSizeFor(canvasW int) int {
 // Capped at 512 to avoid excessive GPU memory on very high-DPI displays.
 func spriteRefSizeFor(dcs int) int {
 	sz := int(math.Ceil(float64(dcs) * 2))
-	if sz > 512 {
-		sz = 512
-	}
-	if sz < 2 {
-		sz = 2
-	}
+	sz = min(sz, 512)
+	sz = max(sz, 2)
 	return sz
 }
 
