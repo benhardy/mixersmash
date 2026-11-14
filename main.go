@@ -32,7 +32,7 @@ const (
 	victimTicks     = int64(24) // 0.4s at 60tps
 	targetAnimTicks = int64(15) // 0.25s at 60 TPS
 
-	healthDecrement = float32(0.2)
+	healthDecrement = float32(1.0 / 3.0)
 	healthMin       = float32(0.2)
 	healthEpsilon   = float32(0.001)
 

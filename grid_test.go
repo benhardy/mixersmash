@@ -171,8 +171,8 @@ func TestNewGameStateInitialFields(t *testing.T) {
 // TestHealthConstants documents the expected values of the health magic numbers
 // so that any accidental change to the step or floor is caught immediately.
 func TestHealthConstants(t *testing.T) {
-	if healthDecrement != 0.2 {
-		t.Errorf("healthDecrement = %v, want 0.2", healthDecrement)
+	if healthDecrement != float32(1.0/3.0) {
+		t.Errorf("healthDecrement = %v, want %v (1/3)", healthDecrement, float32(1.0/3.0))
 	}
 	if healthMin != 0.2 {
 		t.Errorf("healthMin = %v, want 0.2", healthMin)
