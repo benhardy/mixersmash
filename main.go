@@ -57,35 +57,43 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 
 // gelShaderSrc is a Kage fragment shader that renders an Aqua-style gel body.
 // srcPos is in pixel coordinates (0,0)→(Size.x,Size.y) because of //kage:unit pixels.
+// Images[0] is the base image (fill + glyph, fully opaque); the shader samples it
+// for the base colour and applies the gel lighting over the sampled pixel.
 // Output is premultiplied RGBA.
 const gelShaderSrc = `//kage:unit pixels
 package main
 
 var Size vec2
-var BaseColor vec3
 var Hover float
 
 func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+    // local converts atlas-relative srcPos to 0..Size coordinates so that
+    // geometry (center, radius, p) is independent of base's atlas placement.
+    local := srcPos - imageSrc0Origin()
     center := Size * 0.5
     radius := min(center.x, center.y)
-    p := (srcPos - center) / radius
+    p := (local - center) / radius
     dist := length(p)
     pixelWidth := 1.5 / radius
     alpha := 1.0 - smoothstep(1.0-pixelWidth, 1.0, dist)
     if alpha <= 0.0 { return vec4(0.0) }
+    // Sample the base image (fill + glyph). imageSrc0At returns premultiplied
+    // RGBA. The base image is fully opaque (A=255 everywhere), so premultiplied
+    // rgb == straight rgb and no division is needed.
+    baseColor := imageSrc0At(srcPos).rgb
     t := clamp((p.y+1.0)*0.5, 0.0, 1.0)
-    topColor := BaseColor * 0.35
-    bottomColor := mix(BaseColor, vec3(1.0), 0.35)
+    topColor := baseColor * 0.35
+    bottomColor := mix(baseColor, vec3(1.0), 0.35)
     col := mix(topColor, bottomColor, pow(t, 1.3))
     bottomGlow := smoothstep(0.1, 0.95, p.y) * (1.0 - smoothstep(0.65, 1.0, dist))
-    col += mix(BaseColor, vec3(1.0), 0.65) * bottomGlow * (0.55 + Hover*0.2)
+    col += mix(baseColor, vec3(1.0), 0.65) * bottomGlow * (0.55 + Hover*0.2)
     glossP := vec2(p.x*1.18, (p.y+0.44)*1.85)
     glossDist := length(glossP)
     glossMask := 1.0 - smoothstep(0.72, 0.78, glossDist)
     glossFade := clamp(1.0-(p.y+0.92)*1.15, 0.0, 1.0)
     col = mix(col, vec3(1.0), glossMask*glossFade*0.85)
     rim := smoothstep(0.90, 0.98, dist) * (1.0 - smoothstep(0.98, 1.0, dist))
-    col += mix(BaseColor, vec3(1.0), 0.5) * rim * 0.45
+    col += mix(baseColor, vec3(1.0), 0.5) * rim * 0.45
     return vec4(col*alpha, alpha)
 }
 `
@@ -293,6 +301,10 @@ type Game struct {
 	renderScale    float64 // current device scale factor (1.0 on standard displays)
 	deviceCellSize int     // device-pixel cell size, derived from rounded canvas dims
 	spriteRefSize  int     // device-pixel sprite bake diameter (≤512)
+
+	// initialPainted is false until the first in-loop frame, at which point
+	// repaintGrid is called to bake all sprites with a live graphics context.
+	initialPainted bool
 }
 
 // scoreForKill returns the points earned for a single kill.
@@ -385,13 +397,17 @@ const compositeSpriteRefSize = 120
 // building and caching it on first call.  The image carries a circa-2003 Apple
 // Aqua jelly-button look rendered via the gel fragment shader:
 //
-//  1. Gel body — rendered by gelShaderSrc via DrawRectShader (BlendSourceOver).
-//     The shader owns the circular edge (soft antialiased rim); no separate
-//     mask is applied to the body.
-//  2. Creature glyph, tinted darkerShade(clr), clipped to the circle.
-//     The glyph is drawn into a temp image, masked with a filled-circle
-//     BlendDestinationIn pass, then composited over the body with
-//     BlendSourceOver.  This keeps the shader's smooth rim intact.
+//  1. Base image — an sz×sz opaque image filled with clr, then the creature
+//     glyph (tinted darkerShade(clr)) drawn directly onto it.  The base image
+//     is fully opaque so its rgb values equal straight (non-premultiplied) rgb.
+//  2. Gel shader pass — gelShaderSrc runs via DrawRectShader, sampling the base
+//     image (Images[0]) at each pixel to obtain the local colour, then applies
+//     the full Aqua gel lighting (vertical gradient, bottom caustic, gloss
+//     highlight, rim) over that sampled colour.  The shader owns the circular
+//     AA edge and outputs premultiplied vec4(col*alpha, alpha).
+//
+// The glyph is embedded under the gel lighting (gradient, gloss, rim all apply
+// over it), giving an inset "carved into jelly" appearance.
 //
 // Returns nil if the gel shader could not be compiled, the font is not loaded,
 // or no glyph is mapped to clr.
@@ -428,34 +444,15 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 	}
 	half := float32(sz) / 2
 
-	composite := ebiten.NewImage(sz, sz)
+	// ------------------------------------------------------------------ //
+	// Step 1: build the base image — opaque fill colour + creature glyph.
+	// This is the source image the gel shader will sample.
+	// The image is fully opaque (A=255 everywhere after the fill), so the
+	// shader can use sampled .rgb directly as straight colour values.
+	// ------------------------------------------------------------------ //
+	base := ebiten.NewImage(sz, sz)
+	base.Fill(clr)
 
-	// ------------------------------------------------------------------ //
-	// Layer 1: gel body via fragment shader.
-	// DrawRectShader with //kage:unit pixels: srcPos runs (0,0)→(sz,sz).
-	// Size uniform = {sz, sz} so the shader computes center = Size*0.5 = {half,half}.
-	// BaseColor is normalised to [0,1]. Hover = 0 for the baked sprite.
-	// The shader already returns premultiplied vec4(col*alpha, alpha) and
-	// produces a smooth antialiased circular rim — no additional mask needed
-	// on the body.
-	// ------------------------------------------------------------------ //
-	var gelOpts ebiten.DrawRectShaderOptions
-	gelOpts.Blend = ebiten.BlendSourceOver
-	gelOpts.Uniforms = map[string]any{
-		"Size":      []float32{float32(sz), float32(sz)},
-		"BaseColor": []float32{float32(clr.R) / 255.0, float32(clr.G) / 255.0, float32(clr.B) / 255.0},
-		"Hover":     float32(0),
-	}
-	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
-
-	// ------------------------------------------------------------------ //
-	// Layer 2: creature glyph, tinted darkerShade(clr), clipped to circle.
-	// Draw the glyph into a temp image, apply a filled-circle
-	// BlendDestinationIn mask so wide glyphs (e.g. octopus) are clipped,
-	// then composite the result over the shader body with BlendSourceOver.
-	// The body's smooth shader rim is not touched by this pass.
-	// ------------------------------------------------------------------ //
-	glyphImg := ebiten.NewImage(sz, sz)
 	glyphSize := float64(sz) * 0.75
 	face := &text.GoTextFace{
 		Source: g.glyphFont,
@@ -468,19 +465,24 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 	drawOpts.ColorScale.ScaleWithColor(tint)
 	nudgeY := float64(sz) * 0.03
 	drawOpts.GeoM.Translate(float64(half)-w/2, float64(half)-h/2+nudgeY)
-	text.Draw(glyphImg, str, face, &drawOpts)
+	text.Draw(base, str, face, &drawOpts)
 
-	// Clip the glyph image to the circle.
-	maskImg := ebiten.NewImage(sz, sz)
-	vector.DrawFilledCircle(maskImg, half, half, half-1, color.White, true)
-	var maskOpts ebiten.DrawImageOptions
-	maskOpts.Blend = ebiten.BlendDestinationIn
-	glyphImg.DrawImage(maskImg, &maskOpts)
-
-	// Composite clipped glyph over the gel body.
-	var glyphOpts ebiten.DrawImageOptions
-	glyphOpts.Blend = ebiten.BlendSourceOver
-	composite.DrawImage(glyphImg, &glyphOpts)
+	// ------------------------------------------------------------------ //
+	// Step 2: apply the gel shader from base → composite.
+	// The shader samples Images[0] (base) for the per-pixel base colour and
+	// applies all gel lighting math over it, outputting premultiplied RGBA
+	// with the circular AA alpha. composite is a DIFFERENT image from base,
+	// so DrawRectShader reads and writes distinct images as required.
+	// ------------------------------------------------------------------ //
+	composite := ebiten.NewImage(sz, sz)
+	var gelOpts ebiten.DrawRectShaderOptions
+	gelOpts.Blend = ebiten.BlendSourceOver
+	gelOpts.Uniforms = map[string]any{
+		"Size":  []float32{float32(sz), float32(sz)},
+		"Hover": float32(0),
+	}
+	gelOpts.Images[0] = base
+	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
 
 	g.glyphCache[clr] = composite
 	return composite
@@ -517,7 +519,9 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, cl
 // drawCell erases the cell's bounding rectangle on canvas with black and
 // redraws the antialiased circle for (col, row).  No glow is drawn here;
 // glow is composited onto the screen each frame in Draw().
-func (g *Game) drawCell(col, row int, cell *Cell, cs int, cellFullness float32) {
+func (g *Game) drawCell(col, row int, cellFullness float32) {
+	cell := &g.grid.Cells[col][row]
+	cs := g.deviceCellSize
 	csFloat := float32(cs)
 
 	// Clear exactly the cell rect — full pixel replacement, not a blend.
@@ -833,10 +837,30 @@ func (g *Game) buildCollapseAnims() bool {
 	return true
 }
 
+// repaintGrid redraws every cell from the model onto the offscreen canvas,
+// fully re-syncing canvas state with the grid. Dead cells are cleared to blank.
+// This is called only at settle points (no animation is in flight).
+func (g *Game) repaintGrid() {
+	for c := 0; c < g.grid.Cols; c++ {
+		for r := 0; r < g.grid.Rows; r++ {
+			g.drawCell(c, r, 1.0)
+		}
+	}
+}
+
+// enterWaiting repaints the full grid canvas from the model and transitions to
+// stateWaiting. All settle-to-waiting paths must go through this helper so
+// canvas drift is corrected on every settle.
+func (g *Game) enterWaiting() {
+	g.repaintGrid()
+	g.currentState = stateWaiting
+}
+
 // settleAfterRemoval is called at every settle point that follows a cell
 // removal. It runs the horizontal collapse check: if empty columns exist,
 // buildCollapseAnims enters stateColumnCollapsing and returns true, so this
-// function does nothing further. Otherwise it sets currentState = stateWaiting.
+// function does nothing further. Otherwise it transitions to stateWaiting via
+// enterWaiting, which repaints the full canvas from the model.
 //
 // All removal→waiting paths funnel through this helper so the collapse check
 // is never skipped. The shuffle/survival path (no removal) must NOT call this.
@@ -844,7 +868,7 @@ func (g *Game) settleAfterRemoval() {
 	if g.buildCollapseAnims() {
 		return
 	}
-	g.currentState = stateWaiting
+	g.enterWaiting()
 }
 
 // updateColumnCollapsing waits for the horizontal column-collapse animation to
@@ -857,11 +881,11 @@ func (g *Game) updateColumnCollapsing() error {
 			col := int(anim.ToX) / dcs
 			row := int(anim.ToY) / dcs
 			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				g.drawCell(col, row, &g.grid.Cells[col][row], dcs, 1.0)
+				g.drawCell(col, row, 1.0)
 			}
 		}
 		g.moveAnims = nil
-		g.currentState = stateWaiting
+		g.enterWaiting()
 	}
 	return nil
 }
@@ -912,7 +936,7 @@ func (g *Game) updateWaiting() error {
 	g.actionRow = row
 
 	if cell.Health <= 0 {
-		g.handleTargetDeath(col, row, cell)
+		g.handleTargetDeath(col, row)
 	} else {
 		if !g.handleTargetSurvival(col, row, cell, oldHealth) {
 			return nil
@@ -959,11 +983,11 @@ func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrl
 // drained to zero: redraws the dead cell, selects all tied-closest victims to
 // animate into it (transitioning to stateVictimMoving), or falls straight to
 // stateDropping when no victim exists.
-func (g *Game) handleTargetDeath(col, row int, cell *Cell) {
+func (g *Game) handleTargetDeath(col, row int) {
 	// Capture target colour before the cell is cleared.
 	g.targetColor = g.grid.Cells[col][row].Color
 	// Redraw immediately so cell disappears.
-	g.drawCell(col, row, cell, g.deviceCellSize, 1.0)
+	g.drawCell(col, row, 1.0)
 	g.cellCount-- // decrement for the clicked cell
 	victimCoords := closestColorNeighbors(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
 	if len(victimCoords) > 0 {
@@ -1142,11 +1166,11 @@ func (g *Game) updateShuffling() error {
 			col := int(anim.ToX) / dcs
 			row := int(anim.ToY) / dcs
 			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				g.drawCell(col, row, &g.grid.Cells[col][row], dcs, 1.0)
+				g.drawCell(col, row, 1.0)
 			}
 		}
 		g.moveAnims = nil
-		g.currentState = stateWaiting
+		g.enterWaiting()
 	}
 	return nil
 }
@@ -1162,7 +1186,7 @@ func (g *Game) updateDropping() error {
 			col := int(anim.ToX) / dcs
 			row := int(anim.ToY) / dcs
 			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				g.drawCell(col, row, &g.grid.Cells[col][row], dcs, 1.0)
+				g.drawCell(col, row, 1.0)
 			}
 		}
 		g.moveAnims = nil
@@ -1173,6 +1197,15 @@ func (g *Game) updateDropping() error {
 
 // Update handles input each tick.
 func (g *Game) Update() error {
+	// First in-loop frame: bake all sprites with a live graphics context so
+	// that ebiten.NewImage / DrawRectShader / text.Draw have a valid backend.
+	// This must run before any state logic so the canvas is fully painted
+	// before the first Draw call.
+	if !g.initialPainted {
+		g.repaintGrid()
+		g.initialPainted = true
+	}
+
 	ebiten.SetWindowTitle(fmt.Sprintf("MixerSmash — cells: %d  score: %d", g.cellCount, g.score))
 
 	// Reset hover every tick; recompute below if conditions are met.
@@ -1182,7 +1215,7 @@ func (g *Game) Update() error {
 	if g.targetAnimating {
 		if elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks) >= 1.0 {
 			g.targetAnimating = false
-			g.drawCell(g.actionCol, g.actionRow, &g.grid.Cells[g.actionCol][g.actionRow], g.deviceCellSize, 1.0)
+			g.drawCell(g.actionCol, g.actionRow, 1.0)
 		}
 	}
 
@@ -1438,7 +1471,7 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 		// Repaint all live cells into the new device-sized canvas.
 		for c := 0; c < g.grid.Cols; c++ {
 			for r := 0; r < g.grid.Rows; r++ {
-				g.drawCell(c, r, &g.grid.Cells[c][r], g.deviceCellSize, 1.0)
+				g.drawCell(c, r, 1.0)
 			}
 		}
 	}
@@ -1468,19 +1501,17 @@ func main() {
 	}
 	game.glyphFont = glyphFont
 
-	// Initialise device-resolution canvas before RunGame so the first Draw is
-	// not blank.  LayoutF will repaint when the scale factor changes later.
+	// Allocate the device-resolution canvas before RunGame so that dimensions
+	// and renderScale are set for the first LayoutF call.  Drawing/baking is
+	// deferred to the first Update tick (initialPainted gate) so that
+	// ebiten.NewImage / DrawRectShader / text.Draw run with a live graphics
+	// context rather than a cold one that can produce blank sprites.
 	s := deviceScale()
 	game.renderScale = s
 	dw, dh := deviceCanvasDims(s)
 	game.deviceCellSize = deviceCellSizeFor(dw)
 	game.spriteRefSize = spriteRefSizeFor(game.deviceCellSize)
 	game.canvas = ebiten.NewImage(dw, dh)
-	for c := 0; c < grid.Cols; c++ {
-		for r := 0; r < grid.Rows; r++ {
-			game.drawCell(c, r, &grid.Cells[c][r], game.deviceCellSize, 1.0)
-		}
-	}
 
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
