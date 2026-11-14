@@ -64,7 +64,7 @@ type Game struct {
 	victimHints        [][2]int // closest-colour neighbours of hovered cell (empty = none)
 
 	// victim movement animation fields (one entry per simultaneous victim)
-	victims []VictimAnim
+	victims []MoveAnim
 
 	// target cell bounce animation fields
 	targetAnimating    bool
@@ -335,7 +335,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 			cell := g.grid.Cells[col][m[1]]
 			fx, fy := deviceCellCenter(col, m[0], dcs)
 			tx, ty := deviceCellCenter(col, m[1], dcs)
-			g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
+			g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 			// Clear the vacated canvas position (clipped to canvas bounds).
 			x0, y0 := col*dcs, m[0]*dcs
 			x1, y1 := x0+dcs, y0+dcs
@@ -353,7 +353,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 				fx := float32(col*dcs + dcs/2)
 				fy := float32(-dcs / 2)
 				tx, ty := deviceCellCenter(col, i, dcs)
-				g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
+				g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 				// The canvas position for row i was vacated by the moved cell above — already cleared.
 			}
 		}
@@ -422,7 +422,7 @@ func (g *Game) buildCollapseAnims() bool {
 			}
 			fx, fy := deviceCellCenter(oldCol, r, dcs)
 			tx, ty := deviceCellCenter(newCol, r, dcs)
-			g.moveAnims = append(g.moveAnims, MoveAnim{fx, fy, tx, ty, 0, 0, cell})
+			g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 		}
 	}
 
@@ -540,8 +540,8 @@ func (g *Game) updateWaiting() error {
 }
 
 // victimPathParams computes the path parameters for a single victim moving from
-// (fromX,fromY) to (toX,toY) and returns a partially-filled VictimAnim with
-// pathType, ctrlX, ctrlY, and spiralTurns set.
+// (fromX,fromY) to (toX,toY) and returns PathType, CtrlX, CtrlY, and
+// SpiralTurns for use in a MoveAnim victim entry.
 func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrlY, spiralTurns float32) {
 	pathType = rand.Intn(3)
 	dx := toX - fromX
@@ -592,18 +592,18 @@ func (g *Game) handleTargetDeath(col, row int) {
 			ncol, nrow := vc[0], vc[1]
 			fromX, fromY := deviceCellCenter(ncol, nrow, dcs)
 			pt, cx, cy, st := victimPathParams(fromX, fromY, toX, toY)
-			v := VictimAnim{
-				col:         ncol,
-				row:         nrow,
-				cell:        g.grid.Cells[ncol][nrow], // snapshot
-				fromX:       fromX,
-				fromY:       fromY,
-				toX:         toX,
-				toY:         toY,
-				pathType:    pt,
-				ctrlX:       cx,
-				ctrlY:       cy,
-				spiralTurns: st,
+			v := MoveAnim{
+				Col:         ncol,
+				Row:         nrow,
+				Cell:        g.grid.Cells[ncol][nrow], // snapshot
+				FromX:       fromX,
+				FromY:       fromY,
+				ToX:         toX,
+				ToY:         toY,
+				PathType:    pt,
+				CtrlX:       cx,
+				CtrlY:       cy,
+				SpiralTurns: st,
 			}
 			g.victims = append(g.victims, v)
 			// Clear victim's canvas position (it is now an overlay animation).
@@ -694,7 +694,7 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 			ctrlX = fx
 			ctrlY = fy
 		}
-		anims[i] = MoveAnim{fx, fy, tx, ty, ctrlX, ctrlY, src.cell}
+		anims[i] = MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
 	}
 
 	// Clear source positions on canvas.
@@ -722,13 +722,13 @@ func (g *Game) updateVictimMoving() error {
 		// All victims arrived — score the kill, kill them, and trigger drop.
 		victimColors := make([]color.RGBA, len(g.victims))
 		for i, v := range g.victims {
-			victimColors[i] = v.cell.Color()
+			victimColors[i] = v.Cell.Color()
 		}
 		g.score += scoreForKill(victimColors, g.targetColor)
 		colSet := map[int]bool{g.actionCol: true}
 		for _, v := range g.victims {
-			g.grid.Cells[v.col][v.row].Health = 0
-			colSet[v.col] = true
+			g.grid.Cells[v.Col][v.Row].Health = 0
+			colSet[v.Col] = true
 		}
 		g.cellCount -= len(g.victims)
 		affectedCols := make([]int, 0, len(colSet))
@@ -957,28 +957,28 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 		t = min(t, 1.0)
 		for _, v := range g.victims {
 			var cx, cy float32
-			switch v.pathType {
+			switch v.PathType {
 			case 0: // straight line
-				cx, cy = lerp2(v.fromX, v.fromY, v.toX, v.toY, t)
+				cx, cy = lerp2(v.FromX, v.FromY, v.ToX, v.ToY, t)
 			case 1: // quadratic Bezier arc
-				cx, cy = quadBezier2(v.fromX, v.fromY, v.ctrlX, v.ctrlY, v.toX, v.toY, t)
+				cx, cy = quadBezier2(v.FromX, v.FromY, v.CtrlX, v.CtrlY, v.ToX, v.ToY, t)
 			case 2: // inward spiral (radius shrinks, angle rotates)
-				ddx := v.fromX - v.toX
-				ddy := v.fromY - v.toY
+				ddx := v.FromX - v.ToX
+				ddy := v.FromY - v.ToY
 				r0 := float32(math.Sqrt(float64(ddx*ddx + ddy*ddy)))
 				theta0 := float32(math.Atan2(float64(ddy), float64(ddx)))
 				r := r0 * (1 - t)
-				theta := theta0 + v.spiralTurns*2*float32(math.Pi)*t
-				cx = v.toX + r*float32(math.Cos(float64(theta)))
-				cy = v.toY + r*float32(math.Sin(float64(theta)))
+				theta := theta0 + v.SpiralTurns*2*float32(math.Pi)*t
+				cx = v.ToX + r*float32(math.Cos(float64(theta)))
+				cy = v.ToY + r*float32(math.Sin(float64(theta)))
 			}
 			dcs2 := g.deviceCellSize
 			if dcs2 <= 0 {
 				dcs2 = cellSize
 			}
-			radius := float32(dcs2/2-2) * v.cell.Health * (1 - t)
+			radius := float32(dcs2/2-2) * v.Cell.Health * (1 - t)
 			if radius > 0 {
-				g.drawCompositeSprite(screen, cx, cy, radius, v.cell.Creature)
+				g.drawCompositeSprite(screen, cx, cy, radius, v.Cell.Creature)
 			}
 		}
 	}

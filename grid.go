@@ -24,14 +24,23 @@ func (c Cell) Color() color.RGBA {
 }
 
 // MoveAnim describes the animated movement of a cell from one pixel position to
-// another during shuffle or drop phases. FromX/FromY and ToX/ToY are pixel centres.
-// CtrlX/CtrlY is the quadratic Bézier control point used during shuffle; zero
-// value falls back to straight-line interpolation (used for drops).
+// another during shuffle, drop, or victim-move phases. FromX/FromY and ToX/ToY
+// are pixel centres. CtrlX/CtrlY is the quadratic Bézier control point used
+// during shuffle and arc-path victim moves; zero value falls back to straight-line
+// interpolation (used for drops).
+//
+// Col, Row, PathType, and SpiralTurns are used only by the victim-move phase.
+// PathType: 0 = straight line, 1 = quadratic Bézier arc, 2 = inward spiral.
+// SpiralTurns: signed — positive = CCW, negative = CW.
 type MoveAnim struct {
 	FromX, FromY float32
 	ToX, ToY     float32
 	CtrlX, CtrlY float32 // quadratic Bézier control point; zero = straight line
 	Cell         Cell
+	Col          int     // victim-move phase: original grid column
+	Row          int     // victim-move phase: original grid row
+	PathType     int     // victim-move phase: 0=straight, 1=arc, 2=spiral
+	SpiralTurns  float32 // victim-move phase: signed turn count
 }
 
 // Grid holds the grid dimensions and per-cell colours.
@@ -39,18 +48,6 @@ type Grid struct {
 	Cols  int
 	Rows  int
 	Cells [][]Cell
-}
-
-// VictimAnim holds per-victim animation state for the stateVictimMoving phase.
-// All victims converge on the same target cell centre (toX, toY).
-type VictimAnim struct {
-	col, row     int     // victim's original grid position
-	cell         Cell    // snapshot of the victim cell before animation
-	fromX, fromY float32 // pixel start (victim cell centre)
-	toX, toY     float32 // pixel end (target cell centre, same for all victims)
-	pathType     int     // 0=straight, 1=arc, 2=spiral
-	ctrlX, ctrlY float32 // Bezier control point for arc path
-	spiralTurns  float32 // signed: positive=CCW, negative=CW
 }
 
 // NewGrid initialises a Grid with random opaque colours in every cell.
