@@ -67,16 +67,15 @@ type Game struct {
 	victims []VictimAnim
 
 	// target cell bounce animation fields
-	targetAnimating  bool
-	targetAnimStart  int64
-	targetAnimStartR float32
-	targetAnimPeakR  float32
-	targetAnimEndR   float32
-	targetAnimColor  color.RGBA
+	targetAnimating    bool
+	targetAnimStart    int64
+	targetAnimStartR   float32
+	targetAnimPeakR    float32
+	targetAnimEndR     float32
+	targetAnimCreature *Creature
 
 	// glyph rendering
-	glyphFont  *text.GoTextFaceSource
-	glyphCache map[color.RGBA]*ebiten.Image
+	glyphFont *text.GoTextFaceSource
 
 	// HiDPI render scale — set once per LayoutF call; derived from
 	// ebiten.Monitor().DeviceScaleFactor().
@@ -108,13 +107,13 @@ func newGameState(grid *Grid) *Game {
 	}
 }
 
-// compositeCachedSprite returns a pre-rendered composite *ebiten.Image for clr,
-// building and caching it on first call.  The image carries a circa-2003 Apple
-// Aqua jelly-button look rendered via the gel fragment shader:
+// compositeCachedSprite returns a pre-rendered composite *ebiten.Image for cr,
+// building and caching it on cr.Sprite on first call.  The image carries a
+// circa-2003 Apple Aqua jelly-button look rendered via the gel fragment shader:
 //
-//  1. Base image — an sz×sz opaque image filled with clr, then the creature
-//     glyph (tinted darkerShade(clr)) drawn directly onto it.  The base image
-//     is fully opaque so its rgb values equal straight (non-premultiplied) rgb.
+//  1. Base image — an sz×sz opaque image filled with cr.Color, then the creature
+//     glyph cr.Glyph (tinted darkerShade(cr.Color)) drawn directly onto it.  The
+//     base image is fully opaque so its rgb values equal straight (non-premultiplied) rgb.
 //  2. Gel shader pass — gelShaderSrc runs via DrawRectShader, sampling the base
 //     image (Images[0]) at each pixel to obtain the local colour, then applies
 //     the full Aqua gel lighting (vertical gradient, bottom caustic, gloss
@@ -124,21 +123,13 @@ func newGameState(grid *Grid) *Game {
 // The glyph is embedded under the gel lighting (gradient, gloss, rim all apply
 // over it), giving an inset "carved into jelly" appearance.
 //
-// Returns nil if the gel shader could not be compiled, the font is not loaded,
-// or no glyph is mapped to clr.
-func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
-	if g.glyphFont == nil {
+// Returns nil if cr is nil, the font is not loaded, or the gel shader fails to compile.
+func (g *Game) compositeCachedSprite(cr *Creature) *ebiten.Image {
+	if cr == nil || g.glyphFont == nil {
 		return nil
 	}
-	glyph := glyphForColor(clr)
-	if glyph == 0 {
-		return nil
-	}
-	if g.glyphCache == nil {
-		g.glyphCache = make(map[color.RGBA]*ebiten.Image, len(creaturePalette))
-	}
-	if img, ok := g.glyphCache[clr]; ok {
-		return img
+	if cr.Sprite != nil {
+		return cr.Sprite
 	}
 
 	// Compile the gel shader once per game instance (lazy, mirrors glowShader).
@@ -158,6 +149,7 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 		sz = compositeSpriteRefSize
 	}
 	half := float32(sz) / 2
+	clr := cr.Color
 
 	// ------------------------------------------------------------------ //
 	// Step 1: build the base image — opaque fill colour + creature glyph.
@@ -173,7 +165,7 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 		Source: g.glyphFont,
 		Size:   glyphSize,
 	}
-	str := string(glyph)
+	str := string(cr.Glyph)
 	w, h := text.Measure(str, face, 0)
 	tint := darkerShade(clr)
 	var drawOpts text.DrawOptions
@@ -199,18 +191,18 @@ func (g *Game) compositeCachedSprite(clr color.RGBA) *ebiten.Image {
 	gelOpts.Images[0] = base
 	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
 
-	g.glyphCache[clr] = composite
+	cr.Sprite = composite
 	return composite
 }
 
-// drawCompositeSprite blits the pre-rendered composite creature sprite for clr
+// drawCompositeSprite blits the pre-rendered composite creature sprite for cr
 // centred at (cx, cy) scaled so its inscribed circle matches radius.  Does
-// nothing if radius < 1, the font is not loaded, or no glyph is mapped to clr.
-func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, clr color.RGBA) {
-	if radius < 1 {
+// nothing if radius < 1, cr is nil, or the sprite could not be baked.
+func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, cr *Creature) {
+	if cr == nil || radius < 1 {
 		return
 	}
-	img := g.compositeCachedSprite(clr)
+	img := g.compositeCachedSprite(cr)
 	if img == nil {
 		return
 	}
@@ -252,8 +244,7 @@ func (g *Game) drawCell(col, row int, cellFullness float32) {
 	cy := float32(row*cs) + halfCs
 	maxRadius := halfCs - 2
 	radius := maxRadius * cellFullness * cell.Health
-	clr := cell.Color()
-	g.drawCompositeSprite(g.canvas, cx, cy, radius, clr)
+	g.drawCompositeSprite(g.canvas, cx, cy, radius, cell.Creature)
 }
 
 // emptyColumns returns the sorted indices of columns in which every cell has
@@ -671,7 +662,7 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	g.targetAnimStartR = maxR * oldHealth
 	g.targetAnimPeakR = maxR * oldHealth * 1.1
 	g.targetAnimEndR = maxR * cell.Health
-	g.targetAnimColor = g.grid.Cells[col][row].Color()
+	g.targetAnimCreature = g.grid.Cells[col][row].Creature
 	perm := rand.Perm(len(aliveNeighbors))
 
 	// Collect neighbour cells before rearranging.
@@ -932,7 +923,7 @@ func (g *Game) drawTargetBounce(screen *ebiten.Image) {
 	}
 	cx, cy := deviceCellCenter(g.actionCol, g.actionRow, dcs)
 	if r > 0 {
-		g.drawCompositeSprite(screen, cx, cy, r, g.targetAnimColor)
+		g.drawCompositeSprite(screen, cx, cy, r, g.targetAnimCreature)
 	}
 }
 
@@ -966,7 +957,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			r := maxR * anim.Cell.Health
 			if r > 0 {
-				g.drawCompositeSprite(screen, cx, cy, r, anim.Cell.Color())
+				g.drawCompositeSprite(screen, cx, cy, r, anim.Cell.Creature)
 			}
 		}
 	}
@@ -999,7 +990,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			radius := float32(dcs2/2-2) * v.cell.Health * (1 - t)
 			if radius > 0 {
-				g.drawCompositeSprite(screen, cx, cy, radius, v.cell.Color())
+				g.drawCompositeSprite(screen, cx, cy, radius, v.cell.Creature)
 			}
 		}
 	}

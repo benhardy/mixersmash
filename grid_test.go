@@ -990,33 +990,6 @@ func TestDarkerShade(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// glyphForColor
-// ---------------------------------------------------------------------------
-
-// TestGlyphForColorFound verifies that glyphForColor returns the correct glyph
-// for the first palette entry's colour.
-func TestGlyphForColorFound(t *testing.T) {
-	if len(creaturePalette) == 0 {
-		t.Fatal("creaturePalette is empty")
-	}
-	first := creaturePalette[0]
-	got := glyphForColor(first.Color)
-	if got != first.Glyph {
-		t.Errorf("glyphForColor(%v) = %q, want %q", first.Color, got, first.Glyph)
-	}
-}
-
-// TestGlyphForColorNotFound verifies that glyphForColor returns rune(0) for a
-// colour that is not in the palette.
-func TestGlyphForColorNotFound(t *testing.T) {
-	absent := color.RGBA{R: 1, G: 2, B: 3, A: 255}
-	got := glyphForColor(absent)
-	if got != rune(0) {
-		t.Errorf("glyphForColor(%v) = %q, want rune(0)", absent, got)
-	}
-}
-
 // TestClosestColorNeighborSkipsDead verifies that a neighbour with Health==0
 // is not returned even if it would be the closest by colour.
 func TestClosestColorNeighborSkipsDead(t *testing.T) {

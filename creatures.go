@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"math/rand"
 
+	"github.com/hajimehoshi/ebiten/v2"
 	text "github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
@@ -13,10 +14,13 @@ import (
 var notoEmojiTTF []byte
 
 // Creature pairs a display name with its emoji glyph and a unique background colour.
+// Sprite holds the lazily-baked composite *ebiten.Image for this creature; nil
+// until the first call to compositeCachedSprite for this creature pointer.
 type Creature struct {
-	Name  string
-	Glyph rune
-	Color color.RGBA
+	Name   string
+	Glyph  rune
+	Color  color.RGBA
+	Sprite *ebiten.Image
 }
 
 // creaturePalette is the master list of creatures.  Every Color must be unique.
@@ -92,16 +96,6 @@ var creaturePalette = []Creature{
 	{Name: "camel", Glyph: 0x1F42A, Color: color.RGBA{R: 217, G: 178, B: 178, A: 255}},
 }
 
-// glyphColorMap maps each palette colour to its creature's glyph for O(1) lookup.
-var glyphColorMap map[color.RGBA]rune
-
-func init() {
-	glyphColorMap = make(map[color.RGBA]rune, len(creaturePalette))
-	for _, c := range creaturePalette {
-		glyphColorMap[c.Color] = c.Glyph
-	}
-}
-
 // darkerShade returns c with each channel multiplied by 0.65 (integer floor) and
 // alpha forced to 255.
 func darkerShade(c color.RGBA) color.RGBA {
@@ -111,12 +105,6 @@ func darkerShade(c color.RGBA) color.RGBA {
 		B: uint8(float64(c.B) * 0.35),
 		A: 255,
 	}
-}
-
-// glyphForColor returns the glyph rune associated with c in creaturePalette.
-// Returns rune(0) if c is not found.
-func glyphForColor(c color.RGBA) rune {
-	return glyphColorMap[c]
 }
 
 // paletteCreature returns a pointer to a random entry in creaturePalette.

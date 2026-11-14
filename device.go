@@ -64,8 +64,10 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 		g.deviceCellSize = deviceCellSizeFor(dw)
 		g.spriteRefSize = spriteRefSizeFor(g.deviceCellSize)
 		g.canvas = ebiten.NewImage(dw, dh)
-		// Clear sprite cache — sprites were baked at the old size.
-		g.glyphCache = nil
+		// Invalidate per-creature sprite cache — sprites were baked at the old size.
+		for i := range creaturePalette {
+			creaturePalette[i].Sprite = nil
+		}
 		// Repaint all live cells into the new device-sized canvas.
 		for c := 0; c < g.grid.Cols; c++ {
 			for r := 0; r < g.grid.Rows; r++ {
