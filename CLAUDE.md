@@ -57,3 +57,16 @@ Read with Read. Modify with Edit/Write. Never use sed -i, tee, redirects, heredo
 ## Layout
 - Small project: flat `main` package, or `cmd/<name>/` plus `internal/`. Don't invent `pkg/`, `utils/` or `common/` packages.
 - Tests live next to the code (`foo_test.go`).
+
+# Ebitengine rendering notes
+- Colours are premultiplied alpha everywhere (vector fills, DrawImage tints, Kage shader output). Translucent RGB must be <= alpha; for white at opacity `a` use `{a,a,a,a}`, not `{255,255,255,a}`. Overshoot renders opaque/harsh.
+- Kage shaders sampling a bound source image: `srcPos` is in atlas coordinates (offset varies per allocation). Sample with `imageSrc0At(srcPos)`, but compute all geometry (center, radius, gradients, alpha) in local space via `local := srcPos - imageSrc0Origin()`. Mismatch bakes blank/offset sprites for some atlas placements. Alternative: allocate the source image Unmanaged so its origin is 0.
+- `go build` / `go test` do not catch Kage/rendering failures (Kage compiles at runtime; failures are pixels). A green build is not confidence for a rendering change — it needs a visual check.
+- Do all drawing/baking inside the game loop, never before `ebiten.RunGame()` (no graphics context yet; deferred/mis-ordered GPU ops bake blank).
+- Cell sprites are baked once per colour and cached (map keyed by `color.RGBA`), then blitted; the shader runs only at bake time. The offscreen canvas is a model-derived cache, re-synced from the model on every settle to `stateWaiting` (`repaintGrid`/`enterWaiting`).
+- Inspect shader/dependency APIs with `go doc`; never glob or grep the module cache. Some Kage builtins may not appear in `go doc` — ask rather than spelunk the cache.
+
+# Debugging workflow
+- Bisect before theorising. When a bug "started happening," git stash / check the last commit to confirm committed-vs-uncommitted, then narrow to the introducing change. Hunt the mechanism only after.
+- Commit each change after its own verification (a visual check for rendering changes). Keep the uncommitted suspect set to one thing; do not stack several unverified changes.
+- For visual/GPU bugs, instrument (dump a baked sprite to PNG, log atlas origin/bounds) instead of reasoning from code — the running game is the only source of truth for pixels.
