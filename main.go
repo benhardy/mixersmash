@@ -252,7 +252,7 @@ func (g *Game) drawCell(col, row int, cellFullness float32) {
 	cy := float32(row*cs) + halfCs
 	maxRadius := halfCs - 2
 	radius := maxRadius * cellFullness * cell.Health
-	clr := cell.Color
+	clr := cell.Color()
 	g.drawCompositeSprite(g.canvas, cx, cy, radius, clr)
 }
 
@@ -331,7 +331,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		if respawnCells {
 			// Write new random cells into the top slots (0..len(holeRows)-1).
 			for i := 0; i < len(holeRows); i++ {
-				g.grid.Cells[col][i] = Cell{Color: paletteColor(), Health: 1.0}
+				g.grid.Cells[col][i] = Cell{Creature: paletteCreature(), Health: 1.0}
 				spawned++
 			}
 		}
@@ -594,7 +594,7 @@ func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrl
 // stateDropping when no victim exists.
 func (g *Game) handleTargetDeath(col, row int) {
 	// Capture target colour before the cell is cleared.
-	g.targetColor = g.grid.Cells[col][row].Color
+	g.targetColor = g.grid.Cells[col][row].Color()
 	// Redraw immediately so cell disappears.
 	g.drawCell(col, row, 1.0)
 	g.cellCount-- // decrement for the clicked cell
@@ -671,7 +671,7 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	g.targetAnimStartR = maxR * oldHealth
 	g.targetAnimPeakR = maxR * oldHealth * 1.1
 	g.targetAnimEndR = maxR * cell.Health
-	g.targetAnimColor = g.grid.Cells[col][row].Color
+	g.targetAnimColor = g.grid.Cells[col][row].Color()
 	perm := rand.Perm(len(aliveNeighbors))
 
 	// Collect neighbour cells before rearranging.
@@ -737,7 +737,7 @@ func (g *Game) updateVictimMoving() error {
 		// All victims arrived — score the kill, kill them, and trigger drop.
 		victimColors := make([]color.RGBA, len(g.victims))
 		for i, v := range g.victims {
-			victimColors[i] = v.cell.Color
+			victimColors[i] = v.cell.Color()
 		}
 		g.score += scoreForKill(victimColors, g.targetColor)
 		colSet := map[int]bool{g.actionCol: true}
@@ -894,7 +894,7 @@ func (g *Game) drawVictimLine(screen *ebiten.Image) {
 		}
 		ux := dx / length
 		uy := dy / length
-		vc := g.grid.Cells[hc][hr].Color
+		vc := g.grid.Cells[hc][hr].Color()
 		dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
 		for pos := offset; pos < length; pos += dotSpacing {
 			vector.DrawFilledCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
@@ -966,7 +966,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			r := maxR * anim.Cell.Health
 			if r > 0 {
-				g.drawCompositeSprite(screen, cx, cy, r, anim.Cell.Color)
+				g.drawCompositeSprite(screen, cx, cy, r, anim.Cell.Color())
 			}
 		}
 	}
@@ -999,7 +999,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			radius := float32(dcs2/2-2) * v.cell.Health * (1 - t)
 			if radius > 0 {
-				g.drawCompositeSprite(screen, cx, cy, radius, v.cell.Color)
+				g.drawCompositeSprite(screen, cx, cy, radius, v.cell.Color())
 			}
 		}
 	}

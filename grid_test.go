@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+// cellWithColor returns a Cell with the given colour wrapped in a Creature.
+// Health is left at its zero value; callers that need Health=1.0 must set it explicitly.
+func cellWithColor(c color.RGBA) Cell {
+	cr := &Creature{Color: c}
+	return Cell{Creature: cr}
+}
+
 // TestRandomColorAlpha verifies that randomColor returns a colour with A == 255.
 func TestRandomColorAlpha(t *testing.T) {
 	for i := 0; i < 100; i++ {
@@ -66,8 +73,8 @@ func TestGridInitialisation(t *testing.T) {
 		}
 		for r := 0; r < rows; r++ {
 			cell := g.Cells[c][r]
-			if cell.Color.A != 255 {
-				t.Errorf("Grid.Cells[%d][%d].Color.A = %d, want 255", c, r, cell.Color.A)
+			if cell.Color().A != 255 {
+				t.Errorf("Grid.Cells[%d][%d].Color().A = %d, want 255", c, r, cell.Color().A)
 			}
 		}
 	}
@@ -310,19 +317,20 @@ func TestClosestColorNeighborFindsNearest(t *testing.T) {
 	for c := range cells {
 		cells[c] = make([]Cell, 3)
 		for r := range cells[c] {
-			cells[c][r] = Cell{Color: color.RGBA{128, 128, 128, 255}, Health: 1.0}
+			cells[c][r] = cellWithColor(color.RGBA{128, 128, 128, 255})
+			cells[c][r].Health = 1.0
 		}
 	}
 
 	// Centre cell at (1,1) is pure red.
-	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 
 	// Neighbour at (0,0): distant colour (blue).
-	cells[0][0].Color = color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
 	// Neighbour at (2,2): closest colour to red (nearly red).
-	cells[2][2].Color = color.RGBA{R: 195, G: 5, B: 5, A: 255}
+	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 195, G: 5, B: 5, A: 255}}
 	// Neighbour at (1,0): medium colour (green).
-	cells[1][0].Color = color.RGBA{R: 0, G: 200, B: 0, A: 255}
+	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 200, B: 0, A: 255}}
 
 	col, row, found := closestColorNeighbor(cells, 1, 1, 3, 3)
 	if !found {
@@ -345,7 +353,8 @@ func makeUniformGrid(t *testing.T, cols, rows int, c color.RGBA) [][]Cell {
 	for col := range cells {
 		cells[col] = make([]Cell, rows)
 		for row := range cells[col] {
-			cells[col][row] = Cell{Color: c, Health: 1.0}
+			cells[col][row] = cellWithColor(c)
+			cells[col][row].Health = 1.0
 		}
 	}
 	return cells
@@ -373,17 +382,17 @@ func TestClosestColorNeighborsSingleNearest(t *testing.T) {
 	}
 
 	// Target at (1,1): pure red.
-	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 	cells[1][1].Health = 1.0
 
 	// Strictly closest: nearly-red at (2,2).
-	cells[2][2].Color = color.RGBA{R: 195, G: 5, B: 5, A: 255}
+	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 195, G: 5, B: 5, A: 255}}
 	cells[2][2].Health = 1.0
 	// Farther: blue at (0,0).
-	cells[0][0].Color = color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
 	cells[0][0].Health = 1.0
 	// Farther: green at (1,0).
-	cells[1][0].Color = color.RGBA{R: 0, G: 200, B: 0, A: 255}
+	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 200, B: 0, A: 255}}
 	cells[1][0].Health = 1.0
 
 	got := closestColorNeighbors(cells, 1, 1, 3, 3)
@@ -409,15 +418,15 @@ func TestClosestColorNeighborsTwoWayTie(t *testing.T) {
 	}
 
 	// Target at (1,1).
-	cells[1][1].Color = color.RGBA{R: 200, G: 100, B: 100, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 100, B: 100, A: 255}}
 	cells[1][1].Health = 1.0
 
 	// Build two neighbours with identical colour so their distance to target
 	// is bitwise-equal (same float32).
 	tiedColor := color.RGBA{R: 190, G: 110, B: 90, A: 255}
-	cells[0][0].Color = tiedColor
+	cells[0][0].Creature = &Creature{Color: tiedColor}
 	cells[0][0].Health = 1.0
-	cells[2][0].Color = tiedColor
+	cells[2][0].Creature = &Creature{Color: tiedColor}
 	cells[2][0].Health = 1.0
 
 	got := closestColorNeighbors(cells, 1, 1, 3, 3)
@@ -444,15 +453,15 @@ func TestClosestColorNeighborsThreeWayTie(t *testing.T) {
 	}
 
 	// Target at (1,1).
-	cells[1][1].Color = color.RGBA{R: 200, G: 100, B: 100, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 100, B: 100, A: 255}}
 	cells[1][1].Health = 1.0
 
 	tiedColor := color.RGBA{R: 185, G: 115, B: 85, A: 255}
-	cells[0][0].Color = tiedColor
+	cells[0][0].Creature = &Creature{Color: tiedColor}
 	cells[0][0].Health = 1.0
-	cells[2][0].Color = tiedColor
+	cells[2][0].Creature = &Creature{Color: tiedColor}
 	cells[2][0].Health = 1.0
-	cells[0][2].Color = tiedColor
+	cells[0][2].Creature = &Creature{Color: tiedColor}
 	cells[0][2].Health = 1.0
 
 	got := closestColorNeighbors(cells, 1, 1, 3, 3)
@@ -478,18 +487,18 @@ func TestClosestColorNeighborsTieNotAtMinimum(t *testing.T) {
 	}
 
 	// Target at (1,1): pure red.
-	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 	cells[1][1].Health = 1.0
 
 	// Strictly closest: nearly red at (2,2).
-	cells[2][2].Color = color.RGBA{R: 198, G: 2, B: 2, A: 255}
+	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 198, G: 2, B: 2, A: 255}}
 	cells[2][2].Health = 1.0
 
 	// Two neighbours that tie each other but are farther than (2,2).
 	tiedFarColor := color.RGBA{R: 100, G: 100, B: 100, A: 255}
-	cells[0][0].Color = tiedFarColor
+	cells[0][0].Creature = &Creature{Color: tiedFarColor}
 	cells[0][0].Health = 1.0
-	cells[2][0].Color = tiedFarColor
+	cells[2][0].Creature = &Creature{Color: tiedFarColor}
 	cells[2][0].Health = 1.0
 
 	got := closestColorNeighbors(cells, 1, 1, 3, 3)
@@ -512,19 +521,19 @@ func TestClosestColorNeighborsSkipsDead(t *testing.T) {
 	}
 
 	// Target at (1,1): pure red.
-	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 	cells[1][1].Health = 1.0
 
 	// Dead neighbour: perfect colour match, Health=0.
-	cells[2][2].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 	cells[2][2].Health = 0.0
 
 	// Also dead but negative health, same colour.
-	cells[0][0].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 	cells[0][0].Health = -1.0
 
 	// One live neighbour with a less-close colour.
-	cells[1][0].Color = color.RGBA{R: 150, G: 50, B: 50, A: 255}
+	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 150, G: 50, B: 50, A: 255}}
 	cells[1][0].Health = 1.0
 
 	got := closestColorNeighbors(cells, 1, 1, 3, 3)
@@ -570,15 +579,15 @@ func TestClosestColorNeighborsCornerTarget(t *testing.T) {
 	}
 
 	// Target at (0,0): pure red.
-	cells[0][0].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 	cells[0][0].Health = 1.0
 
 	// Among the 3 corner neighbours {(1,0),(0,1),(1,1)}, make (1,1) closest.
-	cells[1][1].Color = color.RGBA{R: 195, G: 5, B: 5, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 195, G: 5, B: 5, A: 255}}
 	cells[1][1].Health = 1.0
-	cells[1][0].Color = color.RGBA{R: 0, G: 200, B: 0, A: 255}
+	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 200, B: 0, A: 255}}
 	cells[1][0].Health = 1.0
-	cells[0][1].Color = color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	cells[0][1].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
 	cells[0][1].Health = 1.0
 
 	got := closestColorNeighbors(cells, 0, 0, 5, 5)
@@ -603,19 +612,19 @@ func TestClosestColorNeighborsOrderIndependence(t *testing.T) {
 	}
 
 	// Target at (1,1).
-	cells[1][1].Color = color.RGBA{R: 200, G: 100, B: 50, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 100, B: 50, A: 255}}
 	cells[1][1].Health = 1.0
 
 	// Three tied winners placed at non-adjacent positions.
 	tiedColor := color.RGBA{R: 195, G: 105, B: 45, A: 255}
 	winners := [][2]int{{0, 0}, {2, 2}, {0, 2}}
 	for _, w := range winners {
-		cells[w[0]][w[1]].Color = tiedColor
+		cells[w[0]][w[1]].Creature = &Creature{Color: tiedColor}
 		cells[w[0]][w[1]].Health = 1.0
 	}
 
 	// One farther live cell.
-	cells[2][0].Color = color.RGBA{R: 0, G: 0, B: 200, A: 255}
+	cells[2][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
 	cells[2][0].Health = 1.0
 
 	got := closestColorNeighbors(cells, 1, 1, 4, 4)
@@ -1016,19 +1025,20 @@ func TestClosestColorNeighborSkipsDead(t *testing.T) {
 	for c := range cells {
 		cells[c] = make([]Cell, 3)
 		for r := range cells[c] {
-			cells[c][r] = Cell{Color: color.RGBA{128, 128, 128, 255}, Health: 1.0}
+			cells[c][r] = cellWithColor(color.RGBA{128, 128, 128, 255})
+			cells[c][r].Health = 1.0
 		}
 	}
 
 	// Centre cell at (1,1) is pure red.
-	cells[1][1].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 
 	// Dead neighbour at (2,2): perfect colour match but Health=0.
-	cells[2][2].Color = color.RGBA{R: 200, G: 0, B: 0, A: 255}
+	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
 	cells[2][2].Health = 0.0
 
 	// Live neighbour at (0,0): worse colour match but alive.
-	cells[0][0].Color = color.RGBA{R: 150, G: 50, B: 50, A: 255}
+	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 150, G: 50, B: 50, A: 255}}
 
 	// All other neighbours use the neutral grey already set.
 
@@ -1087,10 +1097,8 @@ func makeSnapshot(numCols, numRows int) [][]Cell {
 	for c := 0; c < numCols; c++ {
 		snapshot[c] = make([]Cell, numRows)
 		for r := 0; r < numRows; r++ {
-			snapshot[c][r] = Cell{
-				Color:  color.RGBA{R: uint8(c*10 + 10), G: uint8(r*10 + 10), B: 50, A: 255},
-				Health: float32(c+1) * 0.1,
-			}
+			snapshot[c][r] = cellWithColor(color.RGBA{R: uint8(c*10 + 10), G: uint8(r*10 + 10), B: 50, A: 255})
+			snapshot[c][r].Health = float32(c+1) * 0.1
 		}
 	}
 	return snapshot

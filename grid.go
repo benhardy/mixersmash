@@ -6,10 +6,21 @@ import (
 	"math/rand"
 )
 
-// Cell holds a grid cell's colour and health (1.0 = full, 0.0 = dead).
+// Cell holds a grid cell's creature reference and health (1.0 = full, 0.0 = dead).
+// A nil Creature means the cell is empty/dead.
 type Cell struct {
-	Color  color.RGBA
-	Health float32
+	Creature *Creature
+	Health   float32
+}
+
+// Color returns the palette colour for this cell's creature, or a zero color.RGBA
+// (A=0) if the cell is empty (Creature == nil). All palette colours have A=255,
+// so A=0 is a safe sentinel for an empty cell.
+func (c Cell) Color() color.RGBA {
+	if c.Creature == nil {
+		return color.RGBA{}
+	}
+	return c.Creature.Color
 }
 
 // MoveAnim describes the animated movement of a cell from one pixel position to
@@ -49,8 +60,8 @@ func NewGrid(cols, rows int) *Grid {
 		cells[c] = make([]Cell, rows)
 		for r := 0; r < rows; r++ {
 			cells[c][r] = Cell{
-				Color:  paletteColor(),
-				Health: 1.0,
+				Creature: paletteCreature(),
+				Health:   1.0,
 			}
 		}
 	}
@@ -123,7 +134,7 @@ func eightNeighbors(col, row, cols, rows int) [][2]int {
 // cells[col][row].Color. Returns found=false if no healthy neighbour exists.
 func closestColorNeighbor(cells [][]Cell, col, row, cols, rows int) (int, int, bool) {
 	neighbors := eightNeighbors(col, row, cols, rows)
-	target := cells[col][row].Color
+	target := cells[col][row].Color()
 	bestDist := float32(-1)
 	bestCol, bestRow := 0, 0
 	found := false
@@ -132,7 +143,7 @@ func closestColorNeighbor(cells [][]Cell, col, row, cols, rows int) (int, int, b
 		if cells[nc][nr].Health <= 0 {
 			continue
 		}
-		dist := colorDistanceRedmean(target, cells[nc][nr].Color)
+		dist := colorDistanceRedmean(target, cells[nc][nr].Color())
 		if !found || dist < bestDist {
 			bestDist = dist
 			bestCol = nc
@@ -149,7 +160,7 @@ func closestColorNeighbor(cells [][]Cell, col, row, cols, rows int) (int, int, b
 // Returns an empty slice if no healthy neighbour exists.
 func closestColorNeighbors(cells [][]Cell, col, row, cols, rows int) [][2]int {
 	neighbors := eightNeighbors(col, row, cols, rows)
-	target := cells[col][row].Color
+	target := cells[col][row].Color()
 	bestDist := float32(-1)
 	found := false
 	var result [][2]int
@@ -158,7 +169,7 @@ func closestColorNeighbors(cells [][]Cell, col, row, cols, rows int) [][2]int {
 		if cells[nc][nr].Health <= 0 {
 			continue
 		}
-		dist := colorDistanceRedmean(target, cells[nc][nr].Color)
+		dist := colorDistanceRedmean(target, cells[nc][nr].Color())
 		if !found || dist < bestDist {
 			bestDist = dist
 			result = result[:0]

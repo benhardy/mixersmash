@@ -119,9 +119,11 @@ func glyphForColor(c color.RGBA) rune {
 	return glyphColorMap[c]
 }
 
-// paletteColor returns a random colour from creaturePalette.
-func paletteColor() color.RGBA {
-	return creaturePalette[rand.Intn(len(creaturePalette))].Color
+// paletteCreature returns a pointer to a random entry in creaturePalette.
+// The pointer is stable because creaturePalette is a package-level slice that
+// is never reallocated after init.
+func paletteCreature() *Creature {
+	return &creaturePalette[rand.Intn(len(creaturePalette))]
 }
 
 // loadGlyphFont parses the embedded NotoEmoji TTF and returns a GoTextFaceSource.
