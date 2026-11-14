@@ -48,10 +48,10 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
     col := mix(topColor, bottomColor, pow(t, 1.3))
     bottomGlow := smoothstep(0.1, 0.95, p.y) * (1.0 - smoothstep(0.65, 1.0, dist))
     col += mix(baseColor, vec3(1.0), 0.65) * bottomGlow * (0.55 + Hover*0.2)
-    glossP := vec2(p.x*1.28, (p.y+0.54)*2.85)
+    glossP := vec2(p.x*1.18, (p.y+0.44)*1.85)
     glossDist := length(glossP)
     glossMask := 1.0 - smoothstep(0.72, 0.78, glossDist)
-    glossFade := clamp(1.0-(p.y+0.95)*1.55, 0.0, 1.0)
+    glossFade := clamp(1.0-(p.y+0.92)*1.85, 0.0, 1.0)
     col = mix(col, vec3(1.0), glossMask*glossFade*0.85)
     rim := smoothstep(0.90, 0.98, dist) * (1.0 - smoothstep(0.98, 1.0, dist))
     col += mix(baseColor, vec3(1.0), 0.5) * rim * 0.45
