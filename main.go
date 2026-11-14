@@ -1309,13 +1309,13 @@ func (g *Game) drawTargetBounce(screen *ebiten.Image) {
 	}
 	var r float32
 	if t < 0.5 {
-		lt := t * 2                // 0→1 in phase 1
-		eased := 1 - (1-lt)*(1-lt) // ease-out: fast start, slow at peak
-		r = g.targetAnimStartR + (g.targetAnimPeakR-g.targetAnimStartR)*eased
+		lt := t * 2              // 0→1 in phase 1
+		eased := easeOutQuad(lt) // ease-out: fast start, slow at peak
+		r = lerp(g.targetAnimStartR, g.targetAnimPeakR, eased)
 	} else {
-		lt := (t - 0.5) * 2 // 0→1 in phase 2
-		eased := lt * lt    // ease-in: slow at peak, fast at end
-		r = g.targetAnimPeakR + (g.targetAnimEndR-g.targetAnimPeakR)*eased
+		lt := (t - 0.5) * 2     // 0→1 in phase 2
+		eased := easeInQuad(lt) // ease-in: slow at peak, fast at end
+		r = lerp(g.targetAnimPeakR, g.targetAnimEndR, eased)
 	}
 	dcs := g.deviceCellSize
 	if dcs <= 0 {
@@ -1347,22 +1347,13 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 		for _, anim := range g.moveAnims {
 			var cx, cy float32
 			if g.currentState == stateShuffling {
-				// Quadratic ease-in-out
-				var et float32
-				if t < 0.5 {
-					et = 2 * t * t
-				} else {
-					et = 1 - 2*(1-t)*(1-t)
-				}
-				// Quadratic Bézier with eased t
-				u := 1 - et
-				cx = u*u*anim.FromX + 2*u*et*anim.CtrlX + et*et*anim.ToX
-				cy = u*u*anim.FromY + 2*u*et*anim.CtrlY + et*et*anim.ToY
+				// Quadratic ease-in-out, then quadratic Bézier with eased t
+				et := easeInOutQuad(t)
+				cx, cy = quadBezier2(anim.FromX, anim.FromY, anim.CtrlX, anim.CtrlY, anim.ToX, anim.ToY, et)
 			} else {
 				// Drop: quadratic ease-in (gravity), straight line
-				posT := t * t
-				cx = anim.FromX + posT*(anim.ToX-anim.FromX)
-				cy = anim.FromY + posT*(anim.ToY-anim.FromY)
+				posT := easeInQuad(t)
+				cx, cy = lerp2(anim.FromX, anim.FromY, anim.ToX, anim.ToY, posT)
 			}
 			r := maxR * anim.Cell.Health
 			if r > 0 {
@@ -1380,12 +1371,9 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			var cx, cy float32
 			switch v.pathType {
 			case 0: // straight line
-				cx = v.fromX + t*(v.toX-v.fromX)
-				cy = v.fromY + t*(v.toY-v.fromY)
+				cx, cy = lerp2(v.fromX, v.fromY, v.toX, v.toY, t)
 			case 1: // quadratic Bezier arc
-				u := float32(1) - t
-				cx = u*u*v.fromX + 2*u*t*v.ctrlX + t*t*v.toX
-				cy = u*u*v.fromY + 2*u*t*v.ctrlY + t*t*v.toY
+				cx, cy = quadBezier2(v.fromX, v.fromY, v.ctrlX, v.ctrlY, v.toX, v.toY, t)
 			case 2: // inward spiral (radius shrinks, angle rotates)
 				ddx := v.fromX - v.toX
 				ddy := v.fromY - v.toY
