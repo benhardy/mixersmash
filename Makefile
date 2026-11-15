@@ -1,4 +1,4 @@
-.PHONY: all mac linux wasm serve test clean
+.PHONY: all mac linux wasm serve test lint clean
 
 mac: mixersmash_darwin_arm64
 
@@ -28,6 +28,9 @@ serve:
 
 test:
 	go test ./...
+
+lint:
+	golangci-lint run ./...
 
 clean:
 	rm -f mixersmash_darwin_arm64 mixersmash_linux_amd64

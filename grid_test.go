@@ -2,7 +2,6 @@ package main
 
 import (
 	"image/color"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -26,7 +25,7 @@ func TestRandomColorAlpha(t *testing.T) {
 
 // TestRandomColorReturnsRGBA verifies that randomColor returns a color.RGBA value.
 func TestRandomColorReturnsRGBA(t *testing.T) {
-	var _ color.RGBA = randomColor()
+	_ = randomColor()
 }
 
 // TestCellFromPixel verifies that cellFromPixel maps pixel coordinates to the
@@ -254,18 +253,6 @@ func TestColorDistanceRedmeanGreenWeighted(t *testing.T) {
 // ---------------------------------------------------------------------------
 // eightNeighbors
 // ---------------------------------------------------------------------------
-
-// sortPairs is a helper that sorts a [][2]int slice lexicographically so test
-// comparisons are order-independent.
-func sortPairs(pairs [][2]int) [][2]int {
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i][0] != pairs[j][0] {
-			return pairs[i][0] < pairs[j][0]
-		}
-		return pairs[i][1] < pairs[j][1]
-	})
-	return pairs
-}
 
 // TestEightNeighborsCorner verifies that eightNeighbors(0,0,25,18) returns
 // exactly 3 results: {1,0}, {0,1}, {1,1}.

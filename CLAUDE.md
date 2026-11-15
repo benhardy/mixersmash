@@ -29,6 +29,7 @@ Read with Read. Modify with Edit/Write. Never use sed -i, tee, redirects, heredo
 - Build: `go build ./...`
 - Test: `go test ./...` (single package: `go test ./pkg/foo -run TestName -v`)
 - Vet/format: `go vet ./...` and `gofmt -l .` (or `goimports`). Run both before declaring work done.
+- Lint: `golangci-lint run ./...` (or `make lint`) before declaring work done. Enabled linters: staticcheck, errcheck, ineffassign, unused, gocritic.
 - Race check for anything concurrent: `go test -race ./...`
 
 ## Workflow

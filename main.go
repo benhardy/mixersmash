@@ -270,12 +270,6 @@ func (g *Game) emptyColumns() []int {
 	return result
 }
 
-// rowCell is a helper pairing a row index with its cell, used in buildDropAnims.
-type rowCell struct {
-	row  int
-	cell Cell
-}
-
 // buildDropAnims computes MoveAnim entries for each affected column: alive cells
 // compact downward, and new random cells fall from above the screen top.
 // Only canvas positions that cells are vacating are cleared — not the whole column.
@@ -514,10 +508,8 @@ func (g *Game) commitCellAt(col, row int) error {
 
 	if cell.Health <= 0 {
 		g.handleTargetDeath(col, row)
-	} else {
-		if !g.handleTargetSurvival(col, row, cell, oldHealth) {
-			return nil
-		}
+	} else if !g.handleTargetSurvival(col, row, cell, oldHealth) {
+		return nil
 	}
 	return nil
 }
@@ -940,7 +932,7 @@ func (g *Game) drawVictimLine(screen *ebiten.Image) {
 		vc := g.grid.Cells[hc][hr].Color()
 		dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
 		for pos := offset; pos < length; pos += dotSpacing {
-			vector.DrawFilledCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
+			vector.FillCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
 		}
 	}
 }

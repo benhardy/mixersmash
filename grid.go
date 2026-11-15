@@ -309,12 +309,6 @@ func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
 	return float32(currentTick-startTick) / float32(durationTicks)
 }
 
-// cellCenter returns the logical pixel centre of a grid cell using the const
-// cellSize.  Kept pure so existing unit tests pass unchanged.
-func cellCenter(col, row int) (float32, float32) {
-	return float32(col*cellSize + cellSize/2), float32(row*cellSize + cellSize/2)
-}
-
 // deviceCellCenter returns the device-pixel centre of a grid cell for the given
 // device cell size dcs.  Used wherever pixel coordinates must map to the
 // device-resolution canvas or screen.
