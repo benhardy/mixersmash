@@ -227,6 +227,87 @@ func TestRandomColorNeverReturnsWhite(t *testing.T) {
 // colorDistanceRedmean
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// colorDistanceHSV
+// ---------------------------------------------------------------------------
+
+// TestColorDistanceHSV verifies the hue-weighted HSV distance function across a
+// set of representative colour pairs.
+func TestColorDistanceHSV(t *testing.T) {
+	const tol = float32(1e-5)
+
+	cases := []struct {
+		name    string
+		a, b    color.RGBA
+		wantMax float32 // upper bound on result (use 0 to require exact zero)
+		wantMin float32 // lower bound on result
+	}{
+		{
+			name:    "identical colours — distance is zero",
+			a:       color.RGBA{R: 200, G: 100, B: 50, A: 255},
+			b:       color.RGBA{R: 200, G: 100, B: 50, A: 255},
+			wantMin: 0,
+			wantMax: tol,
+		},
+		{
+			name:    "same hue, different value — small-to-moderate distance",
+			a:       color.RGBA{R: 255, G: 0, B: 0, A: 255},
+			b:       color.RGBA{R: 128, G: 0, B: 0, A: 255},
+			wantMin: 0.01,
+			wantMax: 0.60,
+		},
+		{
+			name:    "opposite hue, both saturated — large distance",
+			a:       color.RGBA{R: 255, G: 0, B: 0, A: 255},   // pure red
+			b:       color.RGBA{R: 0, G: 255, B: 255, A: 255}, // pure cyan
+			wantMin: 1.5,
+			wantMax: 10.0,
+		},
+		{
+			name:    "saturated colour vs grey — hue guard prevents spuriously small distance",
+			a:       color.RGBA{R: 255, G: 0, B: 0, A: 255},     // pure red
+			b:       color.RGBA{R: 128, G: 128, B: 128, A: 255}, // mid-grey
+			wantMin: 0.05,
+			wantMax: 2.0,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := colorDistanceHSV(tc.a, tc.b)
+			if got < tc.wantMin || got > tc.wantMax {
+				t.Errorf("colorDistanceHSV(%v, %v) = %v; want in [%v, %v]",
+					tc.a, tc.b, got, tc.wantMin, tc.wantMax)
+			}
+		})
+	}
+}
+
+// TestColorDistanceHSVSymmetry verifies that d(a,b) == d(b,a) for a range of colour pairs.
+func TestColorDistanceHSVSymmetry(t *testing.T) {
+	pairs := [][2]color.RGBA{
+		{{R: 255, G: 0, B: 0, A: 255}, {R: 0, G: 255, B: 0, A: 255}},
+		{{R: 100, G: 200, B: 50, A: 255}, {R: 50, G: 100, B: 200, A: 255}},
+		{{R: 128, G: 128, B: 128, A: 255}, {R: 200, G: 100, B: 50, A: 255}},
+		{{R: 102, G: 102, B: 102, A: 255}, {R: 255, G: 255, B: 102, A: 255}},
+		{{R: 217, G: 140, B: 102, A: 255}, {R: 102, G: 217, B: 102, A: 255}},
+	}
+	const tol = float32(1e-5)
+	for _, p := range pairs {
+		ab := colorDistanceHSV(p[0], p[1])
+		ba := colorDistanceHSV(p[1], p[0])
+		diff := ab - ba
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > tol {
+			t.Errorf("colorDistanceHSV not symmetric: d(%v,%v)=%v d(%v,%v)=%v diff=%v",
+				p[0], p[1], ab, p[1], p[0], ba, diff)
+		}
+	}
+}
+
 // TestColorDistanceRedmeanSame verifies that a colour compared with itself is 0.
 func TestColorDistanceRedmeanSame(t *testing.T) {
 	c := color.RGBA{R: 100, G: 150, B: 200, A: 255}

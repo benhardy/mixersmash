@@ -81,6 +81,96 @@ func colorDistanceRedmean(a, b color.RGBA) float32 {
 	)))
 }
 
+// colorDistanceHSV returns a hue-weighted HSV colour distance between a and b.
+//
+// Algorithm:
+//  1. Convert each RGB to HSV (H in [0,360), S and V in [0,1]).
+//  2. Compute a circular hue difference: dH = min(|h1-h2|, 360-|h1-h2|) / 180,
+//     normalised to [0,1].
+//  3. Scale the hue term by min(s1,s2) so that hue barely contributes when
+//     either colour is near-achromatic (grey guard).
+//  4. dist = sqrt( (hueW * 2*dH)^2 + (1*dS)^2 + (0.5*dV)^2 )
+//
+// Tunable weight constants (documented as such):
+//
+//	hueScale  = 2.0  — multiplies the hue component (hue dominates)
+//	satScale  = 1.0  — multiplies the saturation difference
+//	valScale  = 0.5  — multiplies the value difference (lightness matters less)
+func colorDistanceHSV(a, b color.RGBA) float32 {
+	// Tunable weights — adjust here to change metric behaviour.
+	const hueScale = 2.0
+	const satScale = 1.0
+	const valScale = 0.5
+
+	h1, s1, v1 := rgbToHSV(a)
+	h2, s2, v2 := rgbToHSV(b)
+
+	diff := h1 - h2
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 180 {
+		diff = 360 - diff
+	}
+	dH := diff / 180 // normalised to [0,1]
+
+	hueW := min(s1, s2) // hue only matters when both are colourful
+
+	dS := s1 - s2
+	if dS < 0 {
+		dS = -dS
+	}
+	dV := v1 - v2
+	if dV < 0 {
+		dV = -dV
+	}
+
+	hTerm := hueScale * dH * hueW
+	sTerm := satScale * dS
+	vTerm := valScale * dV
+
+	return float32(math.Sqrt(float64(hTerm*hTerm + sTerm*sTerm + vTerm*vTerm)))
+}
+
+// rgbToHSV converts a color.RGBA to hue (degrees, [0,360)), saturation ([0,1]),
+// and value ([0,1]). Alpha is ignored. For achromatic colours (s==0) hue is 0.
+func rgbToHSV(c color.RGBA) (h, s, v float32) {
+	r := float32(c.R) / 255.0
+	g := float32(c.G) / 255.0
+	b := float32(c.B) / 255.0
+
+	cMax := max(r, max(g, b))
+	cMin := min(r, min(g, b))
+	delta := cMax - cMin
+
+	v = cMax
+
+	if cMax == 0 {
+		s = 0
+	} else {
+		s = delta / cMax
+	}
+
+	if delta == 0 {
+		h = 0
+		return
+	}
+
+	switch cMax {
+	case r:
+		h = 60 * (((g - b) / delta) - float32(math.Floor(float64((g-b)/delta/6)))*6)
+	case g:
+		h = 60 * (((b - r) / delta) + 2)
+	default: // b
+		h = 60 * (((r - g) / delta) + 4)
+	}
+
+	if h < 0 {
+		h += 360
+	}
+	return
+}
+
 // randomColor returns a random opaque colour (A=255).
 // will be a subset of web-safe colours
 func randomColor() color.RGBA {
