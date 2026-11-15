@@ -100,9 +100,9 @@ var creaturePalette = []Creature{
 // alpha forced to 255.
 func darkerShade(c color.RGBA) color.RGBA {
 	return color.RGBA{
-		R: uint8(float64(c.R) * 0.35),
-		G: uint8(float64(c.G) * 0.35),
-		B: uint8(float64(c.B) * 0.35),
+		R: uint8(float64(c.R) * 0.15),
+		G: uint8(float64(c.G) * 0.15),
+		B: uint8(float64(c.B) * 0.15),
 		A: 255,
 	}
 }
