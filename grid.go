@@ -126,31 +126,6 @@ func eightNeighbors(col, row, cols, rows int) [][2]int {
 	return result
 }
 
-// closestColorNeighbor returns the (col, row) of the 8-neighbour of (col,row)
-// with Health > 0 that has minimum colorDistanceRedmean distance to
-// cells[col][row].Color. Returns found=false if no healthy neighbour exists.
-func closestColorNeighbor(cells [][]Cell, col, row, cols, rows int) (int, int, bool) {
-	neighbors := eightNeighbors(col, row, cols, rows)
-	target := cells[col][row].Color()
-	bestDist := float32(-1)
-	bestCol, bestRow := 0, 0
-	found := false
-	for _, n := range neighbors {
-		nc, nr := n[0], n[1]
-		if cells[nc][nr].Health <= 0 {
-			continue
-		}
-		dist := colorDistanceRedmean(target, cells[nc][nr].Color())
-		if !found || dist < bestDist {
-			bestDist = dist
-			bestCol = nc
-			bestRow = nr
-			found = true
-		}
-	}
-	return bestCol, bestRow, found
-}
-
 // closestColorNeighbors returns all 8-neighbours of (col,row) with Health > 0
 // that share the exact minimum colorDistanceRedmean distance to
 // cells[col][row].Color. Tie is determined by exact float32 equality.

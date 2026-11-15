@@ -305,43 +305,6 @@ func TestEightNeighborsCentre(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// closestColorNeighbor
-// ---------------------------------------------------------------------------
-
-// TestClosestColorNeighborFindsNearest sets up a 3×3 grid with known colours
-// and asserts that closestColorNeighbor returns the neighbour whose colour is
-// closest to the centre cell.
-func TestClosestColorNeighborFindsNearest(t *testing.T) {
-	// Build a 3×3 grid: all cells healthy.
-	cells := make([][]Cell, 3)
-	for c := range cells {
-		cells[c] = make([]Cell, 3)
-		for r := range cells[c] {
-			cells[c][r] = cellWithColor(color.RGBA{128, 128, 128, 255})
-			cells[c][r].Health = 1.0
-		}
-	}
-
-	// Centre cell at (1,1) is pure red.
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-
-	// Neighbour at (0,0): distant colour (blue).
-	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
-	// Neighbour at (2,2): closest colour to red (nearly red).
-	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 195, G: 5, B: 5, A: 255}}
-	// Neighbour at (1,0): medium colour (green).
-	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 200, B: 0, A: 255}}
-
-	col, row, found := closestColorNeighbor(cells, 1, 1, 3, 3)
-	if !found {
-		t.Fatal("closestColorNeighbor returned found=false, want true")
-	}
-	if col != 2 || row != 2 {
-		t.Errorf("closestColorNeighbor returned (%d, %d), want (2, 2)", col, row)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // closestColorNeighbors (plural)
 // ---------------------------------------------------------------------------
 
@@ -988,44 +951,6 @@ func TestDarkerShade(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestClosestColorNeighborSkipsDead verifies that a neighbour with Health==0
-// is not returned even if it would be the closest by colour.
-func TestClosestColorNeighborSkipsDead(t *testing.T) {
-	// Build a 3×3 grid: all cells healthy.
-	cells := make([][]Cell, 3)
-	for c := range cells {
-		cells[c] = make([]Cell, 3)
-		for r := range cells[c] {
-			cells[c][r] = cellWithColor(color.RGBA{128, 128, 128, 255})
-			cells[c][r].Health = 1.0
-		}
-	}
-
-	// Centre cell at (1,1) is pure red.
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-
-	// Dead neighbour at (2,2): perfect colour match but Health=0.
-	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-	cells[2][2].Health = 0.0
-
-	// Live neighbour at (0,0): worse colour match but alive.
-	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 150, G: 50, B: 50, A: 255}}
-
-	// All other neighbours use the neutral grey already set.
-
-	col, row, found := closestColorNeighbor(cells, 1, 1, 3, 3)
-	if !found {
-		t.Fatal("closestColorNeighbor returned found=false with live neighbours present")
-	}
-	// The dead cell (2,2) must not be returned.
-	if col == 2 && row == 2 {
-		t.Errorf("closestColorNeighbor returned dead cell (2,2)")
-	}
-	// Suppress unused variable warning in case the compiler complains.
-	_ = col
-	_ = row
 }
 
 // ---------------------------------------------------------------------------
