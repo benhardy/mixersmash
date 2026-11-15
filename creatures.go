@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"image/color"
 	"math/rand"
+	"sort"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	text "github.com/hajimehoshi/ebiten/v2/text/v2"
@@ -16,84 +17,117 @@ var notoEmojiTTF []byte
 // Creature pairs a display name with its emoji glyph and a unique background colour.
 // Sprite holds the lazily-baked composite *ebiten.Image for this creature; nil
 // until the first call to compositeCachedSprite for this creature pointer.
+// Power is the creature's strength level (Fibonacci: 2, 3, 5, or 8).
+// Connections holds exactly Power pointers to distinct other creaturePalette entries,
+// assigned deterministically in init() using paletteConnectionSeed.
 type Creature struct {
-	Name   string
-	Glyph  rune
-	Color  color.RGBA
-	Sprite *ebiten.Image
+	Name        string
+	Glyph       rune
+	Color       color.RGBA
+	Sprite      *ebiten.Image
+	Power       int
+	Connections []*Creature
 }
 
-// creaturePalette is the master list of creatures.  Every Color must be unique.
-// All R, G, B channels are drawn from the 5-level set {102, 140, 178, 217, 255}.
-// Pure white (255,255,255) is excluded.  Alpha is always 255.
-var creaturePalette = []Creature{
-	// ---- required creatures ----
-	{Name: "kangaroo", Glyph: 0x1F998, Color: color.RGBA{R: 217, G: 140, B: 102, A: 255}},
-	{Name: "koala", Glyph: 0x1F428, Color: color.RGBA{R: 140, G: 140, B: 178, A: 255}},
-	{Name: "parrot", Glyph: 0x1F99C, Color: color.RGBA{R: 102, G: 217, B: 102, A: 255}},
-	{Name: "hedgehog", Glyph: 0x1F994, Color: color.RGBA{R: 178, G: 140, B: 102, A: 255}},
-	{Name: "pine tree", Glyph: 0x1F332, Color: color.RGBA{R: 102, G: 140, B: 102, A: 255}},
-	{Name: "fern", Glyph: 0x1F33F, Color: color.RGBA{R: 102, G: 178, B: 102, A: 255}},
-	{Name: "flower", Glyph: 0x1F338, Color: color.RGBA{R: 255, G: 102, B: 178, A: 255}},
-	{Name: "cat", Glyph: 0x1F431, Color: color.RGBA{R: 255, G: 178, B: 102, A: 255}},
-	{Name: "wolf", Glyph: 0x1F43A, Color: color.RGBA{R: 102, G: 102, B: 140, A: 255}},
-	{Name: "goat", Glyph: 0x1F410, Color: color.RGBA{R: 217, G: 217, B: 140, A: 255}},
-	{Name: "horse", Glyph: 0x1F434, Color: color.RGBA{R: 178, G: 102, B: 102, A: 255}},
-	{Name: "butterfly", Glyph: 0x1F98B, Color: color.RGBA{R: 255, G: 140, B: 255, A: 255}},
-	{Name: "cherry", Glyph: 0x1F352, Color: color.RGBA{R: 217, G: 102, B: 102, A: 255}},
-	{Name: "banana", Glyph: 0x1F34C, Color: color.RGBA{R: 255, G: 255, B: 102, A: 255}},
-	{Name: "snake", Glyph: 0x1F40D, Color: color.RGBA{R: 102, G: 178, B: 140, A: 255}},
-	{Name: "dragon", Glyph: 0x1F409, Color: color.RGBA{R: 178, G: 102, B: 217, A: 255}},
-	{Name: "rat", Glyph: 0x1F400, Color: color.RGBA{R: 140, G: 140, B: 102, A: 255}},
-	{Name: "ghost", Glyph: 0x1F47B, Color: color.RGBA{R: 217, G: 217, B: 255, A: 255}},
-	{Name: "rooster", Glyph: 0x1F413, Color: color.RGBA{R: 255, G: 102, B: 102, A: 255}},
-	{Name: "fish", Glyph: 0x1F41F, Color: color.RGBA{R: 102, G: 178, B: 255, A: 255}},
-	{Name: "dolphin", Glyph: 0x1F42C, Color: color.RGBA{R: 102, G: 217, B: 217, A: 255}},
-	{Name: "octopus", Glyph: 0x1F419, Color: color.RGBA{R: 217, G: 102, B: 178, A: 255}},
-	{Name: "palm tree", Glyph: 0x1F334, Color: color.RGBA{R: 102, G: 255, B: 140, A: 255}},
-	{Name: "monkey", Glyph: 0x1F412, Color: color.RGBA{R: 178, G: 102, B: 140, A: 255}},
-	{Name: "bat", Glyph: 0x1F987, Color: color.RGBA{R: 102, G: 102, B: 178, A: 255}},
-	{Name: "jellyfish", Glyph: 0x1FABC, Color: color.RGBA{R: 217, G: 140, B: 217, A: 255}},
-	{Name: "mosquito", Glyph: 0x1F99F, Color: color.RGBA{R: 140, G: 178, B: 140, A: 255}},
-	{Name: "wheat", Glyph: 0x1F33E, Color: color.RGBA{R: 217, G: 178, B: 102, A: 255}},
-	{Name: "pig", Glyph: 0x1F416, Color: color.RGBA{R: 255, G: 140, B: 178, A: 255}},
+// paletteConnectionSeed is the fixed RNG seed used in init() to assign
+// each creature's Connections slice deterministically.
+const paletteConnectionSeed = 42
 
-	// ---- additional creatures ----
-	{Name: "dog", Glyph: 0x1F436, Color: color.RGBA{R: 178, G: 140, B: 140, A: 255}},
-	{Name: "fox", Glyph: 0x1F98A, Color: color.RGBA{R: 255, G: 140, B: 102, A: 255}},
-	{Name: "lion", Glyph: 0x1F981, Color: color.RGBA{R: 255, G: 178, B: 140, A: 255}},
-	{Name: "tiger", Glyph: 0x1F42F, Color: color.RGBA{R: 255, G: 217, B: 102, A: 255}},
-	{Name: "cow", Glyph: 0x1F42E, Color: color.RGBA{R: 217, G: 255, B: 217, A: 255}},
-	{Name: "rabbit", Glyph: 0x1F430, Color: color.RGBA{R: 255, G: 217, B: 217, A: 255}},
-	{Name: "bear", Glyph: 0x1F43B, Color: color.RGBA{R: 140, G: 102, B: 102, A: 255}},
-	{Name: "panda", Glyph: 0x1F43C, Color: color.RGBA{R: 140, G: 255, B: 255, A: 255}},
-	{Name: "hamster", Glyph: 0x1F439, Color: color.RGBA{R: 255, G: 217, B: 178, A: 255}},
-	{Name: "chicken", Glyph: 0x1F414, Color: color.RGBA{R: 255, G: 255, B: 178, A: 255}},
-	{Name: "penguin", Glyph: 0x1F427, Color: color.RGBA{R: 140, G: 178, B: 255, A: 255}},
-	{Name: "eagle", Glyph: 0x1F985, Color: color.RGBA{R: 178, G: 217, B: 255, A: 255}},
-	{Name: "duck", Glyph: 0x1F986, Color: color.RGBA{R: 140, G: 255, B: 178, A: 255}},
-	{Name: "owl", Glyph: 0x1F989, Color: color.RGBA{R: 217, G: 178, B: 140, A: 255}},
-	{Name: "frog", Glyph: 0x1F438, Color: color.RGBA{R: 102, G: 217, B: 140, A: 255}},
-	{Name: "crocodile", Glyph: 0x1F40A, Color: color.RGBA{R: 140, G: 178, B: 102, A: 255}},
-	{Name: "turtle", Glyph: 0x1F422, Color: color.RGBA{R: 102, G: 140, B: 140, A: 255}},
-	{Name: "lizard", Glyph: 0x1F98E, Color: color.RGBA{R: 102, G: 140, B: 178, A: 255}},
-	{Name: "whale", Glyph: 0x1F433, Color: color.RGBA{R: 102, G: 102, B: 217, A: 255}},
-	{Name: "shark", Glyph: 0x1F988, Color: color.RGBA{R: 102, G: 140, B: 255, A: 255}},
-	{Name: "crab", Glyph: 0x1F980, Color: color.RGBA{R: 255, G: 102, B: 140, A: 255}},
-	{Name: "shrimp", Glyph: 0x1F990, Color: color.RGBA{R: 255, G: 178, B: 178, A: 255}},
-	{Name: "squid", Glyph: 0x1F991, Color: color.RGBA{R: 178, G: 102, B: 178, A: 255}},
-	{Name: "snail", Glyph: 0x1F40C, Color: color.RGBA{R: 140, G: 217, B: 140, A: 255}},
-	{Name: "ant", Glyph: 0x1F41C, Color: color.RGBA{R: 140, G: 102, B: 140, A: 255}},
-	{Name: "honeybee", Glyph: 0x1F41D, Color: color.RGBA{R: 255, G: 255, B: 140, A: 255}},
-	{Name: "spider", Glyph: 0x1F577, Color: color.RGBA{R: 102, G: 102, B: 102, A: 255}},
-	{Name: "scorpion", Glyph: 0x1F982, Color: color.RGBA{R: 217, G: 102, B: 140, A: 255}},
-	{Name: "ladybug", Glyph: 0x1F41E, Color: color.RGBA{R: 255, G: 102, B: 217, A: 255}},
-	{Name: "elephant", Glyph: 0x1F418, Color: color.RGBA{R: 140, G: 140, B: 217, A: 255}},
-	{Name: "rhino", Glyph: 0x1F98F, Color: color.RGBA{R: 178, G: 178, B: 178, A: 255}},
-	{Name: "hippo", Glyph: 0x1F99B, Color: color.RGBA{R: 140, G: 217, B: 217, A: 255}},
-	{Name: "zebra", Glyph: 0x1F993, Color: color.RGBA{R: 217, G: 255, B: 255, A: 255}},
-	{Name: "giraffe", Glyph: 0x1F992, Color: color.RGBA{R: 255, G: 217, B: 140, A: 255}},
-	{Name: "camel", Glyph: 0x1F42A, Color: color.RGBA{R: 217, G: 178, B: 178, A: 255}},
+// creaturePalette is the master list of 23 creatures.
+//
+// Colours are OKLCh-derived sRGB.
+// Parameters: L1=0.68, L2=0.52, C=0.13
+// Hues (degrees): 15,45,75,105,135,165,195,225,255,285,315,345
+// Band L1 (12 colours): all 12 hues, indices 0–11 in palette order.
+// Band L2 (11 colours): hues 15–315 (345° dropped), indices 12–22 in palette order.
+// Generated by cmd/gen_palette/main.go (//go:build ignore).
+//
+// Power distribution: 10×Power=2, 7×Power=3, 4×Power=5, 2×Power=8.
+// Connections are assigned in init() via paletteConnectionSeed=42.
+var creaturePalette = []Creature{
+	// Band L1 (L=0.68, C=0.13)
+	{Name: "kangaroo", Glyph: 0x1F998, Color: color.RGBA{R: 220, G: 116, B: 126, A: 255}, Power: 2}, // h=15°  #DC747E
+	{Name: "koala", Glyph: 0x1F428, Color: color.RGBA{R: 217, G: 124, B: 80, A: 255}, Power: 3},     // h=45°  #D97C50
+	{Name: "cat", Glyph: 0x1F431, Color: color.RGBA{R: 199, G: 139, B: 40, A: 255}, Power: 2},       // h=75°  #C78B28
+	{Name: "wolf", Glyph: 0x1F43A, Color: color.RGBA{R: 165, G: 156, B: 42, A: 255}, Power: 5},      // h=105° #A59C2A
+	{Name: "horse", Glyph: 0x1F434, Color: color.RGBA{R: 116, G: 170, B: 84, A: 255}, Power: 2},     // h=135° #74AA54
+	{Name: "butterfly", Glyph: 0x1F98B, Color: color.RGBA{R: 46, G: 177, B: 132, A: 255}, Power: 3}, // h=165° #2EB184
+	{Name: "snake", Glyph: 0x1F40D, Color: color.RGBA{R: 0, G: 176, B: 177, A: 255}, Power: 2},      // h=195° #00B0B1
+	{Name: "dragon", Glyph: 0x1F409, Color: color.RGBA{R: 0, G: 168, B: 212, A: 255}, Power: 8},     // h=225° #00A8D4
+	{Name: "ghost", Glyph: 0x1F47B, Color: color.RGBA{R: 94, G: 154, B: 231, A: 255}, Power: 2},     // h=255° #5E9AE7
+	{Name: "fish", Glyph: 0x1F41F, Color: color.RGBA{R: 145, G: 139, B: 229, A: 255}, Power: 3},     // h=285° #918BE5
+	{Name: "dolphin", Glyph: 0x1F42C, Color: color.RGBA{R: 182, G: 126, B: 207, A: 255}, Power: 2},  // h=315° #B67ECF
+	{Name: "octopus", Glyph: 0x1F419, Color: color.RGBA{R: 208, G: 117, B: 171, A: 255}, Power: 5},  // h=345° #D075AB
+
+	// Band L2 (L=0.52, C=0.13)
+	{Name: "monkey", Glyph: 0x1F412, Color: color.RGBA{R: 166, G: 68, B: 80, A: 255}, Power: 2},   // h=15°  #A64450
+	{Name: "bat", Glyph: 0x1F987, Color: color.RGBA{R: 164, G: 76, B: 29, A: 255}, Power: 3},      // h=45°  #A44C1D
+	{Name: "pig", Glyph: 0x1F416, Color: color.RGBA{R: 147, G: 91, B: 0, A: 255}, Power: 2},       // h=75°  #935B00
+	{Name: "owl", Glyph: 0x1F989, Color: color.RGBA{R: 117, G: 108, B: 0, A: 255}, Power: 5},      // h=105° #756C00
+	{Name: "frog", Glyph: 0x1F438, Color: color.RGBA{R: 70, G: 121, B: 34, A: 255}, Power: 3},     // h=135° #467922
+	{Name: "turtle", Glyph: 0x1F422, Color: color.RGBA{R: 0, G: 127, B: 86, A: 255}, Power: 2},    // h=165° #007F56
+	{Name: "crab", Glyph: 0x1F980, Color: color.RGBA{R: 0, G: 126, B: 128, A: 255}, Power: 8},     // h=195° #007E80
+	{Name: "honeybee", Glyph: 0x1F41D, Color: color.RGBA{R: 0, G: 118, B: 160, A: 255}, Power: 3}, // h=225° #0076A0
+	{Name: "spider", Glyph: 0x1F577, Color: color.RGBA{R: 46, G: 105, B: 178, A: 255}, Power: 2},  // h=255° #2E69B2
+	{Name: "elephant", Glyph: 0x1F418, Color: color.RGBA{R: 99, G: 91, B: 176, A: 255}, Power: 5}, // h=285° #635BB0
+	{Name: "penguin", Glyph: 0x1F427, Color: color.RGBA{R: 133, G: 79, B: 156, A: 255}, Power: 3}, // h=315° #854F9C
+}
+
+// paletteCDF holds the normalised cumulative distribution function for
+// weighted creature spawning (weight = 1/Power). Built in init().
+var paletteCDF []float64
+
+func init() {
+	// Build Connections: each creature gets exactly Power distinct other-creature pointers.
+	rng := rand.New(rand.NewSource(paletteConnectionSeed))
+	n := len(creaturePalette)
+	for i := range creaturePalette {
+		k := creaturePalette[i].Power
+		// Build a list of all indices except i, then sample k without replacement.
+		pool := make([]int, 0, n-1)
+		for j := 0; j < n; j++ {
+			if j != i {
+				pool = append(pool, j)
+			}
+		}
+		// Fisher-Yates partial shuffle to pick k items.
+		chosen := make([]*Creature, k)
+		for c := 0; c < k; c++ {
+			idx := rng.Intn(len(pool) - c)
+			// swap pool[idx] with pool[len(pool)-1-c]
+			last := len(pool) - 1 - c
+			pool[idx], pool[last] = pool[last], pool[idx]
+			chosen[c] = &creaturePalette[pool[last]]
+		}
+		creaturePalette[i].Connections = chosen
+	}
+
+	// Build CDF for weighted spawning (weight = 1/Power).
+	weights := make([]float64, n)
+	var total float64
+	for i := range creaturePalette {
+		weights[i] = 1.0 / float64(creaturePalette[i].Power)
+		total += weights[i]
+	}
+	paletteCDF = make([]float64, n)
+	var cumulative float64
+	for i, w := range weights {
+		cumulative += w / total
+		paletteCDF[i] = cumulative
+	}
+}
+
+// paletteCreature returns a pointer to a random entry in creaturePalette.
+// Spawn probability is proportional to 1/Power (lower-power creatures appear
+// more frequently). The pointer is stable because creaturePalette is a
+// package-level slice that is never reallocated after init.
+func paletteCreature() *Creature {
+	x := rand.Float64()
+	i := sort.SearchFloat64s(paletteCDF, x)
+	if i >= len(creaturePalette) {
+		i = len(creaturePalette) - 1
+	}
+	return &creaturePalette[i]
 }
 
 // darkerShade returns c with each channel multiplied by 0.65 (integer floor) and
@@ -105,13 +139,6 @@ func darkerShade(c color.RGBA) color.RGBA {
 		B: uint8(float64(c.B) * 0.15),
 		A: 255,
 	}
-}
-
-// paletteCreature returns a pointer to a random entry in creaturePalette.
-// The pointer is stable because creaturePalette is a package-level slice that
-// is never reallocated after init.
-func paletteCreature() *Creature {
-	return &creaturePalette[rand.Intn(len(creaturePalette))]
 }
 
 // loadGlyphFont parses the embedded NotoEmoji TTF and returns a GoTextFaceSource.

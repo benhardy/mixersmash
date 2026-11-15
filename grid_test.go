@@ -873,10 +873,10 @@ func TestScoreForKill(t *testing.T) {
 // creaturePalette — structure and palette-level invariants
 // ---------------------------------------------------------------------------
 
-// TestCreaturePaletteMinLength verifies the palette has at least 64 entries.
-func TestCreaturePaletteMinLength(t *testing.T) {
-	if len(creaturePalette) < 64 {
-		t.Errorf("creaturePalette has %d entries, want at least 64", len(creaturePalette))
+// TestCreaturePaletteSize verifies the palette has exactly 23 entries.
+func TestCreaturePaletteSize(t *testing.T) {
+	if len(creaturePalette) != 23 {
+		t.Errorf("creaturePalette has %d entries, want exactly 23", len(creaturePalette))
 	}
 }
 
@@ -909,59 +909,23 @@ func TestCreaturePaletteGlyphsUniqueAndNonZero(t *testing.T) {
 	}
 }
 
-// TestCreaturePaletteChannelValues verifies that every R, G, B channel value of
-// every palette entry is a member of the 5-level set {102, 140, 178, 217, 255}.
-func TestCreaturePaletteChannelValues(t *testing.T) {
-	allowed := map[uint8]bool{102: true, 140: true, 178: true, 217: true, 255: true}
+// TestCreaturePaletteAlphaAll255 verifies that every palette entry has Color.A == 255.
+func TestCreaturePaletteAlphaAll255(t *testing.T) {
 	for i, e := range creaturePalette {
-		for _, ch := range []struct {
-			name string
-			val  uint8
-		}{
-			{"R", e.Color.R},
-			{"G", e.Color.G},
-			{"B", e.Color.B},
-		} {
-			if !allowed[ch.val] {
-				t.Errorf("creaturePalette[%d] (%q) channel %s = %d, not in {102,140,178,217,255}",
-					i, e.Name, ch.name, ch.val)
-			}
+		if e.Color.A != 255 {
+			t.Errorf("creaturePalette[%d] (%q) Color.A = %d, want 255", i, e.Name, e.Color.A)
 		}
 	}
 }
 
-// TestCreaturePaletteChannelRange verifies that the minimum channel value used
-// across all palette entries is exactly 102 (floor preserved) and that 255 is
-// also present (full range exercised).
-func TestCreaturePaletteChannelRange(t *testing.T) {
-	var minVal uint8 = 255
-	has255 := false
-	for _, e := range creaturePalette {
-		for _, ch := range []uint8{e.Color.R, e.Color.G, e.Color.B} {
-			if ch < minVal {
-				minVal = ch
-			}
-			if ch == 255 {
-				has255 = true
-			}
-		}
-	}
-	if minVal != 102 {
-		t.Errorf("minimum channel value across palette = %d, want exactly 102", minVal)
-	}
-	if !has255 {
-		t.Errorf("no palette entry uses channel value 255; full 5-level range not exercised")
-	}
-}
-
-// TestCreaturePaletteRequiredNames verifies that the palette contains at least
-// one entry whose Name contains each required creature name (case-insensitive).
+// TestCreaturePaletteRequiredNames verifies that the palette contains exactly
+// the 23 required creature names.
 func TestCreaturePaletteRequiredNames(t *testing.T) {
 	required := []string{
-		"kangaroo", "koala", "parrot", "hedgehog", "pine", "fern", "flower",
-		"cat", "wolf", "goat", "horse", "butterfly", "cherry", "banana",
-		"snake", "dragon", "rat", "ghost", "rooster", "fish", "dolphin",
-		"octopus", "palm", "monkey", "bat", "jellyfish", "mosquito", "wheat", "pig",
+		"kangaroo", "koala", "cat", "wolf", "horse", "butterfly", "snake",
+		"dragon", "ghost", "fish", "dolphin", "octopus", "monkey", "bat",
+		"pig", "owl", "frog", "turtle", "crab", "honeybee", "spider",
+		"elephant", "penguin",
 	}
 	for _, req := range required {
 		found := false
@@ -973,6 +937,66 @@ func TestCreaturePaletteRequiredNames(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("creaturePalette has no entry whose Name contains %q", req)
+		}
+	}
+}
+
+// TestCreaturePalettePowerDistribution verifies that the palette has exactly
+// 10 creatures with Power=2, 7 with Power=3, 4 with Power=5, and 2 with Power=8.
+func TestCreaturePalettePowerDistribution(t *testing.T) {
+	counts := make(map[int]int)
+	for _, e := range creaturePalette {
+		counts[e.Power]++
+	}
+	want := map[int]int{2: 10, 3: 7, 5: 4, 8: 2}
+	for power, wantCount := range want {
+		if got := counts[power]; got != wantCount {
+			t.Errorf("Power=%d count = %d, want %d", power, got, wantCount)
+		}
+	}
+	// No unexpected power values.
+	for power, got := range counts {
+		if _, ok := want[power]; !ok {
+			t.Errorf("unexpected Power=%d found in palette (%d entries)", power, got)
+		}
+	}
+}
+
+// TestCreaturePaletteConnectionsLengthEqualsPower verifies that each creature's
+// Connections slice has exactly Power entries.
+func TestCreaturePaletteConnectionsLengthEqualsPower(t *testing.T) {
+	for i, e := range creaturePalette {
+		if len(e.Connections) != e.Power {
+			t.Errorf("creaturePalette[%d] (%q) has %d Connections, want Power=%d",
+				i, e.Name, len(e.Connections), e.Power)
+		}
+	}
+}
+
+// TestCreaturePaletteNoSelfLinks verifies that no creature has a Connection
+// pointing to itself.
+func TestCreaturePaletteNoSelfLinks(t *testing.T) {
+	for i := range creaturePalette {
+		for j, conn := range creaturePalette[i].Connections {
+			if conn == &creaturePalette[i] {
+				t.Errorf("creaturePalette[%d] (%q) Connections[%d] points to itself",
+					i, creaturePalette[i].Name, j)
+			}
+		}
+	}
+}
+
+// TestCreaturePaletteNoDuplicateConnections verifies that no creature's
+// Connections slice contains the same pointer more than once.
+func TestCreaturePaletteNoDuplicateConnections(t *testing.T) {
+	for i := range creaturePalette {
+		seen := make(map[*Creature]bool)
+		for j, conn := range creaturePalette[i].Connections {
+			if seen[conn] {
+				t.Errorf("creaturePalette[%d] (%q) Connections[%d] is a duplicate pointer",
+					i, creaturePalette[i].Name, j)
+			}
+			seen[conn] = true
 		}
 	}
 }
