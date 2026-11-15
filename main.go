@@ -517,6 +517,16 @@ func (g *Game) commitCellAt(col, row int) error {
 }
 
 // updateWaiting handles hover recompute and click/touch processing while in stateWaiting.
+// containsTouchID reports whether ids contains id.
+func containsTouchID(ids []ebiten.TouchID, id ebiten.TouchID) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Game) updateWaiting() error {
 	dcs := g.deviceCellSize
 	if dcs <= 0 {
@@ -541,7 +551,10 @@ func (g *Game) updateWaiting() error {
 
 	// Hold-as-hover: mirror the mouse hover recompute using the active touch position.
 	// Also update lastTouchX/Y each frame the finger is confirmed down.
-	if g.touchActive {
+	// Guard requires the tracked ID to still be present in currentTouches: on the
+	// release frame the ID is absent, so lastTouchX/Y retain the last valid position
+	// and the release-commit loop below reads the correct cell instead of (0,0).
+	if g.touchActive && containsTouchID(currentTouches, g.activeTouchID) {
 		tx, ty := ebiten.TouchPosition(g.activeTouchID)
 		g.lastTouchX, g.lastTouchY = tx, ty
 		hc := tx / dcs
