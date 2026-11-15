@@ -63,6 +63,10 @@ type Game struct {
 	hoverCol, hoverRow int      // cell under cursor (-1 = none)
 	victimHints        [][2]int // closest-colour neighbours of hovered cell (empty = none)
 
+	// touch tracking fields
+	touchActive   bool
+	activeTouchID ebiten.TouchID
+
 	// victim movement animation fields (one entry per simultaneous victim)
 	victims []MoveAnim
 
@@ -484,31 +488,10 @@ func (g *Game) updateColumnCollapsing() error {
 	return nil
 }
 
-// updateWaiting handles hover recompute and click processing while in stateWaiting.
-func (g *Game) updateWaiting() error {
-	// Hover recompute.
-	// CursorPosition returns device-pixel coords when LayoutF is in effect.
-	dcs := g.deviceCellSize
-	if dcs <= 0 {
-		dcs = cellSize
-	}
-	mx, my := ebiten.CursorPosition()
-	hc := mx / dcs
-	hr := my / dcs
-	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
-		if g.grid.Cells[hc][hr].Health > 0 {
-			g.hoverCol, g.hoverRow = hc, hr
-			g.victimHints = closestColorNeighbors(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
-		}
-	}
-
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		// nothing to do
-		return nil
-	}
-	// Click handling.
-	px, py := ebiten.CursorPosition()
-	col, row := cellFromPixel(px, py, dcs)
+// commitCellAt applies one hit to the cell at (col, row): decrements health,
+// then delegates to handleTargetDeath or handleTargetSurvival as appropriate.
+// It is a no-op (returns nil) when the cell is out-of-bounds or already dead.
+func (g *Game) commitCellAt(col, row int) error {
 	if col < 0 || col >= g.grid.Cols || row < 0 || row >= g.grid.Rows {
 		return nil
 	}
@@ -536,6 +519,81 @@ func (g *Game) updateWaiting() error {
 			return nil
 		}
 	}
+	return nil
+}
+
+// updateWaiting handles hover recompute and click/touch processing while in stateWaiting.
+func (g *Game) updateWaiting() error {
+	dcs := g.deviceCellSize
+	if dcs <= 0 {
+		dcs = cellSize
+	}
+
+	// Determine whether any touch activity is happening this frame so the mouse
+	// path can be suppressed (dedupe: synthesised mouse clicks on touch devices).
+	currentTouches := ebiten.AppendTouchIDs(nil)
+	justPressed := inpututil.AppendJustPressedTouchIDs(nil)
+	justReleased := inpututil.AppendJustReleasedTouchIDs(nil)
+	touchFrameActive := g.touchActive || len(currentTouches) > 0 || len(justPressed) > 0 || len(justReleased) > 0
+
+	// Touch input block.
+	// New press: begin tracking the first finger.
+	if !g.touchActive && len(justPressed) > 0 {
+		g.touchActive = true
+		g.activeTouchID = justPressed[0]
+	}
+
+	// Hold-as-hover: mirror the mouse hover recompute using the active touch position.
+	if g.touchActive {
+		tx, ty := ebiten.TouchPosition(g.activeTouchID)
+		hc := tx / dcs
+		hr := ty / dcs
+		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
+			if g.grid.Cells[hc][hr].Health > 0 {
+				g.hoverCol, g.hoverRow = hc, hr
+				g.victimHints = closestColorNeighbors(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+			}
+		}
+	}
+
+	// Release-to-commit: when the tracked finger lifts, commit the cell.
+	for _, id := range justReleased {
+		if id == g.activeTouchID {
+			// TouchPosition on a just-released ID returns last-known position — correct for commit.
+			tx, ty := ebiten.TouchPosition(g.activeTouchID)
+			col, row := cellFromPixel(tx, ty, dcs)
+			// Clear touch state before commit so a reused ID cannot match stale state.
+			g.touchActive = false
+			if err := g.commitCellAt(col, row); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
+	// Mouse input block — skipped entirely when touch is active/just-active this frame.
+	if !touchFrameActive {
+		// Hover recompute.
+		// CursorPosition returns device-pixel coords when LayoutF is in effect.
+		mx, my := ebiten.CursorPosition()
+		hc := mx / dcs
+		hr := my / dcs
+		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
+			if g.grid.Cells[hc][hr].Health > 0 {
+				g.hoverCol, g.hoverRow = hc, hr
+				g.victimHints = closestColorNeighbors(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+			}
+		}
+
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			px, py := ebiten.CursorPosition()
+			col, row := cellFromPixel(px, py, dcs)
+			if err := g.commitCellAt(col, row); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

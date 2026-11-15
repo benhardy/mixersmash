@@ -2,27 +2,105 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>MixerSmash</title>
     <style>
-        * {
+        html, body {
             margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+            width: 100%;
+            height: 100%;
         }
+
         body {
-            background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
+            position: fixed;
+            inset: 0;
             overflow: hidden;
+            background: #000;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+
+        * {
+            touch-action: none;
+            overscroll-behavior: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+            touch-action: none;
+        }
+
+        #start-overlay {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: sans-serif;
+            font-size: 1.5rem;
+            z-index: 30;
+            cursor: pointer;
+        }
+
+        #portrait-overlay {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            color: #fff;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-family: sans-serif;
+            font-size: 1.3rem;
+            text-align: center;
+            padding: 1rem;
+            z-index: 40;
+        }
+
+        @media (orientation: portrait) {
+            #portrait-overlay {
+                display: flex;
+            }
+
+            canvas {
+                pointer-events: none;
+            }
+        }
+
+        @media (orientation: landscape) {
+            #portrait-overlay {
+                display: none;
+            }
         }
     </style>
 </head>
 <body>
+    <div id="start-overlay">Tap to play</div>
+    <div id="portrait-overlay">Rotate your device to landscape</div>
+    <div id="loading" style="display:none; position:fixed; bottom:1rem; right:1rem; color:#fff; font-family:sans-serif; z-index:35;">Loading&hellip;</div>
+
     <script src="wasm_exec.js"></script>
     <script>
+        document.getElementById('start-overlay').addEventListener('click', async function (e) {
+            e.preventDefault();
+            this.style.display = 'none';
+            try {
+                await document.documentElement.requestFullscreen();
+            } catch (_) {}
+            try {
+                await screen.orientation.lock('landscape');
+            } catch (_) {}
+        });
+
         (async function () {
             const go = new Go();
 
@@ -51,10 +129,22 @@
                 return WebAssembly.instantiate(bytes, go.importObject);
             }
 
+            const t0 = performance.now();
+            let loaded = false;
+            setTimeout(function () {
+                if (!loaded) {
+                    document.getElementById('loading').style.display = 'block';
+                }
+            }, 1000);
+
             try {
                 const result = await loadWasm();
+                loaded = true;
+                document.getElementById('loading').style.display = 'none';
                 go.run(result.instance);
             } catch (err) {
+                loaded = true;
+                document.getElementById('loading').style.display = 'none';
                 console.error("Failed to load mixersmash.wasm:", err);
             }
         })();
