@@ -207,3 +207,49 @@ A `Cell`'s identity is the creature it holds. `Cell` holds a `*Creature` referen
 - Builtin `min`/`max` adopted in place of local clamp helpers.
 
 ---
+
+## Mobile browser support
+
+**Touch input alongside mouse**
+Touch events are handled in parallel with mouse events. Touch-and-hold mirrors hover; release commits the tap. Mouse and touch are deduped to avoid double-fire on synthesised click events that mobile browsers emit after a touch sequence. When a touch ends, the commit uses the last-known touch position rather than the released touch coordinates, because a released touch ID reports `(0, 0)`.
+
+**Landscape-only web shell**
+The HTML shell targets landscape orientation only:
+- A `tap-to-play` overlay requests best-effort fullscreen and orientation lock (via the Screen Orientation API) on tap. This works on Android; it no-ops on iOS, which does not permit JS-triggered orientation lock.
+- A CSS portrait-mode overlay ("rotate to landscape") provides the iOS guarantee: if the device is held in portrait, the overlay covers the canvas and prompts the user to rotate.
+- Viewport meta, `touch-action: none`, and safe-area CSS env vars are set to prevent browser chrome interference and rubber-band scroll.
+- A loading indicator appears only if WASM load exceeds approximately 1 second, avoiding a flash on fast connections.
+
+Verified on desktop browsers and mobile (Chrome/Android, Safari/iOS).
+
+---
+
+## Tooling and process
+
+**golangci-lint as part of the done check**
+`golangci-lint` is run with staticcheck, errcheck, ineffassign, unused, and gocritic enabled. Lint passes are required before a task is considered done, alongside `go build ./...` and `go test ./...`.
+
+**Checked-in pre-commit hook**
+`.githooks/pre-commit` runs gofmt, `go vet`, `go build`, `go test`, and golangci-lint in sequence. Activated via `git config core.hooksPath .githooks` (or `make hooks`). This ensures the full gate cannot be skipped: `go build ./...` alone does not compile test files, so the hook explicitly runs both build and test passes.
+
+---
+
+## Major mechanic pivot: creature connection graph
+
+**Colour similarity as matching basis — explored then abandoned**
+Two perceptual colour metrics were prototyped: redmean (weighted RGB Euclidean) and a hue-weighted HSV distance. A palette comparison was also explored. All were discarded: colour similarity produced perceptually surprising matches (players could not reliably predict which neighbours would be affected) and gave no strategic depth. Colour is now purely visual identity and plays no role in matching.
+
+**Reduced palette and OKLCh derivation**
+Creature count reduced from ~57 to 23. The new palette is generated in OKLCh (two lightness bands: L=0.68 and L=0.52, moderate chroma 0.13, 12 hues evenly spaced) for perceptually even, pleasant, non-neon colours. Values are baked as sRGB constants with a documented derivation in `cmd/gen_palette`. Colour-distance code (redmean, hue-weighted HSV, closest-colour neighbour selection) was removed as dead.
+
+**Connection graph mechanic**
+Each `Creature` has a `Power` (Fibonacci values 2/3/5/8; distribution 10/7/4/2 creatures per tier) and a `Connections` list of length equal to its Power. When a clicked creature dies, its victims are:
+- alive adjacent neighbours whose creature type appears in the clicked creature's `Connections` list, plus
+- any adjacent neighbour of the same type (always, regardless of `Connections`).
+
+Connections are directed and hardcoded (explicit lists per creature), replacing an earlier fixed-seed RNG approach. Hardcoding keeps the graph stable so players can learn it. Board seeding weights spawn probability by `1/Power`, making high-power connector creatures rare.
+
+**Scoring follow-up deferred**
+`scoreForKill`'s colour-matching bonuses can no longer fire (all 23 creatures have distinct colours). The bonuses remain in place; a scoring redesign around the connection/power mechanic is noted as a follow-up task.
+
+---
