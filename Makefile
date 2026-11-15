@@ -1,4 +1,4 @@
-.PHONY: all mac linux wasm serve test lint clean
+.PHONY: all mac linux wasm serve test lint clean hooks
 
 mac: mixersmash_darwin_arm64
 
@@ -31,6 +31,10 @@ test:
 
 lint:
 	golangci-lint run ./...
+
+hooks:
+	git config core.hooksPath .githooks
+	@echo "pre-commit hook activated (core.hooksPath = .githooks)"
 
 clean:
 	rm -f mixersmash_darwin_arm64 mixersmash_linux_amd64

@@ -32,6 +32,9 @@ Read with Read. Modify with Edit/Write. Never use sed -i, tee, redirects, heredo
 - Lint: `golangci-lint run ./...` (or `make lint`) before declaring work done. Enabled linters: staticcheck, errcheck, ineffassign, unused, gocritic.
 - Race check for anything concurrent: `go test -race ./...`
 
+## Pre-commit hook
+The repo ships `.githooks/pre-commit` which runs gofmt, vet, build, test, and golangci-lint (if available) on every commit. Activate it in a fresh clone with `make hooks`. Bypass in a pinch with `git commit --no-verify`.
+
 ## Workflow
 - Run `go build ./... && go test ./...` after every change. Don't report done until both pass.
 - Write the failing test first, then the minimal code to pass it.
