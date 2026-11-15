@@ -46,18 +46,42 @@ func spriteRefSizeFor(dcs int) int {
 }
 
 // LayoutF implements ebiten.LayoutFer, causing ebiten to call this instead of
-// Layout.  It returns the device-pixel screen size so that Draw receives a
-// device-sized *ebiten.Image.  When the scale factor changes (e.g. window moved
-// to a different monitor, or browser zoom), it reallocates the canvas and clears
-// the sprite cache so all cached sprites are rebaked at the new size.
+// Layout.  It returns the actual device-pixel screen dimensions so that Draw
+// receives a *ebiten.Image matching the real framebuffer (in whatever orientation).
+//
+// The landscape design frame (frameW × frameH = round(800*s) × round(600*s)) is
+// allocated here and kept at the landscape size regardless of screen orientation.
+// deviceCellSize is derived from the frame width, not the screen width, so board
+// coordinates are stable across orientation changes.
+//
+// When the scale factor changes (e.g. window moved to a different monitor, or
+// browser zoom), the frame and canvas are reallocated and the sprite cache is
+// cleared so all cached sprites are rebaked at the new size.
 func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 	s := deviceScale()
-	dw, dh := deviceCanvasDims(s)
+	// screenW/screenH = actual device-pixel screen in current orientation.
+	sw := int(math.Round(outsideWidth * s))
+	sh := int(math.Round(outsideHeight * s))
+	if sw < 1 {
+		sw = 1
+	}
+	if sh < 1 {
+		sh = 1
+	}
+	g.screenW = sw
+	g.screenH = sh
+	g.portrait = sh > sw
+
+	// Fixed-design landscape frame: always windowWidth × windowHeight at scale s.
+	fw, fh := deviceCanvasDims(s) // round(800*s), round(600*s)
+
 	if s != g.renderScale {
 		g.renderScale = s
-		g.deviceCellSize = deviceCellSizeFor(dw)
+		// deviceCellSize is derived from the frame width, not the screen width.
+		g.deviceCellSize = deviceCellSizeFor(fw)
 		g.spriteRefSize = spriteRefSizeFor(g.deviceCellSize)
-		g.canvas = ebiten.NewImage(dw, dh)
+		g.frame = ebiten.NewImage(fw, fh)
+		g.canvas = ebiten.NewImage(fw, fh)
 		// Invalidate per-creature sprite cache — sprites were baked at the old size.
 		for i := range creaturePalette {
 			creaturePalette[i].Sprite = nil
@@ -69,7 +93,7 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 			}
 		}
 	}
-	return float64(dw), float64(dh)
+	return float64(sw), float64(sh)
 }
 
 // Layout satisfies the ebiten.Game interface.  When LayoutF is implemented,

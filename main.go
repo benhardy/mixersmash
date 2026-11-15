@@ -48,11 +48,12 @@ const compositeSpriteRefSize = 120
 type Game struct {
 	grid         *Grid
 	canvas       *ebiten.Image
-	currentState int        // which state are we in?
-	animStart    int64      // when did the current animation phase start?
-	actionCol    int        // the column an action is happening
-	actionRow    int        // the row any given action is happening
-	moveAnims    []MoveAnim // used for both shuffle and drop phases
+	frame        *ebiten.Image // landscape design-size offscreen frame; board renders here
+	currentState int           // which state are we in?
+	animStart    int64         // when did the current animation phase start?
+	actionCol    int           // the column an action is happening
+	actionRow    int           // the row any given action is happening
+	moveAnims    []MoveAnim    // used for both shuffle and drop phases
 	glowShader   *ebiten.Shader
 	gelShader    *ebiten.Shader
 	cellCount    int        // number of live cells currently in the grid
@@ -66,8 +67,8 @@ type Game struct {
 	// touch tracking fields
 	touchActive   bool
 	activeTouchID ebiten.TouchID
-	lastTouchX    int // last device-pixel X while the tracked finger was down
-	lastTouchY    int // last device-pixel Y while the tracked finger was down
+	lastTouchX    int // last device-pixel X while the tracked finger was down (raw screen coords)
+	lastTouchY    int // last device-pixel Y while the tracked finger was down (raw screen coords)
 
 	// victim movement animation fields (one entry per simultaneous victim)
 	victims []MoveAnim
@@ -86,8 +87,13 @@ type Game struct {
 	// HiDPI render scale — set once per LayoutF call; derived from
 	// ebiten.Monitor().DeviceScaleFactor().
 	renderScale    float64 // current device scale factor (1.0 on standard displays)
-	deviceCellSize int     // device-pixel cell size, derived from rounded canvas dims
+	deviceCellSize int     // device-pixel cell size, derived from frame width
 	spriteRefSize  int     // device-pixel sprite bake diameter (≤512)
+
+	// screenW, screenH are the actual device-pixel screen dimensions, updated
+	// each LayoutF call.  portrait is true when screenH > screenW.
+	screenW, screenH int
+	portrait         bool
 
 	// initialPainted is false until the first in-loop frame, at which point
 	// repaintGrid is called to bake all sprites with a live graphics context.
@@ -533,6 +539,24 @@ func (g *Game) updateWaiting() error {
 		dcs = cellSize
 	}
 
+	// frameW/frameH: dimensions of the landscape design frame, used for
+	// screenToFrame conversion.  When g.frame is nil (pre-LayoutF) fall back
+	// to the design constants so input still works.
+	var frameW, frameH float64
+	if g.frame != nil {
+		frameW = float64(g.frame.Bounds().Dx())
+		frameH = float64(g.frame.Bounds().Dy())
+	} else {
+		frameW = float64(windowWidth)
+		frameH = float64(windowHeight)
+	}
+	sw := float64(g.screenW)
+	sh := float64(g.screenH)
+	if sw <= 0 {
+		sw = frameW
+		sh = frameH
+	}
+
 	// Determine whether any touch activity is happening this frame so the mouse
 	// path can be suppressed (dedupe: synthesised mouse clicks on touch devices).
 	currentTouches := ebiten.AppendTouchIDs(nil)
@@ -545,20 +569,21 @@ func (g *Game) updateWaiting() error {
 	if !g.touchActive && len(justPressed) > 0 {
 		g.touchActive = true
 		g.activeTouchID = justPressed[0]
-		// Store the press position so a single-frame tap has a valid stored position.
+		// Store the raw screen press position so a single-frame tap has a valid stored position.
 		g.lastTouchX, g.lastTouchY = ebiten.TouchPosition(g.activeTouchID)
 	}
 
 	// Hold-as-hover: mirror the mouse hover recompute using the active touch position.
-	// Also update lastTouchX/Y each frame the finger is confirmed down.
+	// lastTouchX/Y store RAW screen coords; they are converted via screenToFrame here.
 	// Guard requires the tracked ID to still be present in currentTouches: on the
 	// release frame the ID is absent, so lastTouchX/Y retain the last valid position
 	// and the release-commit loop below reads the correct cell instead of (0,0).
 	if g.touchActive && containsTouchID(currentTouches, g.activeTouchID) {
 		tx, ty := ebiten.TouchPosition(g.activeTouchID)
 		g.lastTouchX, g.lastTouchY = tx, ty
-		hc := tx / dcs
-		hr := ty / dcs
+		fx, fy := screenToFrame(float64(tx), float64(ty), sw, sh, frameW, frameH, g.portrait)
+		hc := int(fx) / dcs
+		hr := int(fy) / dcs
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
@@ -567,12 +592,14 @@ func (g *Game) updateWaiting() error {
 		}
 	}
 
-	// Release-to-commit: when the tracked finger lifts, commit using the stored last position.
-	// Do NOT re-read ebiten.TouchPosition for the released ID — on this Ebitengine version it
-	// returns (0,0) for an already-released touch, which would commit at cell (0,0).
+	// Release-to-commit: when the tracked finger lifts, commit using the stored last
+	// raw screen position, converted to frame coords via screenToFrame.
+	// Do NOT re-read ebiten.TouchPosition for the released ID — on this Ebitengine
+	// version it returns (0,0) for an already-released touch.
 	for _, id := range justReleased {
 		if id == g.activeTouchID {
-			col, row := cellFromPixel(g.lastTouchX, g.lastTouchY, dcs)
+			fx, fy := screenToFrame(float64(g.lastTouchX), float64(g.lastTouchY), sw, sh, frameW, frameH, g.portrait)
+			col, row := cellFromPixel(int(fx), int(fy), dcs)
 			// Clear touch state before commit so a reused ID cannot match stale state.
 			g.touchActive = false
 			if err := g.commitCellAt(col, row); err != nil {
@@ -585,10 +612,11 @@ func (g *Game) updateWaiting() error {
 	// Mouse input block — skipped entirely when touch is active/just-active this frame.
 	if !touchFrameActive {
 		// Hover recompute.
-		// CursorPosition returns device-pixel coords when LayoutF is in effect.
+		// CursorPosition returns device-pixel screen coords; convert to frame coords.
 		mx, my := ebiten.CursorPosition()
-		hc := mx / dcs
-		hr := my / dcs
+		fx, fy := screenToFrame(float64(mx), float64(my), sw, sh, frameW, frameH, g.portrait)
+		hc := int(fx) / dcs
+		hr := int(fy) / dcs
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
@@ -598,7 +626,8 @@ func (g *Game) updateWaiting() error {
 
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			px, py := ebiten.CursorPosition()
-			col, row := cellFromPixel(px, py, dcs)
+			fx2, fy2 := screenToFrame(float64(px), float64(py), sw, sh, frameW, frameH, g.portrait)
+			col, row := cellFromPixel(int(fx2), int(fy2), dcs)
 			if err := g.commitCellAt(col, row); err != nil {
 				return err
 			}
@@ -897,8 +926,8 @@ func (g *Game) Update() error {
 	return nil
 }
 
-// Draw blits the offscreen canvas to the screen, then composites any
-// in-flight animation circles on top.
+// Draw blits the offscreen canvas to g.frame, then presents g.frame onto the
+// screen with optional 90° CCW rotation for portrait orientation.
 func (g *Game) Draw(screen *ebiten.Image) {
 	if g.glowShader == nil {
 		s, err := ebiten.NewShader([]byte(glowShaderSrc))
@@ -907,12 +936,67 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		g.glowShader = s
 	}
-	screen.Fill(color.Black)
 
-	g.drawVictimLine(screen)
-	g.drawCanvas(screen)
-	g.drawTargetBounce(screen)
-	g.drawMoveAnims(screen)
+	// Render the board into the landscape frame image.
+	// Guard: frame may be nil on the very first frame before LayoutF runs.
+	if g.frame == nil {
+		screen.Fill(color.Black)
+		return
+	}
+	g.frame.Fill(color.Black)
+	g.drawVictimLine(g.frame)
+	g.drawCanvas(g.frame)
+	g.drawTargetBounce(g.frame)
+	g.drawMoveAnims(g.frame)
+
+	// Present the frame onto the actual screen.
+	screen.Fill(color.Black)
+	fw := float64(g.frame.Bounds().Dx())
+	fh := float64(g.frame.Bounds().Dy())
+	sw := float64(g.screenW)
+	sh := float64(g.screenH)
+	if sw <= 0 {
+		// LayoutF not yet called; fall back to screen bounds.
+		sw = float64(screen.Bounds().Dx())
+		sh = float64(screen.Bounds().Dy())
+	}
+	var opts ebiten.DrawImageOptions
+	opts.GeoM = presentGeoM(g.portrait, sw, sh, fw, fh)
+	opts.Filter = ebiten.FilterLinear
+	screen.DrawImage(g.frame, &opts)
+}
+
+// presentGeoM returns the GeoM that maps g.frame onto the screen.
+//
+// Landscape: uniform fit-scale centred with letterbox bars.
+// Portrait: rotate the landscape frame 90° CCW so it stands upright on a
+// portrait screen, then fit-scale and centre.
+//
+// The portrait forward mapping satisfies: frame point (fx, fy) maps to screen
+// point (ox + (fh-fy)*scale, oy + fx*scale).
+func presentGeoM(portrait bool, sw, sh, fw, fh float64) ebiten.GeoM {
+	var m ebiten.GeoM
+	if !portrait {
+		scale := math.Min(sw/fw, sh/fh)
+		ox := (sw - fw*scale) / 2
+		oy := (sh - fh*scale) / 2
+		m.Scale(scale, scale)
+		m.Translate(ox, oy)
+		return m
+	}
+	// Portrait: rotate 90° CCW about the frame centre, then fit-scale, then centre.
+	// 1. Translate frame centre to origin.
+	m.Translate(-fw/2, -fh/2)
+	// 2. Rotate 90° CCW.  Ebitengine's Rotate is CCW for positive angle.
+	m.Rotate(-math.Pi / 2)
+	// After this rotation the frame footprint spans [-fh/2, fh/2] in X
+	// and [-fw/2, fw/2] in Y (width=fh, height=fw).
+	// 3. Scale to fit the portrait screen.
+	scale := math.Min(sw/fh, sh/fw)
+	m.Scale(scale, scale)
+	// 4. Translate to screen centre.
+	m.Translate(sw/2, sh/2)
+	return m
 }
 
 // drawVictimLine draws animated dotted hint lines behind the circles, one per
@@ -956,9 +1040,12 @@ func (g *Game) drawVictimLine(screen *ebiten.Image) {
 	}
 }
 
-// drawCanvas blits the persistent offscreen canvas to the screen.
-func (g *Game) drawCanvas(screen *ebiten.Image) {
-	screen.DrawImage(g.canvas, nil)
+// drawCanvas blits the persistent offscreen canvas to the frame.
+func (g *Game) drawCanvas(dst *ebiten.Image) {
+	if dst == nil || g.canvas == nil {
+		return
+	}
+	dst.DrawImage(g.canvas, nil)
 }
 
 // drawTargetBounce renders the target cell bounce animation.
@@ -1070,16 +1157,20 @@ func main() {
 	}
 	game.glyphFont = glyphFont
 
-	// Allocate the device-resolution canvas before RunGame so that dimensions
-	// and renderScale are set for the first LayoutF call.  Drawing/baking is
-	// deferred to the first Update tick (initialPainted gate) so that
+	// Allocate the landscape design frame and canvas before RunGame so that
+	// dimensions and renderScale are set for the first LayoutF call.  Drawing/baking
+	// is deferred to the first Update tick (initialPainted gate) so that
 	// ebiten.NewImage / DrawRectShader / text.Draw run with a live graphics
 	// context rather than a cold one that can produce blank sprites.
+	//
+	// The frame is always landscape-sized (windowWidth × windowHeight at scale s);
+	// deviceCellSize is derived from the frame width, not the screen width.
 	s := deviceScale()
 	game.renderScale = s
-	dw, dh := deviceCanvasDims(s)
+	dw, dh := deviceCanvasDims(s) // round(800*s), round(600*s)
 	game.deviceCellSize = deviceCellSizeFor(dw)
 	game.spriteRefSize = spriteRefSizeFor(game.deviceCellSize)
+	game.frame = ebiten.NewImage(dw, dh)
 	game.canvas = ebiten.NewImage(dw, dh)
 
 	if err := ebiten.RunGame(game); err != nil {
