@@ -2,6 +2,9 @@ package main
 
 import (
 	"image/color"
+	"math"
+	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -1089,5 +1092,290 @@ func TestHorizontalCollapseMoves(t *testing.T) {
 			}
 			assertMoveSetsEqual(t, got, tc.want)
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// connectionTheme — shared invariant helper
+// ---------------------------------------------------------------------------
+
+// assertThemeInvariants verifies the universal postconditions that must hold
+// after any setActiveTheme call:
+//   - len(Connections) == Power for every palette entry
+//   - no self-link
+//   - no duplicate pointer within a Connections slice
+//   - all Color.A == 255 (theme must not alter colours)
+func assertThemeInvariants(t *testing.T, label string) {
+	t.Helper()
+	for i := range creaturePalette {
+		e := &creaturePalette[i]
+		if len(e.Connections) != e.Power {
+			t.Errorf("[%s] palette[%d] (%q): len(Connections)=%d, want Power=%d",
+				label, i, e.Name, len(e.Connections), e.Power)
+		}
+		if e.Color.A != 255 {
+			t.Errorf("[%s] palette[%d] (%q): Color.A=%d, want 255", label, i, e.Name, e.Color.A)
+		}
+		seen := make(map[*Creature]bool, len(e.Connections))
+		for j, conn := range e.Connections {
+			if conn == e {
+				t.Errorf("[%s] palette[%d] (%q): Connections[%d] is a self-link", label, i, e.Name, j)
+			}
+			if seen[conn] {
+				t.Errorf("[%s] palette[%d] (%q): Connections[%d] is a duplicate", label, i, e.Name, j)
+			}
+			seen[conn] = true
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// randomTheme
+// ---------------------------------------------------------------------------
+
+// TestRandomThemeConnections verifies that after setActiveTheme(randomTheme{})
+// each creature's Connections match the hardcoded paletteConnectionNames table.
+func TestRandomThemeConnections(t *testing.T) {
+	setActiveTheme(randomTheme{})
+	defer setActiveTheme(activeTheme) // restore default after test
+
+	// Build name→index for resolution.
+	nameIndex := make(map[string]int, len(creaturePalette))
+	for i := range creaturePalette {
+		nameIndex[creaturePalette[i].Name] = i
+	}
+
+	for i := range creaturePalette {
+		e := &creaturePalette[i]
+		wantNames := paletteConnectionNames[e.Name]
+		if len(e.Connections) != len(wantNames) {
+			t.Errorf("palette[%d] (%q): len(Connections)=%d, want %d",
+				i, e.Name, len(e.Connections), len(wantNames))
+			continue
+		}
+		for c, conn := range e.Connections {
+			wantIdx := nameIndex[wantNames[c]]
+			if conn != &creaturePalette[wantIdx] {
+				t.Errorf("palette[%d] (%q): Connections[%d] = %q, want %q",
+					i, e.Name, c, conn.Name, wantNames[c])
+			}
+		}
+	}
+	assertThemeInvariants(t, "randomTheme")
+}
+
+// TestRandomThemePowerDistribution verifies that randomTheme preserves the
+// original Fibonacci power distribution (10×2, 7×3, 4×5, 2×8).
+func TestRandomThemePowerDistribution(t *testing.T) {
+	setActiveTheme(randomTheme{})
+	defer setActiveTheme(activeTheme)
+
+	counts := make(map[int]int)
+	for _, e := range creaturePalette {
+		counts[e.Power]++
+	}
+	want := map[int]int{2: 10, 3: 7, 5: 4, 8: 2}
+	for power, wantCount := range want {
+		if got := counts[power]; got != wantCount {
+			t.Errorf("randomTheme: Power=%d count=%d, want %d", power, got, wantCount)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// colourTheme
+// ---------------------------------------------------------------------------
+
+// TestColourThemeConnections verifies that after setActiveTheme(colourTheme{})
+// each creature's Connections are exactly its Power nearest palette neighbours
+// by OKLab distance, with ties broken by ascending index.
+func TestColourThemeConnections(t *testing.T) {
+	setActiveTheme(colourTheme{})
+	defer setActiveTheme(activeTheme)
+
+	n := len(creaturePalette)
+
+	// Recompute expected connections independently of the theme implementation.
+	labs := make([][3]float64, n)
+	for i := range creaturePalette {
+		labs[i] = sRGBToOKLab(creaturePalette[i].Color)
+	}
+
+	for i := range creaturePalette {
+		e := &creaturePalette[i]
+		k := e.Power
+
+		type distIdx struct {
+			dist float64
+			idx  int
+		}
+		others := make([]distIdx, 0, n-1)
+		for j := range creaturePalette {
+			if j == i {
+				continue
+			}
+			dl := labs[i][0] - labs[j][0]
+			da := labs[i][1] - labs[j][1]
+			db := labs[i][2] - labs[j][2]
+			dist := math.Sqrt(dl*dl + da*da + db*db)
+			others = append(others, distIdx{dist, j})
+		}
+		sort.Slice(others, func(a, b int) bool {
+			if others[a].dist != others[b].dist {
+				return others[a].dist < others[b].dist
+			}
+			return others[a].idx < others[b].idx
+		})
+
+		if len(e.Connections) != k {
+			t.Errorf("palette[%d] (%q): len(Connections)=%d, want %d",
+				i, e.Name, len(e.Connections), k)
+			continue
+		}
+		for c := 0; c < k; c++ {
+			wantPtr := &creaturePalette[others[c].idx]
+			if e.Connections[c] != wantPtr {
+				t.Errorf("palette[%d] (%q): Connections[%d] = %q, want %q (OKLab nearest)",
+					i, e.Name, c, e.Connections[c].Name, wantPtr.Name)
+			}
+		}
+	}
+	assertThemeInvariants(t, "colourTheme")
+}
+
+// TestColourThemePowerDistribution verifies that colourTheme preserves the
+// original Fibonacci power distribution (10×2, 7×3, 4×5, 2×8).
+func TestColourThemePowerDistribution(t *testing.T) {
+	setActiveTheme(colourTheme{})
+	defer setActiveTheme(activeTheme)
+
+	counts := make(map[int]int)
+	for _, e := range creaturePalette {
+		counts[e.Power]++
+	}
+	want := map[int]int{2: 10, 3: 7, 5: 4, 8: 2}
+	for power, wantCount := range want {
+		if got := counts[power]; got != wantCount {
+			t.Errorf("colourTheme: Power=%d count=%d, want %d", power, got, wantCount)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Theme switching — idempotency / repeatability
+// ---------------------------------------------------------------------------
+
+// TestThemeSwitchIdempotent verifies that switching colour→random→colour
+// restores the colourTheme connection graph each time (repeatable, stable).
+func TestThemeSwitchIdempotent(t *testing.T) {
+	// Capture colourTheme connections after a clean apply.
+	setActiveTheme(colourTheme{})
+	type snapshot struct {
+		power int
+		names []string
+	}
+	capture := func() []snapshot {
+		s := make([]snapshot, len(creaturePalette))
+		for i := range creaturePalette {
+			e := &creaturePalette[i]
+			names := make([]string, len(e.Connections))
+			for c, conn := range e.Connections {
+				names[c] = conn.Name
+			}
+			s[i] = snapshot{e.Power, names}
+		}
+		return s
+	}
+	first := capture()
+
+	setActiveTheme(randomTheme{})
+	setActiveTheme(colourTheme{})
+	second := capture()
+
+	for i := range creaturePalette {
+		if first[i].power != second[i].power {
+			t.Errorf("palette[%d] (%q): power changed across colour→random→colour: %d → %d",
+				i, creaturePalette[i].Name, first[i].power, second[i].power)
+		}
+		if len(first[i].names) != len(second[i].names) {
+			t.Errorf("palette[%d] (%q): connections len changed: %d → %d",
+				i, creaturePalette[i].Name, len(first[i].names), len(second[i].names))
+			continue
+		}
+		for c := range first[i].names {
+			if first[i].names[c] != second[i].names[c] {
+				t.Errorf("palette[%d] (%q): Connections[%d] changed: %q → %q",
+					i, creaturePalette[i].Name, c, first[i].names[c], second[i].names[c])
+			}
+		}
+	}
+	defer setActiveTheme(activeTheme)
+}
+
+// ---------------------------------------------------------------------------
+// Spawn CDF — rebuilt after setActiveTheme
+// ---------------------------------------------------------------------------
+
+// TestSpawnCDFRebuiltAfterTheme verifies that after setActiveTheme the spawn
+// CDF favours lower-power creatures: across many seeded draws, Power=2 creatures
+// must be drawn more frequently than Power=8 creatures.
+func TestSpawnCDFRebuiltAfterTheme(t *testing.T) {
+	for _, theme := range []connectionTheme{randomTheme{}, colourTheme{}} {
+		setActiveTheme(theme)
+
+		rng := rand.New(rand.NewSource(42))
+		counts := make(map[int]int) // power → draw count
+		const draws = 10000
+		for d := 0; d < draws; d++ {
+			x := rng.Float64()
+			i := sort.SearchFloat64s(paletteCDF, x)
+			if i >= len(creaturePalette) {
+				i = len(creaturePalette) - 1
+			}
+			counts[creaturePalette[i].Power]++
+		}
+		if counts[2] <= counts[8] {
+			t.Errorf("[%s] expected Power=2 draws (%d) > Power=8 draws (%d) over %d samples",
+				theme.name(), counts[2], counts[8], draws)
+		}
+	}
+	defer setActiveTheme(activeTheme)
+}
+
+// ---------------------------------------------------------------------------
+// sRGBToOKLab — unit tests
+// ---------------------------------------------------------------------------
+
+// TestSRGBToOKLabBlack verifies that pure black maps to OKLab (0, 0, 0).
+func TestSRGBToOKLabBlack(t *testing.T) {
+	lab := sRGBToOKLab(color.RGBA{R: 0, G: 0, B: 0, A: 255})
+	if lab[0] != 0 || lab[1] != 0 || lab[2] != 0 {
+		t.Errorf("sRGBToOKLab(black) = %v, want [0 0 0]", lab)
+	}
+}
+
+// TestSRGBToOKLabWhiteLuminance verifies that pure white has OKLab L close to 1.
+func TestSRGBToOKLabWhiteLuminance(t *testing.T) {
+	lab := sRGBToOKLab(color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	if math.Abs(lab[0]-1.0) > 1e-5 {
+		t.Errorf("sRGBToOKLab(white).L = %f, want ~1.0", lab[0])
+	}
+}
+
+// TestSRGBToOKLabRedGreenDistance verifies that red and green are farther apart
+// in OKLab than red and orange (perceptual ordering check).
+func TestSRGBToOKLabRedGreenDistance(t *testing.T) {
+	red := sRGBToOKLab(color.RGBA{R: 220, G: 60, B: 60, A: 255})
+	green := sRGBToOKLab(color.RGBA{R: 60, G: 180, B: 60, A: 255})
+	orange := sRGBToOKLab(color.RGBA{R: 220, G: 140, B: 60, A: 255})
+
+	dist := func(a, b [3]float64) float64 {
+		dl, da, db := a[0]-b[0], a[1]-b[1], a[2]-b[2]
+		return math.Sqrt(dl*dl + da*da + db*db)
+	}
+	dRG := dist(red, green)
+	dRO := dist(red, orange)
+	if dRG <= dRO {
+		t.Errorf("expected dist(red,green)=%f > dist(red,orange)=%f", dRG, dRO)
 	}
 }
