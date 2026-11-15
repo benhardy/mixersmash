@@ -175,13 +175,13 @@ func TestNewGameStateInitialFields(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestHealthConstants documents the expected values of the health magic numbers
-// so that any accidental change to the step or floor is caught immediately.
+// so that any accidental change to the keep-fraction or floor is caught immediately.
 func TestHealthConstants(t *testing.T) {
-	if healthDecrement != float32(1.0/3.0) {
-		t.Errorf("healthDecrement = %v, want %v (1/3)", healthDecrement, float32(1.0/3.0))
+	if healthDecrementKeep != float32(0.75) {
+		t.Errorf("healthDecrementKeep = %v, want 0.75", healthDecrementKeep)
 	}
-	if healthMin != 0.2 {
-		t.Errorf("healthMin = %v, want 0.2", healthMin)
+	if healthMin != float32(0.562) {
+		t.Errorf("healthMin = %v, want 0.562", healthMin)
 	}
 }
 
@@ -900,7 +900,7 @@ func TestCreaturePaletteRequiredNames(t *testing.T) {
 // darkerShade
 // ---------------------------------------------------------------------------
 
-// TestDarkerShade verifies the floor(channel*0.35) formula and that alpha is
+// TestDarkerShade verifies the floor(channel*0.15) formula and that alpha is
 // always forced to 255 regardless of input alpha.
 func TestDarkerShade(t *testing.T) {
 	cases := []struct {
@@ -911,12 +911,12 @@ func TestDarkerShade(t *testing.T) {
 		{
 			name:  "mixed channels",
 			input: color.RGBA{R: 200, G: 100, B: 50, A: 255},
-			want:  color.RGBA{R: 70, G: 35, B: 17, A: 255},
+			want:  color.RGBA{R: 30, G: 15, B: 7, A: 255},
 		},
 		{
 			name:  "all 255",
 			input: color.RGBA{R: 255, G: 255, B: 255, A: 255},
-			want:  color.RGBA{R: 89, G: 89, B: 89, A: 255},
+			want:  color.RGBA{R: 38, G: 38, B: 38, A: 255},
 		},
 		{
 			name:  "all zero",
@@ -926,7 +926,7 @@ func TestDarkerShade(t *testing.T) {
 		{
 			name:  "alpha forced to 255 when input alpha differs",
 			input: color.RGBA{R: 200, G: 100, B: 50, A: 100},
-			want:  color.RGBA{R: 70, G: 35, B: 17, A: 255},
+			want:  color.RGBA{R: 30, G: 15, B: 7, A: 255},
 		},
 	}
 	for _, tc := range cases {
