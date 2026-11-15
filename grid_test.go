@@ -427,6 +427,43 @@ func TestConnectionVictimsNilCreatureTarget(t *testing.T) {
 	}
 }
 
+// TestConnectionVictimsSameTypeAliveNeighbour verifies that an alive neighbour
+// of the SAME creature type (pointer identity) as the target is returned as a
+// victim even if it is not in target.Connections.
+func TestConnectionVictimsSameTypeAliveNeighbour(t *testing.T) {
+	// Find a palette creature that is NOT connected to itself (all are, by
+	// construction — we just need any creature and confirm same-pointer match).
+	// Use creaturePalette[0]. Verify it is not in its own Connections (no self-link).
+	target := &creaturePalette[0]
+	cells := makeConnectionGrid(3, 3)
+	cells[1][1] = Cell{Creature: target, Health: 1.0}
+	// Place the same *Creature pointer at neighbour (2,1). This is same-type but
+	// must NOT appear in target.Connections (no self-link invariant guarantees this).
+	cells[2][1] = Cell{Creature: target, Health: 1.0}
+
+	got := connectionVictims(cells, 1, 1, 3, 3)
+	if len(got) != 1 {
+		t.Fatalf("want 1 victim (same-type alive), got %d: %v", len(got), got)
+	}
+	if got[0] != [2]int{2, 1} {
+		t.Errorf("want {2,1}, got %v", got[0])
+	}
+}
+
+// TestConnectionVictimsSameTypeDeadNeighbour verifies that a dead neighbour of
+// the same creature type is NOT returned as a victim.
+func TestConnectionVictimsSameTypeDeadNeighbour(t *testing.T) {
+	target := &creaturePalette[0]
+	cells := makeConnectionGrid(3, 3)
+	cells[1][1] = Cell{Creature: target, Health: 1.0}
+	cells[2][1] = Cell{Creature: target, Health: 0.0} // dead same-type
+
+	got := connectionVictims(cells, 1, 1, 3, 3)
+	if len(got) != 0 {
+		t.Errorf("want no victims (dead same-type neighbour), got %d: %v", len(got), got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // gravityMoves
 // ---------------------------------------------------------------------------

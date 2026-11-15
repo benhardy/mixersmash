@@ -114,8 +114,9 @@ func eightNeighbors(col, row, cols, rows int) [][2]int {
 }
 
 // connectionVictims returns all 8-neighbours of (col,row) with Health > 0
-// whose Creature pointer appears in cells[col][row].Creature.Connections.
-// Comparison is by pointer identity. Returns nil if the target cell has no Creature.
+// whose Creature pointer either equals the target's own Creature (same type,
+// pointer identity) or appears in cells[col][row].Creature.Connections.
+// Returns nil if the target cell has no Creature.
 func connectionVictims(cells [][]Cell, col, row, cols, rows int) [][2]int {
 	if cells[col][row].Creature == nil {
 		return nil
@@ -130,8 +131,15 @@ func connectionVictims(cells [][]Cell, col, row, cols, rows int) [][2]int {
 		if cells[nc][nr].Creature == nil {
 			continue
 		}
+		neighbour := cells[nc][nr].Creature
+		// Same type (pointer equality) is always a victim.
+		if neighbour == target {
+			result = append(result, [2]int{nc, nr})
+			continue
+		}
+		// Connected type (membership in Connections) is also a victim.
 		for _, conn := range target.Connections {
-			if conn == cells[nc][nr].Creature {
+			if conn == neighbour {
 				result = append(result, [2]int{nc, nr})
 				break
 			}
