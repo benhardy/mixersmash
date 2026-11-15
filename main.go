@@ -66,6 +66,8 @@ type Game struct {
 	// touch tracking fields
 	touchActive   bool
 	activeTouchID ebiten.TouchID
+	lastTouchX    int // last device-pixel X while the tracked finger was down
+	lastTouchY    int // last device-pixel Y while the tracked finger was down
 
 	// victim movement animation fields (one entry per simultaneous victim)
 	victims []MoveAnim
@@ -533,11 +535,15 @@ func (g *Game) updateWaiting() error {
 	if !g.touchActive && len(justPressed) > 0 {
 		g.touchActive = true
 		g.activeTouchID = justPressed[0]
+		// Store the press position so a single-frame tap has a valid stored position.
+		g.lastTouchX, g.lastTouchY = ebiten.TouchPosition(g.activeTouchID)
 	}
 
 	// Hold-as-hover: mirror the mouse hover recompute using the active touch position.
+	// Also update lastTouchX/Y each frame the finger is confirmed down.
 	if g.touchActive {
 		tx, ty := ebiten.TouchPosition(g.activeTouchID)
+		g.lastTouchX, g.lastTouchY = tx, ty
 		hc := tx / dcs
 		hr := ty / dcs
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
@@ -548,12 +554,12 @@ func (g *Game) updateWaiting() error {
 		}
 	}
 
-	// Release-to-commit: when the tracked finger lifts, commit the cell.
+	// Release-to-commit: when the tracked finger lifts, commit using the stored last position.
+	// Do NOT re-read ebiten.TouchPosition for the released ID — on this Ebitengine version it
+	// returns (0,0) for an already-released touch, which would commit at cell (0,0).
 	for _, id := range justReleased {
 		if id == g.activeTouchID {
-			// TouchPosition on a just-released ID returns last-known position — correct for commit.
-			tx, ty := ebiten.TouchPosition(g.activeTouchID)
-			col, row := cellFromPixel(tx, ty, dcs)
+			col, row := cellFromPixel(g.lastTouchX, g.lastTouchY, dcs)
 			// Clear touch state before commit so a reused ID cannot match stale state.
 			g.touchActive = false
 			if err := g.commitCellAt(col, row); err != nil {
