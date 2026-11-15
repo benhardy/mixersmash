@@ -224,114 +224,6 @@ func TestRandomColorNeverReturnsWhite(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// colorDistanceRedmean
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// colorDistanceHSV
-// ---------------------------------------------------------------------------
-
-// TestColorDistanceHSV verifies the hue-weighted HSV distance function across a
-// set of representative colour pairs.
-func TestColorDistanceHSV(t *testing.T) {
-	const tol = float32(1e-5)
-
-	cases := []struct {
-		name    string
-		a, b    color.RGBA
-		wantMax float32 // upper bound on result (use 0 to require exact zero)
-		wantMin float32 // lower bound on result
-	}{
-		{
-			name:    "identical colours — distance is zero",
-			a:       color.RGBA{R: 200, G: 100, B: 50, A: 255},
-			b:       color.RGBA{R: 200, G: 100, B: 50, A: 255},
-			wantMin: 0,
-			wantMax: tol,
-		},
-		{
-			name:    "same hue, different value — small-to-moderate distance",
-			a:       color.RGBA{R: 255, G: 0, B: 0, A: 255},
-			b:       color.RGBA{R: 128, G: 0, B: 0, A: 255},
-			wantMin: 0.01,
-			wantMax: 0.60,
-		},
-		{
-			name:    "opposite hue, both saturated — large distance",
-			a:       color.RGBA{R: 255, G: 0, B: 0, A: 255},   // pure red
-			b:       color.RGBA{R: 0, G: 255, B: 255, A: 255}, // pure cyan
-			wantMin: 1.5,
-			wantMax: 10.0,
-		},
-		{
-			name:    "saturated colour vs grey — hue guard prevents spuriously small distance",
-			a:       color.RGBA{R: 255, G: 0, B: 0, A: 255},     // pure red
-			b:       color.RGBA{R: 128, G: 128, B: 128, A: 255}, // mid-grey
-			wantMin: 0.05,
-			wantMax: 2.0,
-		},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			got := colorDistanceHSV(tc.a, tc.b)
-			if got < tc.wantMin || got > tc.wantMax {
-				t.Errorf("colorDistanceHSV(%v, %v) = %v; want in [%v, %v]",
-					tc.a, tc.b, got, tc.wantMin, tc.wantMax)
-			}
-		})
-	}
-}
-
-// TestColorDistanceHSVSymmetry verifies that d(a,b) == d(b,a) for a range of colour pairs.
-func TestColorDistanceHSVSymmetry(t *testing.T) {
-	pairs := [][2]color.RGBA{
-		{{R: 255, G: 0, B: 0, A: 255}, {R: 0, G: 255, B: 0, A: 255}},
-		{{R: 100, G: 200, B: 50, A: 255}, {R: 50, G: 100, B: 200, A: 255}},
-		{{R: 128, G: 128, B: 128, A: 255}, {R: 200, G: 100, B: 50, A: 255}},
-		{{R: 102, G: 102, B: 102, A: 255}, {R: 255, G: 255, B: 102, A: 255}},
-		{{R: 217, G: 140, B: 102, A: 255}, {R: 102, G: 217, B: 102, A: 255}},
-	}
-	const tol = float32(1e-5)
-	for _, p := range pairs {
-		ab := colorDistanceHSV(p[0], p[1])
-		ba := colorDistanceHSV(p[1], p[0])
-		diff := ab - ba
-		if diff < 0 {
-			diff = -diff
-		}
-		if diff > tol {
-			t.Errorf("colorDistanceHSV not symmetric: d(%v,%v)=%v d(%v,%v)=%v diff=%v",
-				p[0], p[1], ab, p[1], p[0], ba, diff)
-		}
-	}
-}
-
-// TestColorDistanceRedmeanSame verifies that a colour compared with itself is 0.
-func TestColorDistanceRedmeanSame(t *testing.T) {
-	c := color.RGBA{R: 100, G: 150, B: 200, A: 255}
-	got := colorDistanceRedmean(c, c)
-	if got != 0.0 {
-		t.Errorf("colorDistanceRedmean(c, c) = %v, want 0.0", got)
-	}
-}
-
-// TestColorDistanceRedmeanGreenWeighted verifies that a pure green shift produces
-// a larger distance than an equal pure blue shift, since green is weighted 4× vs
-// blue's ~2× in the redmean formula.
-func TestColorDistanceRedmeanGreenWeighted(t *testing.T) {
-	black := color.RGBA{R: 0, G: 0, B: 0, A: 255}
-	green := color.RGBA{R: 0, G: 100, B: 0, A: 255}
-	blue := color.RGBA{R: 0, G: 0, B: 100, A: 255}
-	greenDist := colorDistanceRedmean(green, black)
-	blueDist := colorDistanceRedmean(blue, black)
-	if greenDist <= blueDist {
-		t.Errorf("expected green distance (%v) > blue distance (%v)", greenDist, blueDist)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // eightNeighbors
 // ---------------------------------------------------------------------------
 
@@ -373,23 +265,8 @@ func TestEightNeighborsCentre(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// closestColorNeighbors (plural)
+// pairsAsSet — shared helper for set comparisons
 // ---------------------------------------------------------------------------
-
-// makeUniformGrid returns a cols×rows grid of cells with the given colour and
-// Health 1.0.  Callers override specific cells after calling this helper.
-func makeUniformGrid(t *testing.T, cols, rows int, c color.RGBA) [][]Cell {
-	t.Helper()
-	cells := make([][]Cell, cols)
-	for col := range cells {
-		cells[col] = make([]Cell, rows)
-		for row := range cells[col] {
-			cells[col][row] = cellWithColor(c)
-			cells[col][row].Health = 1.0
-		}
-	}
-	return cells
-}
 
 // pairsAsSet converts a [][2]int slice into a map keyed by [2]int for
 // order-independent set comparisons.
@@ -401,272 +278,152 @@ func pairsAsSet(pairs [][2]int) map[[2]int]bool {
 	return s
 }
 
-// TestClosestColorNeighborsSingleNearest verifies that when one neighbour is
-// strictly closer than all others, the plural function returns exactly that one.
-func TestClosestColorNeighborsSingleNearest(t *testing.T) {
-	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
-	// Kill all cells; selectively revive only the target and three neighbours.
-	for c := 0; c < 3; c++ {
-		for r := 0; r < 3; r++ {
-			cells[c][r].Health = 0
-		}
+// ---------------------------------------------------------------------------
+// connectionVictims
+// ---------------------------------------------------------------------------
+
+// makeConnectionGrid builds a cols×rows grid of zero-Health cells. Callers set
+// specific cells' Creature and Health after calling this helper.
+func makeConnectionGrid(cols, rows int) [][]Cell {
+	cells := make([][]Cell, cols)
+	for c := range cells {
+		cells[c] = make([]Cell, rows)
 	}
+	return cells
+}
 
-	// Target at (1,1): pure red.
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-	cells[1][1].Health = 1.0
+// TestConnectionVictimsConnectedAliveNeighbour verifies that a neighbour whose
+// Creature is in the target's Connections is returned when it is alive.
+func TestConnectionVictimsConnectedAliveNeighbour(t *testing.T) {
+	cells := makeConnectionGrid(3, 3)
+	target := &creaturePalette[0]
+	// Pick a creature that target is connected to.
+	connected := target.Connections[0]
+	cells[1][1] = Cell{Creature: target, Health: 1.0}
+	// Place connected creature at neighbour (2,2).
+	cells[2][2] = Cell{Creature: connected, Health: 1.0}
 
-	// Strictly closest: nearly-red at (2,2).
-	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 195, G: 5, B: 5, A: 255}}
-	cells[2][2].Health = 1.0
-	// Farther: blue at (0,0).
-	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
-	cells[0][0].Health = 1.0
-	// Farther: green at (1,0).
-	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 200, B: 0, A: 255}}
-	cells[1][0].Health = 1.0
-
-	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	got := connectionVictims(cells, 1, 1, 3, 3)
 	if len(got) != 1 {
-		t.Fatalf("want exactly 1 result, got %d: %v", len(got), got)
+		t.Fatalf("want 1 victim, got %d: %v", len(got), got)
 	}
 	if got[0] != [2]int{2, 2} {
 		t.Errorf("want {2,2}, got %v", got[0])
 	}
 }
 
-// TestClosestColorNeighborsTwoWayTie verifies that two neighbours sharing the
-// exact minimum redmean distance are both returned.
-func TestClosestColorNeighborsTwoWayTie(t *testing.T) {
-	// 3×3 grid with dead cells everywhere except the two tied neighbours and
-	// the target, so that no other live cell can influence the result.
-	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
-	// Kill all neighbours first.
-	for c := 0; c < 3; c++ {
-		for r := 0; r < 3; r++ {
-			cells[c][r].Health = 0
-		}
-	}
+// TestConnectionVictimsDeadConnectedNeighbour verifies that a connected
+// neighbour with Health<=0 is not returned.
+func TestConnectionVictimsDeadConnectedNeighbour(t *testing.T) {
+	cells := makeConnectionGrid(3, 3)
+	target := &creaturePalette[0]
+	connected := target.Connections[0]
+	cells[1][1] = Cell{Creature: target, Health: 1.0}
+	cells[2][2] = Cell{Creature: connected, Health: 0.0} // dead
 
-	// Target at (1,1).
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 100, B: 100, A: 255}}
-	cells[1][1].Health = 1.0
-
-	// Build two neighbours with identical colour so their distance to target
-	// is bitwise-equal (same float32).
-	tiedColor := color.RGBA{R: 190, G: 110, B: 90, A: 255}
-	cells[0][0].Creature = &Creature{Color: tiedColor}
-	cells[0][0].Health = 1.0
-	cells[2][0].Creature = &Creature{Color: tiedColor}
-	cells[2][0].Health = 1.0
-
-	got := closestColorNeighbors(cells, 1, 1, 3, 3)
-	if len(got) != 2 {
-		t.Fatalf("want 2 results (tied pair), got %d: %v", len(got), got)
-	}
-	want := pairsAsSet([][2]int{{0, 0}, {2, 0}})
-	for _, p := range got {
-		if !want[p] {
-			t.Errorf("unexpected result %v in tied pair", p)
-		}
-	}
-}
-
-// TestClosestColorNeighborsThreeWayTie verifies that three neighbours at the
-// exact same minimum distance are all returned.
-func TestClosestColorNeighborsThreeWayTie(t *testing.T) {
-	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
-	// Kill all neighbours.
-	for c := 0; c < 3; c++ {
-		for r := 0; r < 3; r++ {
-			cells[c][r].Health = 0
-		}
-	}
-
-	// Target at (1,1).
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 100, B: 100, A: 255}}
-	cells[1][1].Health = 1.0
-
-	tiedColor := color.RGBA{R: 185, G: 115, B: 85, A: 255}
-	cells[0][0].Creature = &Creature{Color: tiedColor}
-	cells[0][0].Health = 1.0
-	cells[2][0].Creature = &Creature{Color: tiedColor}
-	cells[2][0].Health = 1.0
-	cells[0][2].Creature = &Creature{Color: tiedColor}
-	cells[0][2].Health = 1.0
-
-	got := closestColorNeighbors(cells, 1, 1, 3, 3)
-	if len(got) != 3 {
-		t.Fatalf("want 3 results (three-way tie), got %d: %v", len(got), got)
-	}
-	want := pairsAsSet([][2]int{{0, 0}, {2, 0}, {0, 2}})
-	for _, p := range got {
-		if !want[p] {
-			t.Errorf("unexpected result %v in three-way tie", p)
-		}
-	}
-}
-
-// TestClosestColorNeighborsTieNotAtMinimum verifies that when two neighbours tie
-// each other but a third is strictly closer, only the strictly-closest is returned.
-func TestClosestColorNeighborsTieNotAtMinimum(t *testing.T) {
-	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
-	for c := 0; c < 3; c++ {
-		for r := 0; r < 3; r++ {
-			cells[c][r].Health = 0
-		}
-	}
-
-	// Target at (1,1): pure red.
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-	cells[1][1].Health = 1.0
-
-	// Strictly closest: nearly red at (2,2).
-	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 198, G: 2, B: 2, A: 255}}
-	cells[2][2].Health = 1.0
-
-	// Two neighbours that tie each other but are farther than (2,2).
-	tiedFarColor := color.RGBA{R: 100, G: 100, B: 100, A: 255}
-	cells[0][0].Creature = &Creature{Color: tiedFarColor}
-	cells[0][0].Health = 1.0
-	cells[2][0].Creature = &Creature{Color: tiedFarColor}
-	cells[2][0].Health = 1.0
-
-	got := closestColorNeighbors(cells, 1, 1, 3, 3)
-	if len(got) != 1 {
-		t.Fatalf("want exactly 1 result (strictly closest), got %d: %v", len(got), got)
-	}
-	if got[0] != [2]int{2, 2} {
-		t.Errorf("want {2,2}, got %v", got[0])
-	}
-}
-
-// TestClosestColorNeighborsSkipsDead verifies that neighbours with Health <= 0
-// are excluded even if their colour would tie or win.
-func TestClosestColorNeighborsSkipsDead(t *testing.T) {
-	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
-	for c := 0; c < 3; c++ {
-		for r := 0; r < 3; r++ {
-			cells[c][r].Health = 0
-		}
-	}
-
-	// Target at (1,1): pure red.
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-	cells[1][1].Health = 1.0
-
-	// Dead neighbour: perfect colour match, Health=0.
-	cells[2][2].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-	cells[2][2].Health = 0.0
-
-	// Also dead but negative health, same colour.
-	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-	cells[0][0].Health = -1.0
-
-	// One live neighbour with a less-close colour.
-	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 150, G: 50, B: 50, A: 255}}
-	cells[1][0].Health = 1.0
-
-	got := closestColorNeighbors(cells, 1, 1, 3, 3)
-	if len(got) != 1 {
-		t.Fatalf("want 1 live result, got %d: %v", len(got), got)
-	}
-	if got[0] == [2]int{2, 2} || got[0] == [2]int{0, 0} {
-		t.Errorf("dead cell returned: %v", got[0])
-	}
-	if got[0] != [2]int{1, 0} {
-		t.Errorf("want {1,0}, got %v", got[0])
-	}
-}
-
-// TestClosestColorNeighborsNoAlive verifies that an empty slice is returned
-// when no neighbour has Health > 0.
-func TestClosestColorNeighborsNoAlive(t *testing.T) {
-	cells := makeUniformGrid(t, 3, 3, color.RGBA{128, 128, 128, 255})
-	// Kill all cells including potential neighbours.
-	for c := 0; c < 3; c++ {
-		for r := 0; r < 3; r++ {
-			cells[c][r].Health = 0
-		}
-	}
-	// Keep only the target alive.
-	cells[1][1].Health = 1.0
-
-	got := closestColorNeighbors(cells, 1, 1, 3, 3)
+	got := connectionVictims(cells, 1, 1, 3, 3)
 	if len(got) != 0 {
-		t.Fatalf("want empty slice, got %d results: %v", len(got), got)
+		t.Errorf("want no victims (dead neighbour), got %d: %v", len(got), got)
 	}
 }
 
-// TestClosestColorNeighborsCornerTarget verifies that a corner target (0,0)
-// with only 3 valid neighbours still returns a correct result.
-func TestClosestColorNeighborsCornerTarget(t *testing.T) {
-	cells := makeUniformGrid(t, 5, 5, color.RGBA{128, 128, 128, 255})
-	// Kill all cells; selectively revive only the target and its 3 corner neighbours.
-	for c := 0; c < 5; c++ {
-		for r := 0; r < 5; r++ {
-			cells[c][r].Health = 0
+// TestConnectionVictimsUnconnectedAliveNeighbour verifies that an alive neighbour
+// whose Creature is NOT in target.Connections is not returned.
+func TestConnectionVictimsUnconnectedAliveNeighbour(t *testing.T) {
+	cells := makeConnectionGrid(3, 3)
+	target := &creaturePalette[0]
+	// Find a palette entry not in target.Connections.
+	var unconnected *Creature
+	for i := range creaturePalette {
+		c := &creaturePalette[i]
+		if c == target {
+			continue
+		}
+		found := false
+		for _, conn := range target.Connections {
+			if conn == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unconnected = c
+			break
 		}
 	}
+	if unconnected == nil {
+		t.Skip("no unconnected creature available for this palette entry")
+	}
+	cells[1][1] = Cell{Creature: target, Health: 1.0}
+	cells[2][2] = Cell{Creature: unconnected, Health: 1.0}
 
-	// Target at (0,0): pure red.
-	cells[0][0].Creature = &Creature{Color: color.RGBA{R: 200, G: 0, B: 0, A: 255}}
-	cells[0][0].Health = 1.0
+	got := connectionVictims(cells, 1, 1, 3, 3)
+	if len(got) != 0 {
+		t.Errorf("want no victims (unconnected creature), got %d: %v", len(got), got)
+	}
+}
 
-	// Among the 3 corner neighbours {(1,0),(0,1),(1,1)}, make (1,1) closest.
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 195, G: 5, B: 5, A: 255}}
-	cells[1][1].Health = 1.0
-	cells[1][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 200, B: 0, A: 255}}
-	cells[1][0].Health = 1.0
-	cells[0][1].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
-	cells[0][1].Health = 1.0
+// TestConnectionVictimsMultipleConnectedNeighbours verifies that all alive
+// connected neighbours are returned when multiple are present.
+func TestConnectionVictimsMultipleConnectedNeighbours(t *testing.T) {
+	// Find a creature with at least 2 connections.
+	var target *Creature
+	for i := range creaturePalette {
+		if len(creaturePalette[i].Connections) >= 2 {
+			target = &creaturePalette[i]
+			break
+		}
+	}
+	if target == nil {
+		t.Skip("no creature with >=2 connections")
+	}
+	cells := makeConnectionGrid(3, 3)
+	cells[1][1] = Cell{Creature: target, Health: 1.0}
+	// Place first two connections at distinct neighbours.
+	cells[0][0] = Cell{Creature: target.Connections[0], Health: 1.0}
+	cells[2][0] = Cell{Creature: target.Connections[1], Health: 1.0}
 
-	got := closestColorNeighbors(cells, 0, 0, 5, 5)
+	got := connectionVictims(cells, 1, 1, 3, 3)
+	if len(got) != 2 {
+		t.Fatalf("want 2 victims, got %d: %v", len(got), got)
+	}
+	wantSet := pairsAsSet([][2]int{{0, 0}, {2, 0}})
+	for _, p := range got {
+		if !wantSet[p] {
+			t.Errorf("unexpected victim %v", p)
+		}
+	}
+}
+
+// TestConnectionVictimsCornerTarget verifies correct behaviour when the target
+// is at a corner (fewer than 8 neighbours).
+func TestConnectionVictimsCornerTarget(t *testing.T) {
+	cells := makeConnectionGrid(5, 5)
+	target := &creaturePalette[0]
+	connected := target.Connections[0]
+	cells[0][0] = Cell{Creature: target, Health: 1.0}
+	// Only 3 neighbours for corner (0,0): (1,0), (0,1), (1,1).
+	cells[1][1] = Cell{Creature: connected, Health: 1.0}
+
+	got := connectionVictims(cells, 0, 0, 5, 5)
 	if len(got) != 1 {
-		t.Fatalf("want 1 result at corner, got %d: %v", len(got), got)
+		t.Fatalf("want 1 victim at corner, got %d: %v", len(got), got)
 	}
 	if got[0] != [2]int{1, 1} {
 		t.Errorf("want {1,1}, got %v", got[0])
 	}
 }
 
-// TestClosestColorNeighborsOrderIndependence verifies that the result set is
-// correct regardless of the internal neighbour scan order by checking set
-// membership rather than slice position.
-func TestClosestColorNeighborsOrderIndependence(t *testing.T) {
-	// 4×4 grid so the target at (1,1) has a full 8-neighbour ring.
-	cells := makeUniformGrid(t, 4, 4, color.RGBA{128, 128, 128, 255})
-	for c := 0; c < 4; c++ {
-		for r := 0; r < 4; r++ {
-			cells[c][r].Health = 0
-		}
-	}
+// TestConnectionVictimsNilCreatureTarget verifies that nil is returned when
+// the target cell has no Creature.
+func TestConnectionVictimsNilCreatureTarget(t *testing.T) {
+	cells := makeConnectionGrid(3, 3)
+	// cells[1][1] has Creature==nil by default.
+	cells[2][2] = Cell{Creature: &creaturePalette[0], Health: 1.0}
 
-	// Target at (1,1).
-	cells[1][1].Creature = &Creature{Color: color.RGBA{R: 200, G: 100, B: 50, A: 255}}
-	cells[1][1].Health = 1.0
-
-	// Three tied winners placed at non-adjacent positions.
-	tiedColor := color.RGBA{R: 195, G: 105, B: 45, A: 255}
-	winners := [][2]int{{0, 0}, {2, 2}, {0, 2}}
-	for _, w := range winners {
-		cells[w[0]][w[1]].Creature = &Creature{Color: tiedColor}
-		cells[w[0]][w[1]].Health = 1.0
-	}
-
-	// One farther live cell.
-	cells[2][0].Creature = &Creature{Color: color.RGBA{R: 0, G: 0, B: 200, A: 255}}
-	cells[2][0].Health = 1.0
-
-	got := closestColorNeighbors(cells, 1, 1, 4, 4)
-	if len(got) != 3 {
-		t.Fatalf("want 3 tied winners, got %d: %v", len(got), got)
-	}
-	wantSet := pairsAsSet(winners)
-	for _, p := range got {
-		if !wantSet[p] {
-			t.Errorf("unexpected result %v; expected one of %v", p, winners)
-		}
+	got := connectionVictims(cells, 1, 1, 3, 3)
+	if got != nil {
+		t.Errorf("want nil for nil-Creature target, got %v", got)
 	}
 }
 

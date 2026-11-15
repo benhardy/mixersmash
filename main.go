@@ -562,7 +562,7 @@ func (g *Game) updateWaiting() error {
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
-				g.victimHints = closestColorNeighbors(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				g.victimHints = connectionVictims(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
 			}
 		}
 	}
@@ -592,7 +592,7 @@ func (g *Game) updateWaiting() error {
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
-				g.victimHints = closestColorNeighbors(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				g.victimHints = connectionVictims(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
 			}
 		}
 
@@ -652,7 +652,7 @@ func (g *Game) handleTargetDeath(col, row int) {
 	// Redraw immediately so cell disappears.
 	g.drawCell(col, row, 1.0)
 	g.cellCount-- // decrement for the clicked cell
-	victimCoords := closestColorNeighbors(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
+	victimCoords := connectionVictims(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
 	if len(victimCoords) > 0 {
 		dcs := g.deviceCellSize
 		toX, toY := deviceCellCenter(col, row, dcs)

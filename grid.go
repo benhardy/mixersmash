@@ -2,7 +2,6 @@ package main
 
 import (
 	"image/color"
-	"math"
 	"math/rand"
 )
 
@@ -69,108 +68,6 @@ func NewGrid(cols, rows int) *Grid {
 	}
 }
 
-// colorDistanceRedmean returns a perceptually-weighted colour distance using the
-// "redmean" approximation, which adapts RGB channel weights based on average redness.
-func colorDistanceRedmean(a, b color.RGBA) float32 {
-	rBar := (float32(a.R) + float32(b.R)) / 2
-	dR := float32(a.R) - float32(b.R)
-	dG := float32(a.G) - float32(b.G)
-	dB := float32(a.B) - float32(b.B)
-	return float32(math.Sqrt(float64(
-		(2+rBar/256)*dR*dR + 4*dG*dG + (2+(255-rBar)/256)*dB*dB,
-	)))
-}
-
-// colorDistanceHSV returns a hue-weighted HSV colour distance between a and b.
-//
-// Algorithm:
-//  1. Convert each RGB to HSV (H in [0,360), S and V in [0,1]).
-//  2. Compute a circular hue difference: dH = min(|h1-h2|, 360-|h1-h2|) / 180,
-//     normalised to [0,1].
-//  3. Scale the hue term by min(s1,s2) so that hue barely contributes when
-//     either colour is near-achromatic (grey guard).
-//  4. dist = sqrt( (hueW * 2*dH)^2 + (1*dS)^2 + (0.5*dV)^2 )
-//
-// Tunable weight constants (documented as such):
-//
-//	hueScale  = 2.0  — multiplies the hue component (hue dominates)
-//	satScale  = 1.0  — multiplies the saturation difference
-//	valScale  = 0.5  — multiplies the value difference (lightness matters less)
-func colorDistanceHSV(a, b color.RGBA) float32 {
-	// Tunable weights — adjust here to change metric behaviour.
-	const hueScale = 2.0
-	const satScale = 1.0
-	const valScale = 0.5
-
-	h1, s1, v1 := rgbToHSV(a)
-	h2, s2, v2 := rgbToHSV(b)
-
-	diff := h1 - h2
-	if diff < 0 {
-		diff = -diff
-	}
-	if diff > 180 {
-		diff = 360 - diff
-	}
-	dH := diff / 180 // normalised to [0,1]
-
-	hueW := min(s1, s2) // hue only matters when both are colourful
-
-	dS := s1 - s2
-	if dS < 0 {
-		dS = -dS
-	}
-	dV := v1 - v2
-	if dV < 0 {
-		dV = -dV
-	}
-
-	hTerm := hueScale * dH * hueW
-	sTerm := satScale * dS
-	vTerm := valScale * dV
-
-	return float32(math.Sqrt(float64(hTerm*hTerm + sTerm*sTerm + vTerm*vTerm)))
-}
-
-// rgbToHSV converts a color.RGBA to hue (degrees, [0,360)), saturation ([0,1]),
-// and value ([0,1]). Alpha is ignored. For achromatic colours (s==0) hue is 0.
-func rgbToHSV(c color.RGBA) (h, s, v float32) {
-	r := float32(c.R) / 255.0
-	g := float32(c.G) / 255.0
-	b := float32(c.B) / 255.0
-
-	cMax := max(r, max(g, b))
-	cMin := min(r, min(g, b))
-	delta := cMax - cMin
-
-	v = cMax
-
-	if cMax == 0 {
-		s = 0
-	} else {
-		s = delta / cMax
-	}
-
-	if delta == 0 {
-		h = 0
-		return
-	}
-
-	switch cMax {
-	case r:
-		h = 60 * (((g - b) / delta) - float32(math.Floor(float64((g-b)/delta/6)))*6)
-	case g:
-		h = 60 * (((b - r) / delta) + 2)
-	default: // b
-		h = 60 * (((r - g) / delta) + 4)
-	}
-
-	if h < 0 {
-		h += 360
-	}
-	return
-}
-
 // randomColor returns a random opaque colour (A=255).
 // will be a subset of web-safe colours
 func randomColor() color.RGBA {
@@ -216,29 +113,28 @@ func eightNeighbors(col, row, cols, rows int) [][2]int {
 	return result
 }
 
-// closestColorNeighbors returns all 8-neighbours of (col,row) with Health > 0
-// that share the exact minimum colorDistanceRedmean distance to
-// cells[col][row].Color. Tie is determined by exact float32 equality.
-// Returns an empty slice if no healthy neighbour exists.
-func closestColorNeighbors(cells [][]Cell, col, row, cols, rows int) [][2]int {
-	neighbors := eightNeighbors(col, row, cols, rows)
-	target := cells[col][row].Color()
-	bestDist := float32(-1)
-	found := false
+// connectionVictims returns all 8-neighbours of (col,row) with Health > 0
+// whose Creature pointer appears in cells[col][row].Creature.Connections.
+// Comparison is by pointer identity. Returns nil if the target cell has no Creature.
+func connectionVictims(cells [][]Cell, col, row, cols, rows int) [][2]int {
+	if cells[col][row].Creature == nil {
+		return nil
+	}
+	target := cells[col][row].Creature
 	var result [][2]int
-	for _, n := range neighbors {
+	for _, n := range eightNeighbors(col, row, cols, rows) {
 		nc, nr := n[0], n[1]
 		if cells[nc][nr].Health <= 0 {
 			continue
 		}
-		dist := colorDistanceRedmean(target, cells[nc][nr].Color())
-		if !found || dist < bestDist {
-			bestDist = dist
-			result = result[:0]
-			result = append(result, [2]int{nc, nr})
-			found = true
-		} else if dist == bestDist {
-			result = append(result, [2]int{nc, nr})
+		if cells[nc][nr].Creature == nil {
+			continue
+		}
+		for _, conn := range target.Connections {
+			if conn == cells[nc][nr].Creature {
+				result = append(result, [2]int{nc, nr})
+				break
+			}
 		}
 	}
 	return result
