@@ -32,9 +32,9 @@ const (
 	victimTicks     = int64(24) // 0.4s at 60tps
 	targetAnimTicks = int64(15) // 0.25s at 60 TPS
 
-	healthDecrement = float32(1.0 / 3.0)
-	healthMin       = float32(0.2)
-	healthEpsilon   = float32(0.001)
+	healthDecrementKeep = float32(0.75)
+	healthMin           = float32(0.562)
+	healthEpsilon       = float32(0.001)
 
 	respawnCells = false // set false to leave gaps at top instead of spawning new cells
 )
@@ -497,7 +497,7 @@ func (g *Game) commitCellAt(col, row int) error {
 	}
 
 	oldHealth := cell.Health
-	cell.Health -= healthDecrement
+	cell.Health *= healthDecrementKeep
 	if cell.Health <= healthMin {
 		cell.Health = 0
 	}
