@@ -48,13 +48,17 @@ const (
 
 	// showOrientationDebug controls the small orientation/dimension readout drawn
 	// in the bottom-left corner of the frame each tick.  Set false to hide it.
-	showOrientationDebug = true
+	showOrientationDebug = false
 )
 
 // compositeSpriteRefSize is the logical fallback side length used only before
 // the first LayoutF call sets g.spriteRefSize.  At runtime, spriteRefSize is
 // derived from deviceCellSize*2 (capped at 512) and updated on scale changes.
 const compositeSpriteRefSize = 120
+
+// hudFace is the shared GoXFace for HUD and orientation-debug text.
+// Created once at package init to avoid a per-frame allocation.
+var hudFace = text.NewGoXFace(basicfont.Face7x13)
 
 // Game is the Ebitengine game state.
 type Game struct {
@@ -110,6 +114,15 @@ type Game struct {
 	// initialPainted is false until the first in-loop frame, at which point
 	// repaintGrid is called to bake all sprites with a live graphics context.
 	initialPainted bool
+
+	// HUD cache: g.hudImage is a persistent image of the HUD strip redrawn only
+	// when its content or size changes.  The last-rendered state is tracked in the
+	// fields below; a mismatch triggers a re-render.
+	hudImage         *ebiten.Image
+	lastHUDScore     int
+	lastHUDHoverCol  int
+	lastHUDHoverRow  int
+	lastHUDThemeName string
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -970,7 +983,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawHUD(g.frame, hudDevW)
 
 	// Draw orientation debug readout (gated by showOrientationDebug const).
-	g.drawOrientationDebug(g.frame)
+	if showOrientationDebug {
+		g.drawOrientationDebug(g.frame)
+	}
 
 	// Present the frame onto the actual screen.
 	screen.Fill(color.Black)
@@ -1206,101 +1221,133 @@ func hudWrapText(text string, maxChars int) []string {
 
 // drawHUD renders the left HUD strip of g.frame.
 // hudDevW is the device-pixel width of the strip.
+//
+// The HUD is rendered into g.hudImage (a persistent cache) and re-rendered only
+// when the content or size changes.  Every frame we blit the cached image with
+// one DrawImage — no per-frame text render, no per-frame allocation.
 func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
-	// Fill the HUD strip with a light background so the dark title image
-	// and black text are visible.
-	frameH := float64(frame.Bounds().Dy())
-	vector.FillRect(frame, 0, 0, float32(hudDevW), float32(frameH),
-		color.RGBA{0x99, 0x99, 0xAA, 0xFF}, false)
+	frameH := frame.Bounds().Dy()
+	themeName := activeTheme.name()
 
-	// Title image at the top of the HUD strip.
-	titleH := 0
-	if titleImage != nil {
-		tw := titleImage.Bounds().Dx()
-		th := titleImage.Bounds().Dy()
-		if tw > 0 && th > 0 {
-			// Scale to fit the HUD width; preserve aspect ratio.
-			scaleX := float64(hudDevW) / float64(tw)
-			const topMargin = 4
-			var tOpts ebiten.DrawImageOptions
-			tOpts.GeoM.Scale(scaleX, scaleX)
-			tOpts.GeoM.Translate(0, topMargin)
-			tOpts.Filter = ebiten.FilterLinear
-			frame.DrawImage(titleImage, &tOpts)
-			titleH = int(math.Round(float64(th)*scaleX)) + topMargin
+	// Dirty check: re-render the cache if anything changed.
+	needRender := g.hudImage == nil ||
+		g.hudImage.Bounds().Dx() != hudDevW ||
+		g.hudImage.Bounds().Dy() != frameH ||
+		g.score != g.lastHUDScore ||
+		g.hoverCol != g.lastHUDHoverCol ||
+		g.hoverRow != g.lastHUDHoverRow ||
+		themeName != g.lastHUDThemeName
+
+	if needRender {
+		// Allocate or reallocate the cache image when size changed.
+		if g.hudImage == nil || g.hudImage.Bounds().Dx() != hudDevW || g.hudImage.Bounds().Dy() != frameH {
+			g.hudImage = ebiten.NewImage(hudDevW, frameH)
+		} else {
+			g.hudImage.Clear()
 		}
-	}
 
-	// Render text at 1× into a small temporary image using basicfont.Face7x13
-	// (7×13 px glyphs, no built-in drop shadow), then blit it scaled up by
-	// hudTextScale.  tmpW = hudDevW / hudTextScale so that after Scale(3,3)
-	// the text fills the HUD strip width exactly.
-	tmpW := hudDevW / hudTextScale
-	if tmpW < 1 {
-		tmpW = 1
-	}
+		// Fill the HUD strip with a light background so the dark title image
+		// and black text are visible.
+		vector.FillRect(g.hudImage, 0, 0, float32(hudDevW), float32(frameH),
+			color.RGBA{0x99, 0x99, 0xAA, 0xFF}, false)
 
-	// basicFontW / basicFontH are the glyph cell dimensions of Face7x13.
-	const basicFontW = 7
-	const basicFontH = 13
-	// maxChars is the maximum characters per line that fit in tmpW.
-	maxChars := (tmpW - 2) / basicFontW // 2 px left-margin reserve
-	if maxChars < 1 {
-		maxChars = 1
-	}
-
-	// Build the list of text lines (wrapping long instruction text).
-	type textLine struct{ s string }
-	lines := []textLine{
-		{"Level 1"},
-	}
-	for _, wrapped := range hudWrapText(activeTheme.instructions(), maxChars) {
-		lines = append(lines, textLine{wrapped})
-	}
-	lines = append(lines, textLine{"Score: " + strconv.Itoa(g.score)})
-
-	// Hovered piece info line (optional).
-	if g.hoverCol >= 0 && g.hoverRow >= 0 &&
-		g.hoverCol < g.grid.Cols && g.hoverRow < g.grid.Rows {
-		cell := &g.grid.Cells[g.hoverCol][g.hoverRow]
-		if cell.Health > 0 && cell.Creature != nil {
-			name := cell.Creature.Name
-			if len(name) > 0 {
-				name = strings.ToUpper(name[:1]) + name[1:]
+		// Title image at the top of the HUD strip.
+		titleH := 0
+		if titleImage != nil {
+			tw := titleImage.Bounds().Dx()
+			th := titleImage.Bounds().Dy()
+			if tw > 0 && th > 0 {
+				// Scale to fit the HUD width; preserve aspect ratio.
+				scaleX := float64(hudDevW) / float64(tw)
+				const topMargin = 4
+				var tOpts ebiten.DrawImageOptions
+				tOpts.GeoM.Scale(scaleX, scaleX)
+				tOpts.GeoM.Translate(0, topMargin)
+				tOpts.Filter = ebiten.FilterLinear
+				g.hudImage.DrawImage(titleImage, &tOpts)
+				titleH = int(math.Round(float64(th)*scaleX)) + topMargin
 			}
-			lines = append(lines, textLine{""}) // blank spacer
-			lines = append(lines, textLine{name + " - " + strconv.Itoa(cell.Creature.Power)})
 		}
+
+		// Render text at 1× into a small temporary image using basicfont.Face7x13
+		// (7×13 px glyphs, no built-in drop shadow), then blit it scaled up by
+		// hudTextScale.  tmpW = hudDevW / hudTextScale so that after Scale(3,3)
+		// the text fills the HUD strip width exactly.
+		tmpW := hudDevW / hudTextScale
+		if tmpW < 1 {
+			tmpW = 1
+		}
+
+		// basicFontW / basicFontH are the glyph cell dimensions of Face7x13.
+		const basicFontW = 7
+		const basicFontH = 13
+		// maxChars is the maximum characters per line that fit in tmpW.
+		maxChars := (tmpW - 2) / basicFontW // 2 px left-margin reserve
+		if maxChars < 1 {
+			maxChars = 1
+		}
+
+		// Build the list of text lines (wrapping long instruction text).
+		type textLine struct{ s string }
+		lines := []textLine{
+			{"Level 1"},
+		}
+		for _, wrapped := range hudWrapText(activeTheme.instructions(), maxChars) {
+			lines = append(lines, textLine{wrapped})
+		}
+		lines = append(lines, textLine{"Score: " + strconv.Itoa(g.score)})
+
+		// Hovered piece info line (optional).
+		if g.hoverCol >= 0 && g.hoverRow >= 0 &&
+			g.hoverCol < g.grid.Cols && g.hoverRow < g.grid.Rows {
+			cell := &g.grid.Cells[g.hoverCol][g.hoverRow]
+			if cell.Health > 0 && cell.Creature != nil {
+				name := cell.Creature.Name
+				if len(name) > 0 {
+					name = strings.ToUpper(name[:1]) + name[1:]
+				}
+				lines = append(lines, textLine{""}) // blank spacer
+				lines = append(lines, textLine{name + " - " + strconv.Itoa(cell.Creature.Power)})
+			}
+		}
+
+		// lineSpacing doubles the font height to leave a blank line between each
+		// rendered text line.
+		lineSpacing := basicFontH * 2
+		tmpH := lineSpacing*len(lines) + basicFontH
+		if tmpH < 1 {
+			tmpH = 1
+		}
+
+		tmp := ebiten.NewImage(tmpW, tmpH)
+		const marginX = 2
+		for i, l := range lines {
+			var tOpts text.DrawOptions
+			tOpts.ColorScale.ScaleWithColor(color.Black)
+			tOpts.GeoM.Translate(float64(marginX), float64(i*lineSpacing))
+			text.Draw(tmp, l.s, hudFace, &tOpts)
+		}
+
+		// Blit the temporary text image into the cache, scaled up by hudTextScale.
+		// FilterNearest preserves the crisp pixel edges of the bitmap font.
+		// Text is already drawn in black so no ColorScale hack is needed.
+		// startY is pushed down by several line-heights to clear the title image.
+		startY := titleH + basicFontH*hudTextScale // ~3 line-heights gap below title
+		var opts ebiten.DrawImageOptions
+		opts.GeoM.Scale(float64(hudTextScale), float64(hudTextScale))
+		opts.GeoM.Translate(0, float64(startY))
+		opts.Filter = ebiten.FilterNearest
+		g.hudImage.DrawImage(tmp, &opts)
+
+		// Update last-rendered state.
+		g.lastHUDScore = g.score
+		g.lastHUDHoverCol = g.hoverCol
+		g.lastHUDHoverRow = g.hoverRow
+		g.lastHUDThemeName = themeName
 	}
 
-	// lineSpacing doubles the font height to leave a blank line between each
-	// rendered text line.
-	lineSpacing := basicFontH * 2
-	tmpH := lineSpacing*len(lines) + basicFontH
-	if tmpH < 1 {
-		tmpH = 1
-	}
-
-	hudFace := text.NewGoXFace(basicfont.Face7x13)
-	tmp := ebiten.NewImage(tmpW, tmpH)
-	const marginX = 2
-	for i, l := range lines {
-		var tOpts text.DrawOptions
-		tOpts.ColorScale.ScaleWithColor(color.Black)
-		tOpts.GeoM.Translate(float64(marginX), float64(i*lineSpacing))
-		text.Draw(tmp, l.s, hudFace, &tOpts)
-	}
-
-	// Blit the temporary text image into the frame, scaled up by hudTextScale.
-	// FilterNearest preserves the crisp pixel edges of the bitmap font.
-	// Text is already drawn in black so no ColorScale hack is needed.
-	// startY is pushed down by several line-heights to clear the title image.
-	startY := titleH + basicFontH*hudTextScale // ~3 line-heights gap below title
-	var opts ebiten.DrawImageOptions
-	opts.GeoM.Scale(float64(hudTextScale), float64(hudTextScale))
-	opts.GeoM.Translate(0, float64(startY))
-	opts.Filter = ebiten.FilterNearest
-	frame.DrawImage(tmp, &opts)
+	// Every frame: blit the cached HUD image into the frame at the HUD strip origin.
+	frame.DrawImage(g.hudImage, nil)
 }
 
 // drawOrientationDebug renders a one-line orientation/dimension readout in the
@@ -1320,7 +1367,6 @@ func (g *Game) drawOrientationDebug(frame *ebiten.Image) {
 		angleStr = "n/a"
 	}
 	line := fmt.Sprintf("%s %dx%d ang=%s sc=%.2f", orient, g.screenW, g.screenH, angleStr, g.renderScale)
-	hudFace := text.NewGoXFace(basicfont.Face7x13)
 	var opts text.DrawOptions
 	opts.ColorScale.ScaleWithColor(color.RGBA{0xFF, 0xFF, 0x00, 0xFF})
 	const marginBottom = 16
