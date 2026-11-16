@@ -116,3 +116,4 @@ test_output.json
 # ============================================================
 /web/mixersmash.wasm
 /web/wasm_exec.js
+/web/wasm-meta.js

@@ -19,6 +19,7 @@ wasm:
 	else \
 		cp "$(shell go env GOROOT)/misc/wasm/wasm_exec.js" web/wasm_exec.js; \
 	fi
+	echo "window.MIXERSMASH_WASM_SIZE = $$(wc -c < web/mixersmash.wasm | tr -d ' \t\n');" > web/wasm-meta.js
 
 # serve starts a local HTTP server for the web/ directory.
 # A static file server is required: browsers cannot fetch .wasm via file://.
@@ -38,4 +39,4 @@ hooks:
 
 clean:
 	rm -f mixersmash_darwin_arm64 mixersmash_linux_amd64
-	rm -f web/mixersmash.wasm web/wasm_exec.js
+	rm -f web/mixersmash.wasm web/wasm_exec.js web/wasm-meta.js
