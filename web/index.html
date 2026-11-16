@@ -51,22 +51,37 @@
         // Prevent pull-to-refresh and rubber-band scrolling on iOS and Android.
         document.addEventListener('touchmove', function(e) { e.preventDefault(); }, {passive: false});
 
-        // On the first user gesture, best-effort enter fullscreen and lock landscape.
-        // Wrapped in try/catch so iOS (no orientation.lock) silently no-ops.
+        // Enter fullscreen on each user gesture until it actually takes, then detach.
+        // orientation.lock is sequenced inside the fullscreen promise so it fires after
+        // the fullscreen transition completes (required on Android). Lock rejections are
+        // swallowed because iOS and desktop do not support it.
         // Does NOT preventDefault — the tap still reaches the game.
-        function goImmersive() {
-            try { if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); } catch (e) {}
-            try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape'); } catch (e) {}
+        function enterImmersive() {
+            if (document.fullscreenElement) return;
+            var el = document.documentElement;
+            var p;
+            try { p = el.requestFullscreen ? el.requestFullscreen() : null; } catch (e) { p = null; }
+            if (p && p.then) {
+                p.then(function () {
+                    try {
+                        if (screen.orientation && screen.orientation.lock) {
+                            screen.orientation.lock('landscape').catch(function () {});
+                        }
+                    } catch (e) {}
+                }).catch(function () {});
+            }
         }
-        function onFirstGesture() {
-            goImmersive();
-            window.removeEventListener('pointerdown', onFirstGesture, true);
-            window.removeEventListener('touchstart', onFirstGesture, true);
-            window.removeEventListener('click', onFirstGesture, true);
+        function onGesture() {
+            enterImmersive();
+            if (document.fullscreenElement) {
+                window.removeEventListener('pointerdown', onGesture, true);
+                window.removeEventListener('touchend', onGesture, true);
+                window.removeEventListener('click', onGesture, true);
+            }
         }
-        window.addEventListener('pointerdown', onFirstGesture, true);
-        window.addEventListener('touchstart', onFirstGesture, true);
-        window.addEventListener('click', onFirstGesture, true);
+        window.addEventListener('pointerdown', onGesture, true);
+        window.addEventListener('touchend', onGesture, true);
+        window.addEventListener('click', onGesture, true);
 
         (async function () {
             const go = new Go();
