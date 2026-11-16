@@ -70,6 +70,11 @@ The repo ships `.githooks/pre-commit` which runs gofmt, vet, build, test, and go
 - Cell sprites are baked once per colour and cached (map keyed by `color.RGBA`), then blitted; the shader runs only at bake time. The offscreen canvas is a model-derived cache, re-synced from the model on every settle to `stateWaiting` (`repaintGrid`/`enterWaiting`).
 - Inspect shader/dependency APIs with `go doc`; never glob or grep the module cache. Some Kage builtins may not appear in `go doc` — ask rather than spelunk the cache.
 
+## Performance (WASM/mobile)
+- The per-frame budget is ~16ms. High baseline Draw-path cost is invisible on a static screen but surfaces as jank during animations. "FPS drops during animations" is usually baseline cost, not animation logic — audit the whole per-frame path.
+- Avoid per frame: `ebiten.NewImage` allocations (reuse/cache); `syscall/js` calls (expensive JS boundary crossings — cache results, throttle, and gate debug readouts behind a `const debugHUD = false`); re-rendering static UI (cache the HUD to an `*ebiten.Image` with a dirty-check; re-render only when content or size changes); `text.NewGoXFace` allocation (hoist to a package-level var); `AppendTouchIDs` slice allocations (reuse a persistent buffer).
+- Do not invalidate the per-creature sprite cache mid-animation. Defer `LayoutF` scale-change clears to the next settle; clearing during an animation triggers a re-bake storm.
+
 # Debugging workflow
 - Bisect before theorising. When a bug "started happening," git stash / check the last commit to confirm committed-vs-uncommitted, then narrow to the introducing change. Hunt the mechanism only after.
 - Commit each change after its own verification (a visual check for rendering changes). Keep the uncommitted suspect set to one thing; do not stack several unverified changes.
