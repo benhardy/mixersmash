@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -128,6 +129,17 @@ type Game struct {
 	// (bakes) a new sprite on a cache miss; never reset.
 	spritesThisFrame int
 	bakeCount        int
+
+	// Worst-frame-time tracking for showPerfDebug.
+	// lastDrawTime records when the previous Draw call started (zero = unset).
+	// worstFrameMs is the worst Draw-to-Draw delta seen in the current 2s window.
+	// worstWindowStart marks when the current window began.
+	// prevWindowWorstMs is the worst value from the completed previous window,
+	// displayed so the readout stays stable while the current window accumulates.
+	lastDrawTime      time.Time
+	worstFrameMs      float64
+	worstWindowStart  time.Time
+	prevWindowWorstMs float64
 
 	// HUD cache: g.hudImage is a persistent image of the HUD strip redrawn only
 	// when its content or size changes.  The last-rendered state is tracked in the
@@ -1398,28 +1410,74 @@ func (g *Game) drawOrientationDebug(frame *ebiten.Image) {
 	text.Draw(frame, line, hudFace, &opts)
 }
 
-// drawPerfDebug renders a one-line performance readout in the bottom-right
-// corner of the frame, gated by the showPerfDebug const.  It reuses the
-// package-level hudFace (basicfont.Face7x13) so there is no per-frame
-// allocation.  When showPerfDebug is false this method is never called.
+// drawPerfDebug renders a 3x-scaled multi-line performance readout in the
+// top-left corner of the frame, gated by the showPerfDebug const.  It reuses
+// the package-level hudFace (basicfont.Face7x13) so there is no per-frame
+// font allocation.  When showPerfDebug is false this method is never called.
+//
+// Worst-frame-time is tracked here because Draw is the measurement site:
+// wall-clock time between consecutive Draw calls captures scheduler jank that
+// ActualFPS (a 1-second average) smooths over.  A rolling 2-second window is
+// maintained; the previous completed window's maximum is displayed so the
+// readout is stable while the current window accumulates.
 func (g *Game) drawPerfDebug(frame *ebiten.Image) {
-	line := fmt.Sprintf("fps:%.1f tps:%.1f spr:%d bk:%d",
-		ebiten.ActualFPS(), ebiten.ActualTPS(),
-		g.spritesThisFrame, g.bakeCount)
-	const marginBottom = 16
-	const marginRight = 4
-	frameW := frame.Bounds().Dx()
-	frameH := frame.Bounds().Dy()
-	// Measure the text width so we can right-align it.
-	w, _ := text.Measure(line, hudFace, 0)
-	x := float64(frameW) - w - float64(marginRight)
-	if x < 0 {
-		x = 0
+	// --- worst-frame-time measurement ---
+	now := time.Now()
+	if !g.lastDrawTime.IsZero() {
+		deltaMs := float64(now.Sub(g.lastDrawTime).Microseconds()) / 1000.0
+		if deltaMs > g.worstFrameMs {
+			g.worstFrameMs = deltaMs
+		}
+		// Advance the 2-second window when it has elapsed.
+		if g.worstWindowStart.IsZero() {
+			g.worstWindowStart = now
+		} else if now.Sub(g.worstWindowStart) >= 2*time.Second {
+			g.prevWindowWorstMs = g.worstFrameMs
+			g.worstFrameMs = deltaMs
+			g.worstWindowStart = now
+		}
+	} else {
+		g.worstWindowStart = now
 	}
+	g.lastDrawTime = now
+
+	// --- build display lines ---
+	line1 := fmt.Sprintf("fps %.0f  tps %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
+	line2 := fmt.Sprintf("max %.1fms", g.prevWindowWorstMs)
+	line3 := fmt.Sprintf("spr %d  bk %d", g.spritesThisFrame, g.bakeCount)
+
+	const scale = 3.0
+	const lineSpacing = 13 // basicfont.Face7x13 glyph height
+	const padX = 4.0
+	const padY = 4.0
+
+	// Measure the widest line to size the backing rectangle.
+	w1, _ := text.Measure(line1, hudFace, 0)
+	w2, _ := text.Measure(line2, hudFace, 0)
+	w3, _ := text.Measure(line3, hudFace, 0)
+	maxW := w1
+	if w2 > maxW {
+		maxW = w2
+	}
+	if w3 > maxW {
+		maxW = w3
+	}
+	rectW := float32(maxW*scale + padX*2)
+	rectH := float32((lineSpacing*3)*scale + padY*2)
+
+	// Dark semi-transparent backing rect for legibility.
+	vector.FillRect(frame, 0, 0, rectW, rectH, color.RGBA{0, 0, 0, 180}, false)
+
+	// Draw each line scaled 3x, white, top-left.
 	var opts text.DrawOptions
 	opts.ColorScale.ScaleWithColor(color.RGBA{0xFF, 0xFF, 0xFF, 0xFF})
-	opts.GeoM.Translate(x, float64(frameH-marginBottom))
-	text.Draw(frame, line, hudFace, &opts)
+	for i, l := range []string{line1, line2, line3} {
+		opts.GeoM.Reset()
+		opts.GeoM.Scale(scale, scale)
+		y := padY + float64(i)*lineSpacing*scale + lineSpacing*scale
+		opts.GeoM.Translate(padX, y)
+		text.Draw(frame, l, hudFace, &opts)
+	}
 }
 
 func main() {
