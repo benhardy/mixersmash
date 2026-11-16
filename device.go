@@ -20,12 +20,19 @@ func deviceScale() float64 {
 	return s
 }
 
-// deviceCanvasDims returns the device-pixel canvas width and height for the
+// deviceCanvasDims returns the device-pixel board width and height for the
 // given logical window size and scale factor, rounded to the nearest integer.
+// The board occupies windowWidth × windowHeight logical pixels.
 func deviceCanvasDims(s float64) (int, int) {
 	w := int(math.Round(float64(windowWidth) * s))
 	h := int(math.Round(float64(windowHeight) * s))
 	return w, h
+}
+
+// hudDeviceWidth returns the device-pixel width of the HUD strip for a given
+// scale factor, rounded to the nearest integer.
+func hudDeviceWidth(s float64) int {
+	return int(math.Round(float64(hudWidth) * s))
 }
 
 // deviceCellSizeFor derives the device-pixel cell size from the rounded canvas
@@ -72,16 +79,18 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 	g.screenH = sh
 	g.portrait = sh > sw
 
-	// Fixed-design landscape frame: always windowWidth × windowHeight at scale s.
-	fw, fh := deviceCanvasDims(s) // round(800*s), round(600*s)
+	// Fixed-design landscape frame: [ HUD strip | board ] wide, windowHeight tall.
+	boardW, fh := deviceCanvasDims(s) // round(800*s), round(600*s)
+	hudW := hudDeviceWidth(s)
+	fw := hudW + boardW
 
 	if s != g.renderScale {
 		g.renderScale = s
-		// deviceCellSize is derived from the frame width, not the screen width.
-		g.deviceCellSize = deviceCellSizeFor(fw)
+		// deviceCellSize is derived from boardW (not the full frame width).
+		g.deviceCellSize = deviceCellSizeFor(boardW)
 		g.spriteRefSize = spriteRefSizeFor(g.deviceCellSize)
 		g.frame = ebiten.NewImage(fw, fh)
-		g.canvas = ebiten.NewImage(fw, fh)
+		g.canvas = ebiten.NewImage(boardW, fh)
 		// Invalidate per-creature sprite cache — sprites were baked at the old size.
 		for i := range creaturePalette {
 			creaturePalette[i].Sprite = nil

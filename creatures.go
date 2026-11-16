@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	_ "embed"
+	"image"
 	"image/color"
+	_ "image/png"
+	"log"
 	"math"
 	"math/rand"
 	"sort"
@@ -14,6 +17,21 @@ import (
 
 //go:embed assets/NotoEmoji-Regular.ttf
 var notoEmojiTTF []byte
+
+//go:embed assets/mixersmashtitle.png
+var mixerSmashTitlePNG []byte
+
+// titleImage is the decoded title image, loaded once at startup.
+var titleImage *ebiten.Image
+
+func init() {
+	img, _, err := image.Decode(bytes.NewReader(mixerSmashTitlePNG))
+	if err != nil {
+		log.Printf("title image decode error: %v", err)
+		return
+	}
+	titleImage = ebiten.NewImageFromImage(img)
+}
 
 // Creature pairs a display name with its emoji glyph and a unique background colour.
 // Sprite holds the lazily-baked composite *ebiten.Image for this creature; nil
@@ -83,8 +101,12 @@ var paletteCDF []float64
 //   - conns:  len(palette) index lists; conns[i] holds palette indices that
 //     palette[i] connects to; len(conns[i]) must equal powers[i]; no self-index,
 //     no duplicates within a row.
+//
+// instructions returns a short player-facing hint string explaining how
+// connections work for this theme. Must be non-empty.
 type connectionTheme interface {
 	name() string
+	instructions() string
 	assign(palette []Creature) (powers []int, conns [][]int)
 }
 
@@ -129,6 +151,10 @@ var paletteConnectionNames = map[string][]string{
 
 func (randomTheme) name() string { return "random" }
 
+func (randomTheme) instructions() string {
+	return "Learn which creatures connect"
+}
+
 func (randomTheme) assign(palette []Creature) (powers []int, conns [][]int) {
 	// Build name→index map.
 	nameIndex := make(map[string]int, len(palette))
@@ -156,6 +182,10 @@ func (randomTheme) assign(palette []Creature) (powers []int, conns [][]int) {
 type colourTheme struct{}
 
 func (colourTheme) name() string { return "colour" }
+
+func (colourTheme) instructions() string {
+	return "Connect creatures of similar colour"
+}
 
 func (colourTheme) assign(palette []Creature) (powers []int, conns [][]int) {
 	n := len(palette)

@@ -7,8 +7,11 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"strconv"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	text "github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
@@ -20,6 +23,10 @@ const (
 	cellSize     = 64
 	gridCols     = windowWidth / cellSize  // 12
 	gridRows     = windowHeight / cellSize // 9
+
+	// hudWidth is the logical-pixel width of the left HUD strip. The board
+	// occupies the remaining windowWidth device-pixels of the frame.
+	hudWidth = 160
 
 	stateWaiting          = 1
 	stateShuffling        = 2
@@ -539,13 +546,14 @@ func (g *Game) updateWaiting() error {
 		dcs = cellSize
 	}
 
-	// frameW/frameH: dimensions of the landscape design frame, used for
-	// screenToFrame conversion.  When g.frame is nil (pre-LayoutF) fall back
-	// to the design constants so input still works.
+	// frameW/frameH: dimensions of the full (HUD+board) landscape design frame.
+	// When g.frame is nil (pre-LayoutF) fall back to design constants with no HUD.
 	var frameW, frameH float64
+	hudDevW := 0
 	if g.frame != nil {
 		frameW = float64(g.frame.Bounds().Dx())
 		frameH = float64(g.frame.Bounds().Dy())
+		hudDevW = hudDeviceWidth(g.renderScale)
 	} else {
 		frameW = float64(windowWidth)
 		frameH = float64(windowHeight)
@@ -574,16 +582,14 @@ func (g *Game) updateWaiting() error {
 	}
 
 	// Hold-as-hover: mirror the mouse hover recompute using the active touch position.
-	// lastTouchX/Y store RAW screen coords; they are converted via screenToFrame here.
+	// lastTouchX/Y store RAW screen coords; mapped to board via screenToBoard.
 	// Guard requires the tracked ID to still be present in currentTouches: on the
 	// release frame the ID is absent, so lastTouchX/Y retain the last valid position
 	// and the release-commit loop below reads the correct cell instead of (0,0).
 	if g.touchActive && containsTouchID(currentTouches, g.activeTouchID) {
 		tx, ty := ebiten.TouchPosition(g.activeTouchID)
 		g.lastTouchX, g.lastTouchY = tx, ty
-		fx, fy := screenToFrame(float64(tx), float64(ty), sw, sh, frameW, frameH, g.portrait)
-		hc := int(fx) / dcs
-		hr := int(fy) / dcs
+		hc, hr := screenToBoard(float64(tx), float64(ty), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
@@ -593,13 +599,12 @@ func (g *Game) updateWaiting() error {
 	}
 
 	// Release-to-commit: when the tracked finger lifts, commit using the stored last
-	// raw screen position, converted to frame coords via screenToFrame.
+	// raw screen position, mapped to a board cell via screenToBoard.
 	// Do NOT re-read ebiten.TouchPosition for the released ID — on this Ebitengine
 	// version it returns (0,0) for an already-released touch.
 	for _, id := range justReleased {
 		if id == g.activeTouchID {
-			fx, fy := screenToFrame(float64(g.lastTouchX), float64(g.lastTouchY), sw, sh, frameW, frameH, g.portrait)
-			col, row := cellFromPixel(int(fx), int(fy), dcs)
+			col, row := screenToBoard(float64(g.lastTouchX), float64(g.lastTouchY), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
 			// Clear touch state before commit so a reused ID cannot match stale state.
 			g.touchActive = false
 			if err := g.commitCellAt(col, row); err != nil {
@@ -612,11 +617,9 @@ func (g *Game) updateWaiting() error {
 	// Mouse input block — skipped entirely when touch is active/just-active this frame.
 	if !touchFrameActive {
 		// Hover recompute.
-		// CursorPosition returns device-pixel screen coords; convert to frame coords.
+		// CursorPosition returns device-pixel screen coords; map to board via screenToBoard.
 		mx, my := ebiten.CursorPosition()
-		fx, fy := screenToFrame(float64(mx), float64(my), sw, sh, frameW, frameH, g.portrait)
-		hc := int(fx) / dcs
-		hr := int(fy) / dcs
+		hc, hr := screenToBoard(float64(mx), float64(my), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
@@ -626,8 +629,7 @@ func (g *Game) updateWaiting() error {
 
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			px, py := ebiten.CursorPosition()
-			fx2, fy2 := screenToFrame(float64(px), float64(py), sw, sh, frameW, frameH, g.portrait)
-			col, row := cellFromPixel(int(fx2), int(fy2), dcs)
+			col, row := screenToBoard(float64(px), float64(py), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
 			if err := g.commitCellAt(col, row); err != nil {
 				return err
 			}
@@ -944,15 +946,28 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		return
 	}
 	g.frame.Fill(color.Black)
-	g.drawVictimLine(g.frame)
-	g.drawCanvas(g.frame)
-	g.drawTargetBounce(g.frame)
-	g.drawMoveAnims(g.frame)
+
+	// Board destination: the right portion of the frame, offset by hudDeviceW.
+	// We draw directly into g.frame using an explicit x-offset rather than a
+	// SubImage, because Ebiten SubImage-as-destination clips but does NOT
+	// translate the origin — board-local coords at x=0 would land at x=0 in
+	// the frame and be hidden under the HUD strip.
+	frameH := g.frame.Bounds().Dy()
+	frameW := g.frame.Bounds().Dx()
+	hudDevW := hudDeviceWidth(g.renderScale)
+
+	g.drawVictimLine(g.frame, hudDevW)
+	g.drawCanvas(g.frame, hudDevW)
+	g.drawTargetBounce(g.frame, hudDevW)
+	g.drawMoveAnims(g.frame, hudDevW)
+
+	// Draw the HUD strip in the left portion of the frame.
+	g.drawHUD(g.frame, hudDevW)
 
 	// Present the frame onto the actual screen.
 	screen.Fill(color.Black)
-	fw := float64(g.frame.Bounds().Dx())
-	fh := float64(g.frame.Bounds().Dy())
+	fw := float64(frameW)
+	fh := float64(frameH)
 	sw := float64(g.screenW)
 	sh := float64(g.screenH)
 	if sw <= 0 {
@@ -1001,7 +1016,8 @@ func presentGeoM(portrait bool, sw, sh, fw, fh float64) ebiten.GeoM {
 
 // drawVictimLine draws animated dotted hint lines behind the circles, one per
 // tied victim, each from that victim's cell toward the hovered cell.
-func (g *Game) drawVictimLine(screen *ebiten.Image) {
+// xOffset is added to all board-local X coordinates before drawing into dst.
+func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 	if g.hoverCol == -1 || len(g.victimHints) == 0 {
 		return
 	}
@@ -1013,6 +1029,7 @@ func (g *Game) drawVictimLine(screen *ebiten.Image) {
 	if s <= 0 {
 		s = 1.0
 	}
+	xOff := float32(xOffset)
 	toX, toY := deviceCellCenter(g.hoverCol, g.hoverRow, dcs)
 	// Dot spacing and radius scale with device scale so they appear the same
 	// physical size on all displays.
@@ -1035,21 +1052,25 @@ func (g *Game) drawVictimLine(screen *ebiten.Image) {
 		vc := g.grid.Cells[hc][hr].Color()
 		dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
 		for pos := offset; pos < length; pos += dotSpacing {
-			vector.FillCircle(screen, fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
+			vector.FillCircle(dst, xOff+fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)
 		}
 	}
 }
 
-// drawCanvas blits the persistent offscreen canvas to the frame.
-func (g *Game) drawCanvas(dst *ebiten.Image) {
+// drawCanvas blits the persistent offscreen canvas into dst at an explicit
+// x-offset so board-local pixel coords land at the right position in the frame.
+func (g *Game) drawCanvas(dst *ebiten.Image, xOffset int) {
 	if dst == nil || g.canvas == nil {
 		return
 	}
-	dst.DrawImage(g.canvas, nil)
+	var opts ebiten.DrawImageOptions
+	opts.GeoM.Translate(float64(xOffset), 0)
+	dst.DrawImage(g.canvas, &opts)
 }
 
 // drawTargetBounce renders the target cell bounce animation.
-func (g *Game) drawTargetBounce(screen *ebiten.Image) {
+// xOffset is added to the board-local X coordinate before drawing into dst.
+func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	if !g.targetAnimating {
 		return
 	}
@@ -1071,12 +1092,14 @@ func (g *Game) drawTargetBounce(screen *ebiten.Image) {
 	}
 	cx, cy := deviceCellCenter(g.actionCol, g.actionRow, dcs)
 	if r > 0 {
-		g.drawCompositeSprite(screen, cx, cy, r, g.targetAnimCreature)
+		g.drawCompositeSprite(dst, cx+float32(xOffset), cy, r, g.targetAnimCreature)
 	}
 }
 
 // drawMoveAnims renders in-motion cells for shuffle, drop, and victim-move animations.
-func (g *Game) drawMoveAnims(screen *ebiten.Image) {
+// xOffset is added to all board-local X coordinates before drawing into dst.
+func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
+	xOff := float32(xOffset)
 	if len(g.moveAnims) > 0 {
 		var t float32
 		ticks := int64(shuffleTicks)
@@ -1103,7 +1126,7 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			r := maxR * anim.Cell.Health
 			if r > 0 {
-				g.drawCompositeSprite(screen, cx, cy, r, anim.Cell.Creature)
+				g.drawCompositeSprite(dst, xOff+cx, cy, r, anim.Cell.Creature)
 			}
 		}
 	}
@@ -1134,7 +1157,75 @@ func (g *Game) drawMoveAnims(screen *ebiten.Image) {
 			}
 			radius := float32(dcs2/2-2) * v.Cell.Health * (1 - t)
 			if radius > 0 {
-				g.drawCompositeSprite(screen, cx, cy, radius, v.Cell.Creature)
+				g.drawCompositeSprite(dst, xOff+cx, cy, radius, v.Cell.Creature)
+			}
+		}
+	}
+}
+
+// drawHUD renders the left HUD strip of g.frame.
+// hudDevW is the device-pixel width of the strip.
+func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
+	s := g.renderScale
+	if s <= 0 {
+		s = 1.0
+	}
+
+	// Title image at the top of the HUD strip.
+	if titleImage != nil {
+		tw := titleImage.Bounds().Dx()
+		th := titleImage.Bounds().Dy()
+		if tw > 0 && th > 0 {
+			// Scale to fit the HUD width; preserve aspect ratio.
+			scaleX := float64(hudDevW) / float64(tw)
+			scaledH := float64(th) * scaleX
+			const topMargin = 4
+			var tOpts ebiten.DrawImageOptions
+			tOpts.GeoM.Scale(scaleX, scaleX)
+			tOpts.GeoM.Translate(0, topMargin)
+			tOpts.Filter = ebiten.FilterLinear
+			frame.DrawImage(titleImage, &tOpts)
+			_ = scaledH // used implicitly through y offset below
+		}
+	}
+
+	// Text lines rendered below the title image.
+	// ebitenutil.DebugPrintAt uses a fixed 6×8 px font; scale x≈4 for readability.
+	textX := int(math.Round(4 * s))
+	lineH := int(math.Round(13 * s)) // ~13 device px per line at this font size
+
+	// Start y: below the title image (approximate: title aspect ~2000/836 ≈ 2.39:1).
+	titleH := 0
+	if titleImage != nil {
+		tw := titleImage.Bounds().Dx()
+		th := titleImage.Bounds().Dy()
+		if tw > 0 {
+			scaleX := float64(hudDevW) / float64(tw)
+			titleH = int(math.Round(float64(th)*scaleX)) + 4 // 4 px top margin
+		}
+	}
+	y := titleH + lineH/2
+
+	ebitenutil.DebugPrintAt(frame, "Level 1", textX, y)
+	y += lineH
+
+	ebitenutil.DebugPrintAt(frame, activeTheme.instructions(), textX, y)
+	y += lineH
+
+	ebitenutil.DebugPrintAt(frame, "Score: "+strconv.Itoa(g.score), textX, y)
+	y += lineH * 2 // blank line
+
+	// Hovered piece info.
+	if g.hoverCol >= 0 && g.hoverRow >= 0 {
+		if g.hoverCol < g.grid.Cols && g.hoverRow < g.grid.Rows {
+			cell := &g.grid.Cells[g.hoverCol][g.hoverRow]
+			if cell.Health > 0 && cell.Creature != nil {
+				name := cell.Creature.Name
+				// Capitalise first letter.
+				if len(name) > 0 {
+					name = strings.ToUpper(name[:1]) + name[1:]
+				}
+				ebitenutil.DebugPrintAt(frame, name+" - "+strconv.Itoa(cell.Creature.Power), textX, y)
 			}
 		}
 	}
@@ -1163,15 +1254,16 @@ func main() {
 	// ebiten.NewImage / DrawRectShader / text.Draw run with a live graphics
 	// context rather than a cold one that can produce blank sprites.
 	//
-	// The frame is always landscape-sized (windowWidth × windowHeight at scale s);
-	// deviceCellSize is derived from the frame width, not the screen width.
+	// The frame is [ HUD strip (hudDeviceW) | board (boardDeviceW) ] wide.
+	// deviceCellSize is derived from boardDeviceW (not the full frame width).
 	s := deviceScale()
 	game.renderScale = s
-	dw, dh := deviceCanvasDims(s) // round(800*s), round(600*s)
-	game.deviceCellSize = deviceCellSizeFor(dw)
+	boardW, dh := deviceCanvasDims(s) // round(800*s), round(600*s)
+	hudW := hudDeviceWidth(s)
+	game.deviceCellSize = deviceCellSizeFor(boardW)
 	game.spriteRefSize = spriteRefSizeFor(game.deviceCellSize)
-	game.frame = ebiten.NewImage(dw, dh)
-	game.canvas = ebiten.NewImage(dw, dh)
+	game.frame = ebiten.NewImage(hudW+boardW, dh)
+	game.canvas = ebiten.NewImage(boardW, dh)
 
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
