@@ -182,9 +182,60 @@
             loadError.textContent = msg;
         }
 
+        // dismissWhenLandscape hides the #loading overlay once the browser geometry
+        // confirms landscape orientation (innerWidth > innerHeight).  Called by the
+        // orientationchange/resize listeners and the poll interval below.  Also
+        // armed with a 1500 ms unconditional fallback so the overlay never persists
+        // forever on iOS or desktop where orientation.lock is a no-op.
+        var _dismissListenersArmed = false;
+        var _dismissInterval = null;
+        var _dismissFallback = null;
+
+        function dismissWhenLandscape() {
+            if (window.innerWidth <= window.innerHeight) return;
+            _hideLoading();
+        }
+
+        function _hideLoading() {
+            var overlay = document.getElementById('loading');
+            if (!overlay || overlay.style.display === 'none') return; // already hidden
+            overlay.style.display = 'none';
+
+            // Clean up all listeners / timers regardless of which path fired.
+            if (_dismissInterval !== null) {
+                clearInterval(_dismissInterval);
+                _dismissInterval = null;
+            }
+            if (_dismissFallback !== null) {
+                clearTimeout(_dismissFallback);
+                _dismissFallback = null;
+            }
+            if (_dismissListenersArmed) {
+                window.removeEventListener('orientationchange', dismissWhenLandscape);
+                window.removeEventListener('resize', dismissWhenLandscape);
+                _dismissListenersArmed = false;
+            }
+        }
+
         startBtn.addEventListener('click', function () {
             enterImmersive();
-            document.getElementById('loading').style.display = 'none';
+
+            // If already landscape (desktop, phone held landscape), dismiss now.
+            if (window.innerWidth > window.innerHeight) {
+                _hideLoading();
+                return;
+            }
+
+            // Not yet landscape — arm listeners and poll until orientation resolves.
+            _dismissListenersArmed = true;
+            window.addEventListener('orientationchange', dismissWhenLandscape);
+            window.addEventListener('resize', dismissWhenLandscape);
+
+            _dismissInterval = setInterval(dismissWhenLandscape, 100);
+
+            // Unconditional fallback: hides overlay after 1500 ms even if the device
+            // never rotates (iOS unsupported lock, desktop, portrait-only hold).
+            _dismissFallback = setTimeout(_hideLoading, 1500);
         });
 
         (async function () {
