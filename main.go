@@ -49,6 +49,10 @@ const (
 	// showOrientationDebug controls the small orientation/dimension readout drawn
 	// in the bottom-left corner of the frame each tick.  Set false to hide it.
 	showOrientationDebug = false
+
+	// showPerfDebug controls the per-frame performance readout drawn in the
+	// bottom-right corner of the frame.  Set false to compile it out entirely.
+	showPerfDebug = true
 )
 
 // compositeSpriteRefSize is the logical fallback side length used only before
@@ -116,6 +120,14 @@ type Game struct {
 	// initialPainted is false until the first in-loop frame, at which point
 	// repaintGrid is called to bake all sprites with a live graphics context.
 	initialPainted bool
+
+	// Performance counters for showPerfDebug readout.
+	// spritesThisFrame counts drawCompositeSprite blits in the current Draw call;
+	// reset to 0 at the top of each Draw.
+	// bakeCount is cumulative: incremented each time compositeCachedSprite builds
+	// (bakes) a new sprite on a cache miss; never reset.
+	spritesThisFrame int
+	bakeCount        int
 
 	// HUD cache: g.hudImage is a persistent image of the HUD strip redrawn only
 	// when its content or size changes.  The last-rendered state is tracked in the
@@ -230,6 +242,7 @@ func (g *Game) compositeCachedSprite(cr *Creature) *ebiten.Image {
 	gelOpts.Images[0] = base
 	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
 
+	g.bakeCount++
 	cr.Sprite = composite
 	return composite
 }
@@ -245,6 +258,7 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, cr
 	if img == nil {
 		return
 	}
+	g.spritesThisFrame++
 	// Scale so the sprite's inscribed circle (diameter = sprite bake size)
 	// matches the requested radius.
 	refSz := g.spriteRefSize
@@ -951,6 +965,8 @@ func (g *Game) Update() error {
 // Draw blits the offscreen canvas to g.frame, then presents g.frame onto the
 // screen with optional 90° CCW rotation for portrait orientation.
 func (g *Game) Draw(screen *ebiten.Image) {
+	g.spritesThisFrame = 0
+
 	if g.glowShader == nil {
 		s, err := ebiten.NewShader([]byte(glowShaderSrc))
 		if err != nil {
@@ -987,6 +1003,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw orientation debug readout (gated by showOrientationDebug const).
 	if showOrientationDebug {
 		g.drawOrientationDebug(g.frame)
+	}
+
+	// Draw performance readout (gated by showPerfDebug const).
+	if showPerfDebug {
+		g.drawPerfDebug(g.frame)
 	}
 
 	// Present the frame onto the actual screen.
@@ -1374,6 +1395,30 @@ func (g *Game) drawOrientationDebug(frame *ebiten.Image) {
 	const marginBottom = 16
 	frameH := frame.Bounds().Dy()
 	opts.GeoM.Translate(2, float64(frameH-marginBottom))
+	text.Draw(frame, line, hudFace, &opts)
+}
+
+// drawPerfDebug renders a one-line performance readout in the bottom-right
+// corner of the frame, gated by the showPerfDebug const.  It reuses the
+// package-level hudFace (basicfont.Face7x13) so there is no per-frame
+// allocation.  When showPerfDebug is false this method is never called.
+func (g *Game) drawPerfDebug(frame *ebiten.Image) {
+	line := fmt.Sprintf("fps:%.1f tps:%.1f spr:%d bk:%d",
+		ebiten.ActualFPS(), ebiten.ActualTPS(),
+		g.spritesThisFrame, g.bakeCount)
+	const marginBottom = 16
+	const marginRight = 4
+	frameW := frame.Bounds().Dx()
+	frameH := frame.Bounds().Dy()
+	// Measure the text width so we can right-align it.
+	w, _ := text.Measure(line, hudFace, 0)
+	x := float64(frameW) - w - float64(marginRight)
+	if x < 0 {
+		x = 0
+	}
+	var opts text.DrawOptions
+	opts.ColorScale.ScaleWithColor(color.RGBA{0xFF, 0xFF, 0xFF, 0xFF})
+	opts.GeoM.Translate(x, float64(frameH-marginBottom))
 	text.Draw(frame, line, hudFace, &opts)
 }
 
