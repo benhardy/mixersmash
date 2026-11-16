@@ -26,7 +26,8 @@ const (
 
 	// hudWidth is the logical-pixel width of the left HUD strip. The board
 	// occupies the remaining windowWidth device-pixels of the frame.
-	hudWidth = 160
+	// Widened to 280 so that 3x-scaled debug text fits comfortably.
+	hudWidth = 280
 
 	stateWaiting          = 1
 	stateShuffling        = 2
@@ -1163,72 +1164,125 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	}
 }
 
+// hudTextScale is the integer magnification factor applied to ebitenutil debug
+// text in the HUD.  The text is first rendered into a small temporary image at
+// 1× (6×8 px font) and then blit into the frame scaled up by this factor.
+const hudTextScale = 3
+
+// hudWrapText splits text into lines each no longer than maxChars characters,
+// breaking only at space boundaries.  Lines that have no space and exceed
+// maxChars are left unbroken.
+func hudWrapText(text string, maxChars int) []string {
+	if maxChars <= 0 || len(text) <= maxChars {
+		return []string{text}
+	}
+	var lines []string
+	for len(text) > maxChars {
+		cut := maxChars
+		// Walk back from maxChars to find the last space.
+		for cut > 0 && text[cut-1] != ' ' {
+			cut--
+		}
+		if cut == 0 {
+			// No space found — emit the whole remaining string as one line.
+			break
+		}
+		lines = append(lines, strings.TrimRight(text[:cut], " "))
+		text = text[cut:]
+	}
+	if len(text) > 0 {
+		lines = append(lines, text)
+	}
+	return lines
+}
+
 // drawHUD renders the left HUD strip of g.frame.
 // hudDevW is the device-pixel width of the strip.
 func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
-	s := g.renderScale
-	if s <= 0 {
-		s = 1.0
-	}
-
 	// Title image at the top of the HUD strip.
+	titleH := 0
 	if titleImage != nil {
 		tw := titleImage.Bounds().Dx()
 		th := titleImage.Bounds().Dy()
 		if tw > 0 && th > 0 {
 			// Scale to fit the HUD width; preserve aspect ratio.
 			scaleX := float64(hudDevW) / float64(tw)
-			scaledH := float64(th) * scaleX
 			const topMargin = 4
 			var tOpts ebiten.DrawImageOptions
 			tOpts.GeoM.Scale(scaleX, scaleX)
 			tOpts.GeoM.Translate(0, topMargin)
 			tOpts.Filter = ebiten.FilterLinear
 			frame.DrawImage(titleImage, &tOpts)
-			_ = scaledH // used implicitly through y offset below
+			titleH = int(math.Round(float64(th)*scaleX)) + topMargin
 		}
 	}
 
-	// Text lines rendered below the title image.
-	// ebitenutil.DebugPrintAt uses a fixed 6×8 px font; scale x≈4 for readability.
-	textX := int(math.Round(4 * s))
-	lineH := int(math.Round(13 * s)) // ~13 device px per line at this font size
-
-	// Start y: below the title image (approximate: title aspect ~2000/836 ≈ 2.39:1).
-	titleH := 0
-	if titleImage != nil {
-		tw := titleImage.Bounds().Dx()
-		th := titleImage.Bounds().Dy()
-		if tw > 0 {
-			scaleX := float64(hudDevW) / float64(tw)
-			titleH = int(math.Round(float64(th)*scaleX)) + 4 // 4 px top margin
-		}
+	// Render text at 1× into a small temporary image, then blit it scaled up
+	// by hudTextScale.  This gives crisp, blocky magnified debug text without
+	// adding any font dependency.
+	//
+	// ebitenutil.DebugPrintAt uses a fixed 6×8 px bitmap font.
+	// tmpW = hudDevW / hudTextScale so that after Scale(3,3) the text fills
+	// the HUD strip width exactly.
+	tmpW := hudDevW / hudTextScale
+	if tmpW < 1 {
+		tmpW = 1
 	}
-	y := titleH + lineH/2
 
-	ebitenutil.DebugPrintAt(frame, "Level 1", textX, y)
-	y += lineH
+	// debugFontW is the glyph width of the fixed ebitenutil bitmap font (px).
+	const debugFontW = 6
+	// maxChars is the maximum characters per line that fit in tmpW.
+	maxChars := (tmpW - 2) / debugFontW // 2 px left-margin reserve
+	if maxChars < 1 {
+		maxChars = 1
+	}
 
-	ebitenutil.DebugPrintAt(frame, activeTheme.instructions(), textX, y)
-	y += lineH
+	// Build the list of text lines (wrapping long instruction text).
+	type textLine struct{ s string }
+	lines := []textLine{
+		{"Level 1"},
+	}
+	for _, wrapped := range hudWrapText(activeTheme.instructions(), maxChars) {
+		lines = append(lines, textLine{wrapped})
+	}
+	lines = append(lines, textLine{"Score: " + strconv.Itoa(g.score)})
 
-	ebitenutil.DebugPrintAt(frame, "Score: "+strconv.Itoa(g.score), textX, y)
-	y += lineH * 2 // blank line
-
-	// Hovered piece info.
-	if g.hoverCol >= 0 && g.hoverRow >= 0 {
-		if g.hoverCol < g.grid.Cols && g.hoverRow < g.grid.Rows {
-			cell := &g.grid.Cells[g.hoverCol][g.hoverRow]
-			if cell.Health > 0 && cell.Creature != nil {
-				name := cell.Creature.Name
-				// Capitalise first letter.
-				if len(name) > 0 {
-					name = strings.ToUpper(name[:1]) + name[1:]
-				}
-				ebitenutil.DebugPrintAt(frame, name+" - "+strconv.Itoa(cell.Creature.Power), textX, y)
+	// Hovered piece info line (optional).
+	if g.hoverCol >= 0 && g.hoverRow >= 0 &&
+		g.hoverCol < g.grid.Cols && g.hoverRow < g.grid.Rows {
+		cell := &g.grid.Cells[g.hoverCol][g.hoverRow]
+		if cell.Health > 0 && cell.Creature != nil {
+			name := cell.Creature.Name
+			if len(name) > 0 {
+				name = strings.ToUpper(name[:1]) + name[1:]
 			}
+			lines = append(lines, textLine{""}) // blank spacer
+			lines = append(lines, textLine{name + " - " + strconv.Itoa(cell.Creature.Power)})
 		}
 	}
+
+	// debugFontH is the glyph height of the fixed ebitenutil bitmap font (px).
+	const debugFontH = 8
+	lineSpacing := debugFontH + 2 // 2 px between lines at 1×
+	tmpH := lineSpacing*len(lines) + 2
+	if tmpH < 1 {
+		tmpH = 1
+	}
+
+	tmp := ebiten.NewImage(tmpW, tmpH)
+	const marginX = 2
+	for i, l := range lines {
+		ebitenutil.DebugPrintAt(tmp, l.s, marginX, i*lineSpacing)
+	}
+
+	// Blit the temporary text image into the frame, scaled up by hudTextScale.
+	// FilterNearest preserves the crisp pixel edges of the bitmap font.
+	startY := titleH + 4 // 4 px gap below the title image
+	var opts ebiten.DrawImageOptions
+	opts.GeoM.Scale(float64(hudTextScale), float64(hudTextScale))
+	opts.GeoM.Translate(0, float64(startY))
+	opts.Filter = ebiten.FilterNearest
+	frame.DrawImage(tmp, &opts)
 }
 
 func main() {
