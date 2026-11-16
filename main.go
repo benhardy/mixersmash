@@ -103,6 +103,8 @@ type Game struct {
 	// HiDPI render scale — set once per LayoutF call; derived from
 	// ebiten.Monitor().DeviceScaleFactor().
 	renderScale    float64 // current device scale factor (1.0 on standard displays)
+	frameScale     float64 // presented fit-scale k (device px per logical unit); see frameScaleFor
+	hudDevW        int     // device-pixel HUD strip width at the current frameScale
 	deviceCellSize int     // device-pixel cell size, derived from frame width
 	spriteRefSize  int     // device-pixel sprite bake diameter (≤512)
 
@@ -571,7 +573,7 @@ func (g *Game) updateWaiting() error {
 	if g.frame != nil {
 		frameW = float64(g.frame.Bounds().Dx())
 		frameH = float64(g.frame.Bounds().Dy())
-		hudDevW = hudDeviceWidth(g.renderScale)
+		hudDevW = g.hudDevW
 	} else {
 		frameW = float64(windowWidth)
 		frameH = float64(windowHeight)
@@ -972,7 +974,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// the frame and be hidden under the HUD strip.
 	frameH := g.frame.Bounds().Dy()
 	frameW := g.frame.Bounds().Dx()
-	hudDevW := hudDeviceWidth(g.renderScale)
+	hudDevW := g.hudDevW
 
 	g.drawVictimLine(g.frame, hudDevW)
 	g.drawCanvas(g.frame, hudDevW)
@@ -1392,18 +1394,30 @@ func main() {
 	}
 	game.glyphFont = glyphFont
 
-	// Allocate the landscape design frame and canvas before RunGame so that
-	// dimensions and renderScale are set for the first LayoutF call.  Drawing/baking
-	// is deferred to the first Update tick (initialPainted gate) so that
-	// ebiten.NewImage / DrawRectShader / text.Draw run with a live graphics
-	// context rather than a cold one that can produce blank sprites.
+	// Allocate the frame and canvas before RunGame so that dimensions and
+	// renderScale are set for the first LayoutF call.  Drawing/baking is deferred
+	// to the first Update tick (initialPainted gate) so that ebiten.NewImage /
+	// DrawRectShader / text.Draw run with a live graphics context rather than a
+	// cold one that can produce blank sprites.
 	//
-	// The frame is [ HUD strip (hudDeviceW) | board (boardDeviceW) ] wide.
-	// deviceCellSize is derived from boardDeviceW (not the full frame width).
+	// The initial frame is sized to the presented resolution using the design
+	// window dimensions as a proxy for the initial screen size.  LayoutF will
+	// realloc when the real screen dims are known (first call), since the frame
+	// dims will differ from the initial allocation whenever the screen is not
+	// exactly windowWidth×windowHeight device pixels.
+	//
+	// The frame is [ HUD strip (hudDevW) | board (boardW) ] wide.
+	// deviceCellSize is derived from boardW (not the full frame width).
 	s := deviceScale()
 	game.renderScale = s
-	boardW, dh := deviceCanvasDims(s) // round(800*s), round(600*s)
-	hudW := hudDeviceWidth(s)
+	initSW := int(math.Round(float64(windowWidth) * s))
+	initSH := int(math.Round(float64(windowHeight) * s))
+	k := frameScaleFor(initSW, initSH, false) // initial: landscape assumed
+	game.frameScale = k
+	hudW := int(math.Round(float64(hudWidth) * k))
+	boardW := int(math.Round(float64(windowWidth) * k))
+	dh := int(math.Round(float64(windowHeight) * k))
+	game.hudDevW = hudW
 	game.deviceCellSize = deviceCellSizeFor(boardW)
 	game.spriteRefSize = spriteRefSizeFor(game.deviceCellSize)
 	game.frame = ebiten.NewImage(hudW+boardW, dh)

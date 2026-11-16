@@ -20,19 +20,34 @@ func deviceScale() float64 {
 	return s
 }
 
-// deviceCanvasDims returns the device-pixel board width and height for the
-// given logical window size and scale factor, rounded to the nearest integer.
-// The board occupies windowWidth × windowHeight logical pixels.
-func deviceCanvasDims(s float64) (int, int) {
-	w := int(math.Round(float64(windowWidth) * s))
-	h := int(math.Round(float64(windowHeight) * s))
-	return w, h
-}
-
-// hudDeviceWidth returns the device-pixel width of the HUD strip for a given
-// scale factor, rounded to the nearest integer.
-func hudDeviceWidth(s float64) int {
-	return int(math.Round(float64(hudWidth) * s))
+// frameScaleFor computes the presented fit-scale k (device pixels per logical
+// unit) for the landscape design placed into a screen of size sw×sh.
+//
+// The design is designW×designH logical pixels (hudWidth+windowWidth by
+// windowHeight).  In landscape orientation the design is fit directly into the
+// screen; in portrait the design is rotated 90° CCW first, so its effective
+// footprint becomes designH wide × designW tall before fitting.
+//
+// k mirrors the scale factor that presentGeoM computes, expressed in design
+// logical units, so allocating a frame at round(designW*k)×round(designH*k)
+// makes the presentGeoM fit-scale ≈1 (a near-identity rotation+centre).
+func frameScaleFor(sw, sh int, portrait bool) float64 {
+	designW := float64(hudWidth + windowWidth) // 1080 logical px
+	designH := float64(windowHeight)           // 600 logical px
+	fsw := float64(sw)
+	fsh := float64(sh)
+	var k float64
+	if !portrait {
+		// Landscape: fit designW×designH into sw×sh.
+		k = math.Min(fsw/designW, fsh/designH)
+	} else {
+		// Portrait: design is rotated 90° CCW; effective footprint is designH×designW.
+		k = math.Min(fsw/designH, fsh/designW)
+	}
+	if k <= 0 {
+		k = 1
+	}
+	return k
 }
 
 // deviceCellSizeFor derives the device-pixel cell size from the rounded canvas
@@ -56,14 +71,16 @@ func spriteRefSizeFor(dcs int) int {
 // Layout.  It returns the actual device-pixel screen dimensions so that Draw
 // receives a *ebiten.Image matching the real framebuffer (in whatever orientation).
 //
-// The landscape design frame (frameW × frameH = round(800*s) × round(600*s)) is
-// allocated here and kept at the landscape size regardless of screen orientation.
-// deviceCellSize is derived from the frame width, not the screen width, so board
-// coordinates are stable across orientation changes.
+// The frame is sized to the PRESENTED resolution: k = frameScaleFor(sw, sh,
+// portrait) is the device-pixels-per-logical-unit that presentGeoM would apply,
+// so allocating at round(designW*k)×round(designH*k) makes presentGeoM's
+// fit-scale ≈1 (near-identity rotation+centre).  Every per-frame composite op
+// therefore touches only as many pixels as the screen actually shows.
 //
-// When the scale factor changes (e.g. window moved to a different monitor, or
-// browser zoom), the frame and canvas are reallocated and the sprite cache is
-// cleared so all cached sprites are rebaked at the new size.
+// Reallocation is triggered whenever the computed frame pixel dimensions differ
+// from the current g.frame.Bounds() — this catches screen resize and orientation
+// changes in addition to DeviceScaleFactor changes, while ignoring sub-pixel
+// jitter (e.g. mobile address-bar animation) that produces identical dims.
 func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 	s := deviceScale()
 	// screenW/screenH = actual device-pixel screen in current orientation.
@@ -79,13 +96,26 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 	g.screenH = sh
 	g.portrait = sh > sw
 
-	// Fixed-design landscape frame: [ HUD strip | board ] wide, windowHeight tall.
-	boardW, fh := deviceCanvasDims(s) // round(800*s), round(600*s)
-	hudW := hudDeviceWidth(s)
+	// Compute the presented fit-scale k: device pixels per logical design unit.
+	k := frameScaleFor(sw, sh, g.portrait)
+
+	// Frame at the presented size: designW×designH logical → round(·*k) device px.
+	hudW := int(math.Round(float64(hudWidth) * k))
+	boardW := int(math.Round(float64(windowWidth) * k))
+	fh := int(math.Round(float64(windowHeight) * k))
 	fw := hudW + boardW
 
-	if s != g.renderScale {
+	// Realloc only when the target pixel dimensions differ from the current frame.
+	// Comparing Bounds() avoids thrashing on tiny mobile viewport jitter that
+	// produces the same integer dimensions.
+	needRealloc := g.frame == nil ||
+		g.frame.Bounds().Dx() != fw ||
+		g.frame.Bounds().Dy() != fh
+
+	if needRealloc {
 		g.renderScale = s
+		g.frameScale = k
+		g.hudDevW = hudW
 		// deviceCellSize is derived from boardW (not the full frame width).
 		g.deviceCellSize = deviceCellSizeFor(boardW)
 		g.spriteRefSize = spriteRefSizeFor(g.deviceCellSize)

@@ -11,6 +11,191 @@ func near(a, b float64) bool {
 	return math.Abs(a-b) < epsilon
 }
 
+// nearF64 returns true when a and b are within tol of each other.
+func nearF64(a, b, tol float64) bool {
+	return math.Abs(a-b) <= tol
+}
+
+// ---------------------------------------------------------------------------
+// frameScaleFor
+// ---------------------------------------------------------------------------
+
+// TestFrameScaleForLandscape verifies that in landscape orientation the
+// returned k makes round(designW*k)×round(designH*k) ≈ the presented size,
+// and that presentGeoM's fit-scale with those frame dims is ≈1.
+func TestFrameScaleForLandscape(t *testing.T) {
+	// Design: 1080×600 logical (hudWidth+windowWidth by windowHeight).
+	const designW = hudWidth + windowWidth // 1080
+	const designH = windowHeight           // 600
+
+	cases := []struct {
+		name   string
+		sw, sh int
+		wantFW int // round(designW*k)
+		wantFH int // round(designH*k)
+	}{
+		{
+			// 1080×600 screen, landscape: k = min(1080/1080, 600/600) = 1.0
+			name: "screen exactly equals design",
+			sw:   1080, sh: 600,
+			wantFW: 1080, wantFH: 600,
+		},
+		{
+			// 2160×1200 screen, landscape: k = min(2160/1080, 1200/600) = 2.0
+			name: "2× landscape",
+			sw:   2160, sh: 1200,
+			wantFW: 2160, wantFH: 1200,
+		},
+		{
+			// 1920×1080 screen, landscape: k = min(1920/1080, 1080/600) = min(1.777, 1.8) = 1.777
+			// round(1080*1.777)=1920, round(600*1.777)=1066
+			name: "1920×1080 widescreen landscape",
+			sw:   1920, sh: 1080,
+			wantFW: 1920, wantFH: 1067,
+		},
+		{
+			// 3× DPI phone: sw=1080, sh=1920 is portrait — not tested here (portrait case below).
+			// Landscape 3× proxy: sw=1800,sh=1800 → k=min(1800/1080,1800/600)=min(1.666,3.0)=1.666
+			// round(1080*1.666)=1800, round(600*1.666)=1000
+			name: "1800×1800 square landscape",
+			sw:   1800, sh: 1800,
+			wantFW: 1800, wantFH: 1000,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			k := frameScaleFor(tc.sw, tc.sh, false)
+			if k <= 0 {
+				t.Fatalf("frameScaleFor returned k=%v, want >0", k)
+			}
+			gotFW := int(math.Round(designW * k))
+			gotFH := int(math.Round(designH * k))
+			// Allow ±1 rounding tolerance.
+			if abs(gotFW-tc.wantFW) > 1 || abs(gotFH-tc.wantFH) > 1 {
+				t.Errorf("frame dims round(designW*k)×round(designH*k) = %d×%d, want ~%d×%d (k=%.4f)",
+					gotFW, gotFH, tc.wantFW, tc.wantFH, k)
+			}
+			// Verify presentGeoM fit-scale ≈ 1 with these frame dims.
+			fw := float64(gotFW)
+			fh := float64(gotFH)
+			sw := float64(tc.sw)
+			sh := float64(tc.sh)
+			fitScale := math.Min(sw/fw, sh/fh)
+			if !nearF64(fitScale, 1.0, 0.02) {
+				t.Errorf("presentGeoM fit-scale = %.4f, want ≈1.0 (frame %d×%d, screen %d×%d)",
+					fitScale, gotFW, gotFH, tc.sw, tc.sh)
+			}
+		})
+	}
+}
+
+// TestFrameScaleForPortrait verifies that in portrait orientation k makes the
+// rotated design (designH wide × designW tall) fit into sw×sh, and that
+// presentGeoM's portrait fit-scale with those frame dims is ≈1.
+func TestFrameScaleForPortrait(t *testing.T) {
+	const designW = hudWidth + windowWidth // 1080
+	const designH = windowHeight           // 600
+
+	cases := []struct {
+		name   string
+		sw, sh int
+	}{
+		{
+			// Portrait phone at 3× DPI: 1080×1920 device px.
+			// Rotated footprint = 600×1080; k = min(1080/600, 1920/1080) = min(1.8, 1.777) = 1.777.
+			// frame = round(1080*1.777)×round(600*1.777) = 1920×1067.
+			name: "portrait 1080×1920 at 3×",
+			sw:   1080, sh: 1920,
+		},
+		{
+			// Portrait phone at 2× DPI: 750×1334.
+			// Rotated: k = min(750/600, 1334/1080) = min(1.25, 1.235) = 1.235.
+			name: "portrait 750×1334 at 2×",
+			sw:   750, sh: 1334,
+		},
+		{
+			// Portrait tablet: 1536×2048 device px.
+			// Rotated: k = min(1536/600, 2048/1080) = min(2.56, 1.896) = 1.896.
+			name: "portrait 1536×2048 tablet",
+			sw:   1536, sh: 2048,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			k := frameScaleFor(tc.sw, tc.sh, true)
+			if k <= 0 {
+				t.Fatalf("frameScaleFor portrait returned k=%v, want >0", k)
+			}
+			fw := float64(int(math.Round(designW * k)))
+			fh := float64(int(math.Round(designH * k)))
+			sw := float64(tc.sw)
+			sh := float64(tc.sh)
+			// In portrait, presentGeoM's scale = min(sw/fh, sh/fw).
+			fitScale := math.Min(sw/fh, sh/fw)
+			if !nearF64(fitScale, 1.0, 0.02) {
+				t.Errorf("portrait presentGeoM fit-scale = %.4f, want ≈1.0 (frame %.0f×%.0f, screen %d×%d, k=%.4f)",
+					fitScale, fw, fh, tc.sw, tc.sh, k)
+			}
+			// Frame area should be significantly smaller than design×s² for a 3× DPI device.
+			// Just verify frame fits within the screen bounds in its rotated footprint.
+			if fw > sh+1 || fh > sw+1 {
+				t.Errorf("rotated frame %.0f×%.0f doesn't fit in screen %d×%d", fh, fw, tc.sw, tc.sh)
+			}
+		})
+	}
+}
+
+// TestFrameScaleForPresentsAtScale1 is a combined parametric test: for
+// landscape and portrait, the frame allocated at round(design*k) makes
+// presentGeoM's scale ≈1, confirming over-resolution is eliminated.
+func TestFrameScaleForPresentsAtScale1(t *testing.T) {
+	const designW = float64(hudWidth + windowWidth) // 1080
+	const designH = float64(windowHeight)           // 600
+
+	cases := []struct {
+		name     string
+		sw, sh   int
+		portrait bool
+	}{
+		{"landscape 1920×1080", 1920, 1080, false},
+		{"landscape 2560×1440", 2560, 1440, false},
+		{"portrait 1080×1920", 1080, 1920, true},
+		{"portrait 768×1024", 768, 1024, true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			k := frameScaleFor(tc.sw, tc.sh, tc.portrait)
+			fw := float64(int(math.Round(designW * k)))
+			fh := float64(int(math.Round(designH * k)))
+			sw := float64(tc.sw)
+			sh := float64(tc.sh)
+			var fitScale float64
+			if !tc.portrait {
+				fitScale = math.Min(sw/fw, sh/fh)
+			} else {
+				fitScale = math.Min(sw/fh, sh/fw)
+			}
+			if !nearF64(fitScale, 1.0, 0.02) {
+				t.Errorf("%s: fit-scale=%.4f want ≈1.0 (k=%.4f, frame %.0f×%.0f, screen %d×%d)",
+					tc.name, fitScale, k, fw, fh, tc.sw, tc.sh)
+			}
+		})
+	}
+}
+
+// abs returns the absolute value of an int.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // TestScreenToFrameLandscapeSameSize verifies that when screen and frame are the
 // same size (no letterboxing, no rotation) the mapping is the identity.
 func TestScreenToFrameLandscapeSameSize(t *testing.T) {
