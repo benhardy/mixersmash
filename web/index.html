@@ -41,10 +41,76 @@
             background: #000;
             touch-action: none;
         }
+
+        #loading {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2rem;
+        }
+
+        #loading img {
+            max-width: 80vw;
+            height: auto;
+            display: block;
+        }
+
+        #progress-container {
+            width: 80vw;
+            max-width: 480px;
+            height: 12px;
+            background: #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        #progress-fill {
+            height: 100%;
+            width: 0%;
+            background: #fff;
+            border-radius: 6px;
+            transition: width 0.1s linear;
+        }
+
+        #startbtn {
+            display: none;
+            padding: 1.2rem 3rem;
+            font-size: 1.6rem;
+            font-family: sans-serif;
+            font-weight: bold;
+            color: #000;
+            background: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #load-error {
+            display: none;
+            color: #f66;
+            font-family: sans-serif;
+            font-size: 1rem;
+            text-align: center;
+            padding: 0 1rem;
+        }
     </style>
 </head>
 <body>
-    <div id="loading" style="display:none; position:fixed; bottom:1rem; right:1rem; color:#fff; font-family:sans-serif; z-index:35;">Loading&hellip;</div>
+    <div id="loading">
+        <img src="title.png" alt="MixerSmash">
+        <div id="progress-container">
+            <div id="progress-fill"></div>
+        </div>
+        <button id="startbtn">Start</button>
+        <div id="load-error"></div>
+    </div>
 
     <script src="wasm_exec.js"></script>
     <script>
@@ -83,51 +149,84 @@
         window.addEventListener('touchend', onGesture, true);
         window.addEventListener('click', onGesture, true);
 
+        // Fallback estimate for WASM size when Content-Length is absent or mismatched
+        // (common when served with gzip transfer encoding).
+        var WASM_EST = 22 * 1024 * 1024;
+
+        var progressFill = document.getElementById('progress-fill');
+        var progressContainer = document.getElementById('progress-container');
+        var startBtn = document.getElementById('startbtn');
+        var loadError = document.getElementById('load-error');
+
+        function setProgress(pct) {
+            var clamped = Math.max(0, Math.min(100, pct));
+            progressFill.style.width = clamped + '%';
+        }
+
+        function showStartButton() {
+            progressContainer.style.display = 'none';
+            startBtn.style.display = 'block';
+        }
+
+        function showError(msg) {
+            progressContainer.style.display = 'none';
+            startBtn.style.display = 'none';
+            loadError.style.display = 'block';
+            loadError.textContent = msg;
+        }
+
+        startBtn.addEventListener('click', function () {
+            enterImmersive();
+            document.getElementById('loading').style.display = 'none';
+        });
+
         (async function () {
             const go = new Go();
 
-            async function loadWasm() {
-                // Prefer streaming instantiation (requires correct MIME type: application/wasm).
-                // Fall back to ArrayBuffer instantiation for servers that serve .wasm as
-                // application/octet-stream or similar (common with simple static servers).
-                if (typeof WebAssembly.instantiateStreaming === "function") {
-                    try {
-                        const result = await WebAssembly.instantiateStreaming(
-                            fetch("mixersmash.wasm"),
-                            go.importObject
-                        );
-                        return result;
-                    } catch (streamErr) {
-                        console.warn(
-                            "WebAssembly.instantiateStreaming failed, falling back to ArrayBuffer instantiation:",
-                            streamErr
-                        );
-                    }
-                }
-
-                // ArrayBuffer fallback.
-                const resp = await fetch("mixersmash.wasm");
-                const bytes = await resp.arrayBuffer();
-                return WebAssembly.instantiate(bytes, go.importObject);
-            }
-
-            const t0 = performance.now();
-            let loaded = false;
-            setTimeout(function () {
-                if (!loaded) {
-                    document.getElementById('loading').style.display = 'block';
-                }
-            }, 1000);
-
             try {
-                const result = await loadWasm();
-                loaded = true;
-                document.getElementById('loading').style.display = 'none';
+                const resp = await fetch('mixersmash.wasm');
+                if (!resp.ok) {
+                    throw new Error('Fetch failed: ' + resp.status + ' ' + resp.statusText);
+                }
+
+                var contentLength = Number(resp.headers.get('Content-Length'));
+                // Use Content-Length only when it looks like a plausible uncompressed WASM size.
+                // Values below 1 MB are likely the compressed transfer size from gzip encoding.
+                var total = (contentLength && contentLength >= 1024 * 1024) ? contentLength : WASM_EST;
+
+                var reader = resp.body.getReader();
+                var chunks = [];
+                var received = 0;
+
+                while (true) {
+                    var read = await reader.read();
+                    if (read.done) break;
+                    chunks.push(read.value);
+                    received += read.value.byteLength;
+                    // If received exceeds the Content-Length (gzip mismatch), switch to estimate.
+                    if (received > total) {
+                        total = WASM_EST;
+                    }
+                    setProgress(received / total * 100);
+                }
+
+                // Concatenate all chunks into a single Uint8Array.
+                var bytes = new Uint8Array(received);
+                var offset = 0;
+                for (var i = 0; i < chunks.length; i++) {
+                    bytes.set(chunks[i], offset);
+                    offset += chunks[i].byteLength;
+                }
+
+                setProgress(100);
+
+                var result = await WebAssembly.instantiate(bytes, go.importObject);
                 go.run(result.instance);
+
+                showStartButton();
             } catch (err) {
-                loaded = true;
-                document.getElementById('loading').style.display = 'none';
-                console.error("Failed to load mixersmash.wasm:", err);
+                console.error('Failed to load mixersmash.wasm:', err);
+                showError('Failed to load game: ' + err.message);
             }
         })();
     </script>
