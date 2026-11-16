@@ -45,6 +45,10 @@ const (
 	healthEpsilon       = float32(0.001)
 
 	respawnCells = false // set false to leave gaps at top instead of spawning new cells
+
+	// showOrientationDebug controls the small orientation/dimension readout drawn
+	// in the bottom-left corner of the frame each tick.  Set false to hide it.
+	showOrientationDebug = true
 )
 
 // compositeSpriteRefSize is the logical fallback side length used only before
@@ -965,6 +969,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw the HUD strip in the left portion of the frame.
 	g.drawHUD(g.frame, hudDevW)
 
+	// Draw orientation debug readout (gated by showOrientationDebug const).
+	g.drawOrientationDebug(g.frame)
+
 	// Present the frame onto the actual screen.
 	screen.Fill(color.Black)
 	fw := float64(frameW)
@@ -1294,6 +1301,32 @@ func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
 	opts.GeoM.Translate(0, float64(startY))
 	opts.Filter = ebiten.FilterNearest
 	frame.DrawImage(tmp, &opts)
+}
+
+// drawOrientationDebug renders a one-line orientation/dimension readout in the
+// bottom-left corner of the frame, gated by the showOrientationDebug const.
+// It is intentionally small (1× basicfont, no scale) so it does not obscure gameplay.
+func (g *Game) drawOrientationDebug(frame *ebiten.Image) {
+	if !showOrientationDebug {
+		return
+	}
+	orient := "L"
+	if g.portrait {
+		orient = "P"
+	}
+	angle := deviceOrientationAngle()
+	angleStr := strconv.Itoa(angle)
+	if angle < 0 {
+		angleStr = "n/a"
+	}
+	line := fmt.Sprintf("%s %dx%d ang=%s sc=%.2f", orient, g.screenW, g.screenH, angleStr, g.renderScale)
+	hudFace := text.NewGoXFace(basicfont.Face7x13)
+	var opts text.DrawOptions
+	opts.ColorScale.ScaleWithColor(color.RGBA{0xFF, 0xFF, 0x00, 0xFF})
+	const marginBottom = 16
+	frameH := frame.Bounds().Dy()
+	opts.GeoM.Translate(2, float64(frameH-marginBottom))
+	text.Draw(frame, line, hudFace, &opts)
 }
 
 func main() {
