@@ -253,3 +253,59 @@ Connections are directed and hardcoded (explicit lists per creature), replacing 
 `scoreForKill`'s colour-matching bonuses can no longer fire (all 23 creatures have distinct colours). The bonuses remain in place; a scoring redesign around the connection/power mechanic is noted as a follow-up task.
 
 ---
+
+## Connection themes
+
+**Per-level theme interface**
+Connections and Power are no longer fixed on the creature type. A `connectionTheme` interface wraps the two concerns that vary per level: which creatures each creature connects to, and each creature's Power value. `setActiveTheme` recomputes every creature's Power and Connections and rebuilds the `1/Power`-weighted spawn CDF, so power distribution can differ between themes without changing creature definitions.
+
+**Two themes implemented**
+- *Colour theme* (default, level 1): each creature connects to its Power nearest neighbours by OKLab perceptual distance. The intent is a learnable entry point — a player can read approximate connections from colour proximity on-screen. This is the active theme.
+- *Random theme*: the former hardcoded per-creature connection lists, preserved as a named theme. Provided consistent behaviour while the theme architecture was being introduced.
+
+Same-type adjacency always triggers a kill regardless of which theme is active; this is enforced outside the theme.
+
+**Level progression between themes deferred**
+The mechanism for advancing a player from one theme to the next (trigger condition, transition animation, difficulty curve) is an open design question and is not yet implemented.
+
+---
+
+## Always-landscape rendering
+
+**Rotation instead of overlay**
+Rather than blocking portrait use with a "rotate your device" overlay, the game renders its scene into a fixed-size landscape frame and presents that frame to the real screen rotated 90° when the device is in portrait orientation. The user sees the game sideways and simply turns the phone; no interaction is blocked.
+
+**Two-seam design**
+The rotation is implemented at two narrow seams only:
+1. The `Draw` present transform rotates and translates the offscreen frame onto the actual screen.
+2. Input coordinates are unmapped through the inverse of that transform before reaching any game logic (`screenToFrame` / `screenToBoard`).
+
+No drawing, animation, shader, or HUD code was changed. `LayoutF` returns the real device-pixel screen dimensions; a fixed design frame holds the board. `screenToFrame` and `screenToBoard` are pure functions covered by unit tests.
+
+---
+
+## HUD
+
+**Left strip layout**
+A fixed-width vertical strip to the left of the board displays: an embedded title image, the current Level, theme instructions, Score, and the hovered piece as "Name – Power". The board origin is shifted right by an explicit pixel offset, and that offset is folded into the same `screenToFrame`/`screenToBoard` coordinate mapping that handles the landscape rotation, so the HUD imposes no additional coordinate logic elsewhere.
+
+**Cheap bitmap text**
+Text is rendered with `text/v2` and `basicfont` at approximately 3× scale on a `#9999AA` background strip. No shadow layer. Black text on the mid-grey strip provides sufficient contrast without a separate outline or drop-shadow pass.
+
+---
+
+## Mobile web shell
+
+**PWA manifest**
+A `manifest.webmanifest` declares `display: standalone` and `orientation: landscape`, enabling an installable app without browser chrome. Icons are referenced from the manifest. The rotate-device and tap-to-start overlays were removed; the in-game rotation (see Always-landscape rendering above) is the sole orientation mechanism.
+
+**Scroll and rubber-band suppression**
+`overscroll-behavior: none`, `touch-action: none`, and `touchmove` with `preventDefault` collectively kill pull-to-refresh and rubber-band scroll on both Android and iOS.
+
+**Fullscreen and orientation lock**
+On the first user gesture, the shell requests fullscreen and calls `screen.orientation.lock('landscape')` best-effort. On Android this locks to a single landscape orientation and hides the browser bars. On iOS both calls are ignored; the in-game rotation serves as the iOS fallback.
+
+**Lesson: orientation APIs are platform-fragmented**
+Locking to one orientation via `screen.orientation.lock` is the most reliable cross-platform escape from handling all four device orientations. Full four-orientation correctness (including the two 180°-wrong orientations on Android before the lock) would require reading `screen.orientation.angle` on every resize and applying a conditional transform — this is deferred. iOS has no orientation-lock API at all; the in-game rotation is permanent there.
+
+---
