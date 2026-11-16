@@ -51,6 +51,23 @@
         // Prevent pull-to-refresh and rubber-band scrolling on iOS and Android.
         document.addEventListener('touchmove', function(e) { e.preventDefault(); }, {passive: false});
 
+        // On the first user gesture, best-effort enter fullscreen and lock landscape.
+        // Wrapped in try/catch so iOS (no orientation.lock) silently no-ops.
+        // Does NOT preventDefault — the tap still reaches the game.
+        function goImmersive() {
+            try { if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen(); } catch (e) {}
+            try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape'); } catch (e) {}
+        }
+        function onFirstGesture() {
+            goImmersive();
+            window.removeEventListener('pointerdown', onFirstGesture, true);
+            window.removeEventListener('touchstart', onFirstGesture, true);
+            window.removeEventListener('click', onFirstGesture, true);
+        }
+        window.addEventListener('pointerdown', onFirstGesture, true);
+        window.addEventListener('touchstart', onFirstGesture, true);
+        window.addEventListener('click', onFirstGesture, true);
+
         (async function () {
             const go = new Go();
 
