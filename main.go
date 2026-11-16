@@ -1199,6 +1199,12 @@ func hudWrapText(text string, maxChars int) []string {
 // drawHUD renders the left HUD strip of g.frame.
 // hudDevW is the device-pixel width of the strip.
 func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
+	// Fill the HUD strip with a light background so the dark title image
+	// and black text are visible.
+	frameH := float64(frame.Bounds().Dy())
+	vector.FillRect(frame, 0, 0, float32(hudDevW), float32(frameH),
+		color.RGBA{0x99, 0x99, 0xAA, 0xFF}, false)
+
 	// Title image at the top of the HUD strip.
 	titleH := 0
 	if titleImage != nil {
@@ -1277,11 +1283,14 @@ func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
 
 	// Blit the temporary text image into the frame, scaled up by hudTextScale.
 	// FilterNearest preserves the crisp pixel edges of the bitmap font.
+	// ColorScale maps white glyph pixels to black (RGB×0) while preserving
+	// alpha, so the text renders as black on the #9999AA strip background.
 	startY := titleH + 4 // 4 px gap below the title image
 	var opts ebiten.DrawImageOptions
 	opts.GeoM.Scale(float64(hudTextScale), float64(hudTextScale))
 	opts.GeoM.Translate(0, float64(startY))
 	opts.Filter = ebiten.FilterNearest
+	opts.ColorScale.Scale(0, 0, 0, 1)
 	frame.DrawImage(tmp, &opts)
 }
 
