@@ -11,10 +11,10 @@ import (
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	text "github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+	"golang.org/x/image/font/basicfont"
 )
 
 const (
@@ -1164,9 +1164,10 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	}
 }
 
-// hudTextScale is the integer magnification factor applied to ebitenutil debug
-// text in the HUD.  The text is first rendered into a small temporary image at
-// 1× (6×8 px font) and then blit into the frame scaled up by this factor.
+// hudTextScale is the integer magnification factor applied to HUD text.
+// Text is first rendered into a small temporary image at 1× (basicfont
+// Face7x13: 7×13 px glyphs) and then blit into the frame scaled up by this
+// factor, giving blocky crisp 3× text with no drop shadow.
 const hudTextScale = 3
 
 // hudWrapText splits text into lines each no longer than maxChars characters,
@@ -1223,22 +1224,20 @@ func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
 		}
 	}
 
-	// Render text at 1× into a small temporary image, then blit it scaled up
-	// by hudTextScale.  This gives crisp, blocky magnified debug text without
-	// adding any font dependency.
-	//
-	// ebitenutil.DebugPrintAt uses a fixed 6×8 px bitmap font.
-	// tmpW = hudDevW / hudTextScale so that after Scale(3,3) the text fills
-	// the HUD strip width exactly.
+	// Render text at 1× into a small temporary image using basicfont.Face7x13
+	// (7×13 px glyphs, no built-in drop shadow), then blit it scaled up by
+	// hudTextScale.  tmpW = hudDevW / hudTextScale so that after Scale(3,3)
+	// the text fills the HUD strip width exactly.
 	tmpW := hudDevW / hudTextScale
 	if tmpW < 1 {
 		tmpW = 1
 	}
 
-	// debugFontW is the glyph width of the fixed ebitenutil bitmap font (px).
-	const debugFontW = 6
+	// basicFontW / basicFontH are the glyph cell dimensions of Face7x13.
+	const basicFontW = 7
+	const basicFontH = 13
 	// maxChars is the maximum characters per line that fit in tmpW.
-	maxChars := (tmpW - 2) / debugFontW // 2 px left-margin reserve
+	maxChars := (tmpW - 2) / basicFontW // 2 px left-margin reserve
 	if maxChars < 1 {
 		maxChars = 1
 	}
@@ -1267,30 +1266,33 @@ func (g *Game) drawHUD(frame *ebiten.Image, hudDevW int) {
 		}
 	}
 
-	// debugFontH is the glyph height of the fixed ebitenutil bitmap font (px).
-	const debugFontH = 8
-	lineSpacing := debugFontH + 2 // 2 px between lines at 1×
-	tmpH := lineSpacing*len(lines) + 2
+	// lineSpacing doubles the font height to leave a blank line between each
+	// rendered text line.
+	lineSpacing := basicFontH * 2
+	tmpH := lineSpacing*len(lines) + basicFontH
 	if tmpH < 1 {
 		tmpH = 1
 	}
 
+	hudFace := text.NewGoXFace(basicfont.Face7x13)
 	tmp := ebiten.NewImage(tmpW, tmpH)
 	const marginX = 2
 	for i, l := range lines {
-		ebitenutil.DebugPrintAt(tmp, l.s, marginX, i*lineSpacing)
+		var tOpts text.DrawOptions
+		tOpts.ColorScale.ScaleWithColor(color.Black)
+		tOpts.GeoM.Translate(float64(marginX), float64(i*lineSpacing))
+		text.Draw(tmp, l.s, hudFace, &tOpts)
 	}
 
 	// Blit the temporary text image into the frame, scaled up by hudTextScale.
 	// FilterNearest preserves the crisp pixel edges of the bitmap font.
-	// ColorScale maps white glyph pixels to black (RGB×0) while preserving
-	// alpha, so the text renders as black on the #9999AA strip background.
-	startY := titleH + 4 // 4 px gap below the title image
+	// Text is already drawn in black so no ColorScale hack is needed.
+	// startY is pushed down by several line-heights to clear the title image.
+	startY := titleH + basicFontH*hudTextScale // ~3 line-heights gap below title
 	var opts ebiten.DrawImageOptions
 	opts.GeoM.Scale(float64(hudTextScale), float64(hudTextScale))
 	opts.GeoM.Translate(0, float64(startY))
 	opts.Filter = ebiten.FilterNearest
-	opts.ColorScale.Scale(0, 0, 0, 1)
 	frame.DrawImage(tmp, &opts)
 }
 
