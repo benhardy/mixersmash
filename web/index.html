@@ -37,13 +37,70 @@
             touch-action: none;
         }
 
+        #start-overlay {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: sans-serif;
+            font-size: 1.5rem;
+            z-index: 30;
+            cursor: pointer;
+        }
+
+        #portrait-overlay {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            color: #fff;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-family: sans-serif;
+            font-size: 1.3rem;
+            text-align: center;
+            padding: 1rem;
+            z-index: 40;
+        }
+
+        @media (orientation: portrait) {
+            #portrait-overlay {
+                display: flex;
+            }
+
+            canvas {
+                pointer-events: none;
+            }
+        }
+
+        @media (orientation: landscape) {
+            #portrait-overlay {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body>
+    <div id="start-overlay">Tap to play</div>
+    <div id="portrait-overlay">Rotate your device to landscape</div>
     <div id="loading" style="display:none; position:fixed; bottom:1rem; right:1rem; color:#fff; font-family:sans-serif; z-index:35;">Loading&hellip;</div>
 
     <script src="wasm_exec.js"></script>
     <script>
+        document.getElementById('start-overlay').addEventListener('click', async function (e) {
+            e.preventDefault();
+            this.style.display = 'none';
+            try {
+                await document.documentElement.requestFullscreen();
+            } catch (_) {}
+            try {
+                await screen.orientation.lock('landscape');
+            } catch (_) {}
+        });
+
         (async function () {
             const go = new Go();
 
