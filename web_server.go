@@ -29,6 +29,12 @@ func main() {
 		log.Fatalf("mime.AddExtensionType: %v", err)
 	}
 
+	// Ensure .webmanifest files are served with the correct MIME type so
+	// browsers recognise the PWA manifest.
+	if err := mime.AddExtensionType(".webmanifest", "application/manifest+json"); err != nil {
+		log.Fatalf("mime.AddExtensionType: %v", err)
+	}
+
 	fs := http.FileServer(http.Dir(*dir))
 	http.Handle("/", fs)
 
