@@ -6,6 +6,15 @@
 - Report failures and unresolved items as plainly as successes.
 - No emojis. Prose by default; lists only for parallel items.
 
+# Project documents
+
+These documents outlive any single session. Keep them current as part of doing the work, not afterwards.
+
+- **CLAUDE.md** (this file): how to work here — conventions, commands, engine gotchas, workflow. Update when a convention or tooling fact changes.
+- **HANDOFF.md**: the cold-start map for an agent picking the project up fresh — what it is, build/run/deploy, the architecture file map, current state, where to look next. Keep the current-state and architecture map honest as the project evolves.
+- **DECISIONS.md**: a chronological record of design decisions and their rationale — WHY an approach was chosen, which alternatives were rejected and why, and what constraints or user preferences drove it. It is NOT a commit log or changelog: do not restate what changed or how the code works (git and the source already hold that). Add an entry when a decision shapes the design or would otherwise get re-litigated later; skip routine implementation detail. Naming the key technique in a phrase is fine; describing the code is not.
+- **ROADMAP.md**: parked ideas and deferred work, each with the trigger or evidence that would justify picking it up. Remove items when done or abandoned.
+
 # Agent Behaviour
 
 ## Step budget (orchestrator and subagents)
