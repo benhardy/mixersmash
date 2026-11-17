@@ -181,7 +181,7 @@ The scene is rendered at `LayoutF × DeviceScaleFactor` so sprites are crisp at 
 The display name is MixerSmash; the Go module and build artifacts remain `go2d`. Rename was limited to the module declaration and artifact names — the directory and import path were not changed.
 
 **WASM build target and GitHub Pages hosting**
-Added `GOOS=js GOARCH=wasm` as a build target for a browser-playable version. A local Go web server (`web_server.go`, `//go:build ignore`) serves the WASM build during development. The browser version is hosted on GitHub Pages (static files, deploy action).
+Added `GOOS=js GOARCH=wasm` as a build target for a browser-playable version. A local Go web server (`tools/web_server/main.go`, `//go:build ignore`) serves the WASM build during development. The browser version is hosted on GitHub Pages (static files, deploy action).
 
 ---
 
@@ -240,7 +240,7 @@ Verified on desktop browsers and mobile (Chrome/Android, Safari/iOS).
 Two perceptual colour metrics were prototyped: redmean (weighted RGB Euclidean) and a hue-weighted HSV distance. A palette comparison was also explored. All were discarded: colour similarity produced perceptually surprising matches (players could not reliably predict which neighbours would be affected) and gave no strategic depth. Colour is now purely visual identity and plays no role in matching.
 
 **Reduced palette and OKLCh derivation**
-Creature count reduced from ~57 to 23. The new palette is generated in OKLCh (two lightness bands: L=0.68 and L=0.52, moderate chroma 0.13, 12 hues evenly spaced) for perceptually even, pleasant, non-neon colours. Values are baked as sRGB constants with a documented derivation in `cmd/gen_palette`. Colour-distance code (redmean, hue-weighted HSV, closest-colour neighbour selection) was removed as dead.
+Creature count reduced from ~57 to 23. The new palette is generated in OKLCh (two lightness bands: L=0.68 and L=0.52, moderate chroma 0.13, 12 hues evenly spaced) for perceptually even, pleasant, non-neon colours. Values are baked as sRGB constants with a documented derivation in `tools/gen_palette`. Colour-distance code (redmean, hue-weighted HSV, closest-colour neighbour selection) was removed as dead.
 
 **Connection graph mechanic**
 Each `Creature` has a `Power` (Fibonacci values 2/3/5/8; distribution 10/7/4/2 creatures per tier) and a `Connections` list of length equal to its Power. When a clicked creature dies, its victims are:

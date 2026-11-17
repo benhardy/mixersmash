@@ -25,7 +25,7 @@ wasm:
 # A static file server is required: browsers cannot fetch .wasm via file://.
 # Run `make wasm` first to build the WebAssembly binary before serving.
 serve:
-	go run web_server.go
+	go run tools/web_server/main.go
 
 test:
 	go test ./...

@@ -1,7 +1,7 @@
 //go:build ignore
 
 // web_server.go is a standalone local HTTP server for testing the WASM build.
-// Run it with: go run web_server.go
+// Run it with: go run tools/web_server/main.go
 // Or via:      make serve
 //
 // It serves the web/ directory (or the directory given by -dir) and ensures

@@ -21,7 +21,7 @@ Authoritative targets are in `Makefile`. Summary:
 - `make mac` — builds `mixersmash_darwin_arm64` (CGO off)
 - `make linux` — builds `mixersmash_linux_amd64`
 - `make wasm` — builds `web/mixersmash.wasm`, copies `wasm_exec.js` from GOROOT (Go 1.24+ uses `lib/wasm/`; older uses `misc/wasm/`), writes `web/wasm-meta.js` with the binary size for the progress bar
-- `make serve` — runs `web_server.go` as a local HTTP server for `web/` (required; browsers reject `.wasm` over `file://`)
+- `make serve` — runs `tools/web_server/main.go` as a local HTTP server for `web/` (required; browsers reject `.wasm` over `file://`)
 - `make test` — `go test ./...`
 - `make lint` — `golangci-lint run ./...` (binary at `/home/ubuntu/go/bin/golangci-lint`, v2)
 - `make hooks` — sets `core.hooksPath .githooks`; the pre-commit hook runs gofmt, vet, build, test, and golangci-lint
@@ -44,7 +44,7 @@ All source is in the flat `main` package at the repo root.
 - `lerp.go` — easing and bezier helpers
 - `shaders.go` — Kage gel/glow shader source strings
 - `orientation_js.go` / `orientation_other.go` — build-tagged orientation lock and fullscreen (JS-only on WASM; no-ops elsewhere)
-- `web_server.go` — minimal static file server for `make serve`
+- `tools/web_server/main.go` — minimal static file server for `make serve`
 - `web/` — `index.html` (loading screen, progress bar, Start overlay), `manifest.webmanifest` (PWA), `wasm_exec.js`, `mixersmash.wasm`, `wasm-meta.js`, icons, `title.png`
 
 **Rendering model.** Every frame is drawn into an offscreen `*ebiten.Image` (the "frame"), then presented to the real screen via `presentGeoM`: identity in landscape, 90-degree rotation in portrait. Input coordinates are mapped back through the inverse of that same `GeoM` (`mapping.go`). The board canvas and HUD are model-derived caches; they are re-synced from the model on every settle to `stateWaiting` via `repaintGrid` / `enterWaiting`.

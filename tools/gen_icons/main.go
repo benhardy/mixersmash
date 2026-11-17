@@ -3,7 +3,7 @@
 // gen_icons generates PWA icon PNGs for MixerSmash.
 // Run from the repo root:
 //
-//	go run cmd/gen_icons/main.go
+//	go run tools/gen_icons/main.go
 //
 // Output: web/icon-192.png and web/icon-512.png
 //
