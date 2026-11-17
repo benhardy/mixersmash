@@ -60,7 +60,7 @@ const (
 
 	// showPerfDebug controls the per-frame performance readout drawn in the
 	// bottom-right corner of the frame.  Set false to compile it out entirely.
-	showPerfDebug = true
+	showPerfDebug = false
 )
 
 // compositeSpriteRefSize is the logical fallback side length used only before
