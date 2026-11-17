@@ -191,7 +191,7 @@ func newGameState(grid *Grid) *Game {
 // circa-2003 Apple Aqua jelly-button look rendered via the gel fragment shader:
 //
 //  1. Base image — an sz×sz opaque image filled with cr.Color, then the creature
-//     glyph cr.Glyph (tinted darkerShade(cr.Color)) drawn directly onto it.  The
+//     glyph cr.Glyph (tinted glyphTint(cr.Color)) drawn directly onto it.  The
 //     base image is fully opaque so its rgb values equal straight (non-premultiplied) rgb.
 //  2. Gel shader pass — gelShaderSrc runs via DrawRectShader, sampling the base
 //     image (Images[0]) at each pixel to obtain the local colour, then applies
@@ -246,7 +246,7 @@ func (g *Game) compositeCachedSprite(cr *Creature) *ebiten.Image {
 	}
 	str := string(cr.Glyph)
 	w, h := text.Measure(str, face, 0)
-	tint := darkerShade(clr)
+	tint := glyphTint(clr)
 	var drawOpts text.DrawOptions
 	drawOpts.ColorScale.ScaleWithColor(tint)
 	nudgeY := float64(sz) * 0.03

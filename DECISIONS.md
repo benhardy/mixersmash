@@ -329,6 +329,19 @@ When the jank was first reported, the cause was not obvious: candidates included
 
 ---
 
+## Creature palette rework (2026-11-17)
+
+**Colour encodes power tier, not individual identity**
+The previous palette (12 hues × 2 lightness bands) was visually dull and the hues too similar to tell apart at a glance. The new palette is tier-keyed: one near-black for the single power-8 creature, three vivid unique hues for the three power-5 creatures, three vivid hues each shared by a power-3 pair, and six very-light near-white pastels distributed across the thirteen power-2 creatures. Within a shared-colour tier the emoji glyph is now the sole differentiator between creatures. Alternative rejected: keeping a unique colour per creature — this would require more hues than can be reliably distinguished and obscures tier information.
+
+**Luminance-adaptive glyph tint (OKLab L threshold)**
+The previous approach tinted the glyph a fixed darker shade of the base colour. On the near-black power-8 tier a darker shade is effectively invisible; on light pastel cells it is faint. The new approach (`glyphTint`) uses an OKLab lightness threshold: near-white on dark cells, near-black on light cells. This is essential because the glyph is now the sole within-tier differentiator.
+
+**Chroma tuned to post-shader appearance**
+The gel/bevel shader visibly desaturates cells. Saturated-hue chroma is set higher than looks correct in raw RGBA, and the pastel tier is kept at high L and low chroma, so that the on-screen result after the shader passes looks right. The source values are intentionally not "balanced" in isolation; the visual check on the running game is the reference.
+
+---
+
 ## Process (2026-11-17)
 
 **ROADMAP for parked ideas**

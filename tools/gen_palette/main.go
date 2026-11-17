@@ -1,13 +1,27 @@
 //go:build ignore
 
-// gen_palette generates 23 OKLCh-derived sRGB colours for the creature palette.
+// gen_palette generates the creature colour palette for the new power-tier scheme.
 //
-// Parameters:
-//   - 12 evenly-spaced hues starting at 15°: 15,45,75,105,135,165,195,225,255,285,315,345
-//   - Chroma C = 0.13
-//   - Lightness band L1 = 0.68  → 12 colours (one per hue)
-//   - Lightness band L2 = 0.52  → 11 colours (drop hue index 11, i.e. 345°)
-//     Total = 23 unique colours.
+// Output: 13 colours as color.RGBA literals printed to stdout (paste into
+// creaturePalette in creatures.go). Optionally also writes a 640x480 PNG
+// swatch sheet showing every generated colour as a filled rectangle.
+//
+// Usage:
+//
+//	go run tools/gen_palette/main.go [output.png]
+//
+// If output.png is supplied the swatch sheet is written there. If omitted the
+// palette literals are still printed to stdout.
+//
+//  1. Near-black (power 8, 1 creature): #334433
+//     2–4. 3 vivid hues at 0°,120°,240° of a 6-hue OKLCh wheel (power 5, 3 creatures)
+//     5–7. 3 vivid hues at 60°,180°,300° of that same wheel (power 3, 6 creatures)
+//     8–13. 6 pastel hues at the in-between angles (power 2, 13 creatures, round-robin)
+//
+// OKLCh parameters for the 6 saturated hues:
+//
+//	Base hue offset: 30° (keeps hue 0°+30°=30° in orange-red, visually warm anchor)
+//	Lightness L = 0.72, Chroma C = 0.22
 //
 // OKLCh → OKLab: a = C*cos(h_rad), b = C*sin(h_rad)
 // OKLab → linear sRGB (Ottosson matrix):
@@ -26,7 +40,12 @@ package main
 
 import (
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"math"
+	"os"
 )
 
 func oklchToRGBA(L, C, hDeg float64) (r, g, b uint8) {
@@ -76,57 +95,161 @@ func oklchToRGBA(L, C, hDeg float64) (r, g, b uint8) {
 	return uint8(math.Round(R * 255)), uint8(math.Round(G * 255)), uint8(math.Round(B * 255))
 }
 
+type entry struct {
+	r, g, b uint8
+	label   string
+}
+
 func main() {
-	const C = 0.13
-	const L1 = 0.68
-	const L2 = 0.52
+	// Fixed OKLCh parameters for the 6 saturated hues.
+	// L=0.72 is bright enough to look vivid on a dark board; C=0.17 gives noticeable
+	// saturation without clipping too aggressively.
+	const L = 0.72
+	const C = 0.22
+	// Base offset so the first hue sits at 30° (warm orange-red anchor).
+	const baseHue = 30.0
 
-	hues := [12]float64{15, 45, 75, 105, 135, 165, 195, 225, 255, 285, 315, 345}
-
-	type colour struct {
-		r, g, b uint8
-		L, h    float64
+	// 6-hue wheel evenly spaced 60° apart, starting at baseHue.
+	// power-5 creatures use hues at indices 0,2,4 (0°,120°,240° relative).
+	// power-3 creatures use hues at indices 1,3,5 (60°,180°,300° relative).
+	hues := [6]float64{
+		baseHue + 0,   // 30°
+		baseHue + 60,  // 90°
+		baseHue + 120, // 150°
+		baseHue + 180, // 210°
+		baseHue + 240, // 270°
+		baseHue + 300, // 330°
 	}
 
-	var colours []colour
+	var palette []entry
 
-	// Band L1: all 12 hues
-	for _, h := range hues {
-		r, g, b := oklchToRGBA(L1, C, h)
-		colours = append(colours, colour{r, g, b, L1, h})
+	// 1. Near-black — power 8 (1 creature)
+	palette = append(palette, entry{0x33, 0x44, 0x33, "power-8 / near-black #334433"})
+
+	// 2–4. Power-5 hues: indices 0,2,4 → 30°,150°,270°
+	power5Labels := []string{
+		fmt.Sprintf("power-5 / hue 30° (%.0f°)", hues[0]),
+		fmt.Sprintf("power-5 / hue 150° (%.0f°)", hues[2]),
+		fmt.Sprintf("power-5 / hue 270° (%.0f°)", hues[4]),
+	}
+	for i, idx := range []int{0, 2, 4} {
+		r, g, b := oklchToRGBA(L, C, hues[idx])
+		palette = append(palette, entry{r, g, b, power5Labels[i]})
 	}
 
-	// Band L2: 11 hues (drop hue index 11 = 345°)
-	for i, h := range hues {
-		if i == 11 {
-			break
-		}
-		r, g, b := oklchToRGBA(L2, C, h)
-		colours = append(colours, colour{r, g, b, L2, h})
+	// 5–7. Power-3 hues: indices 1,3,5 → 90°,210°,330°
+	power3Labels := []string{
+		fmt.Sprintf("power-3 / hue 90° (%.0f°)", hues[1]),
+		fmt.Sprintf("power-3 / hue 210° (%.0f°)", hues[3]),
+		fmt.Sprintf("power-3 / hue 330° (%.0f°)", hues[5]),
+	}
+	for i, idx := range []int{1, 3, 5} {
+		r, g, b := oklchToRGBA(L, C, hues[idx])
+		palette = append(palette, entry{r, g, b, power3Labels[i]})
 	}
 
-	fmt.Printf("Total colours: %d\n\n", len(colours))
-
-	// Check for duplicates
-	seen := make(map[[3]uint8]int)
-	for i, c := range colours {
-		key := [3]uint8{c.r, c.g, c.b}
-		if prev, ok := seen[key]; ok {
-			fmt.Printf("COLLISION: index %d and index %d both = {%d,%d,%d} L=%.2f h=%.0f\n",
-				prev, i, c.r, c.g, c.b, c.L, c.h)
-		}
-		seen[key] = i
-	}
-
-	fmt.Println("// OKLCh-derived sRGB colours:")
-	fmt.Println("// L1=0.68, L2=0.52, C=0.13")
-	fmt.Println("// Hues (degrees): 15,45,75,105,135,165,195,225,255,285,315,345")
-	fmt.Println("// Band L1 (indices 0-11): all 12 hues")
-	fmt.Println("// Band L2 (indices 12-22): hues 15-315 (11 hues, 345° dropped)")
+	fmt.Println("// Creature colour palette — 13 entries (1 dark + 6 vivid + 6 pastel).")
+	fmt.Println("// Paste into creaturePalette in creatures.go.")
+	fmt.Printf("// OKLCh parameters for saturated hues: L=%.2f, C=%.2f, base hue=%.0f°\n", L, C, baseHue)
 	fmt.Println()
-	for i, c := range colours {
-		hex := fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
-		fmt.Printf("// [%2d] L=%.2f h=%5.0f° %s  → color.RGBA{R: %3d, G: %3d, B: %3d, A: 255}\n",
-			i, c.L, c.h, hex, c.r, c.g, c.b)
+	for _, e := range palette {
+		fmt.Printf("color.RGBA{R: %3d, G: %3d, B: %3d, A: 255}, // %s\n",
+			e.r, e.g, e.b, e.label)
 	}
+
+	// 6 pastel hues at the "in-between" hues: halfway between the vivid hues.
+	// vivid hues: 30°,90°,150°,210°,270°,330° → in-between: 60°,120°,180°,240°,300°,0°(360°).
+	// OKLCh: L=0.91 (high lightness), C=0.12 (moderate chroma — survives bevel shader desaturation).
+	const Lp = 0.97
+	const Cp = 0.04
+
+	pastelHues := [6]float64{
+		baseHue + 30,  // 60°
+		baseHue + 90,  // 120°
+		baseHue + 150, // 180°
+		baseHue + 210, // 240°
+		baseHue + 270, // 300°
+		baseHue + 330, // 360° (= 0°)
+	}
+
+	fmt.Println()
+	fmt.Printf("// 6 pastel hues for power-2 creatures: L=%.2f, C=%.2f, in-between hues.\n", Lp, Cp)
+
+	var pastels []entry
+	for i, h := range pastelHues {
+		r, g, b := oklchToRGBA(Lp, Cp, h)
+		lbl := fmt.Sprintf("pastel %d / hue %.0f°", i+1, h)
+		fmt.Printf("color.RGBA{R: %3d, G: %3d, B: %3d, A: 255}, // %s\n",
+			r, g, b, lbl)
+		pastels = append(pastels, entry{r, g, b, lbl})
+	}
+
+	// PNG swatch sheet — only written when a path is supplied.
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: go run tools/gen_palette/main.go <output.png>")
+		fmt.Fprintln(os.Stderr, "  (no output.png given; palette literals printed to stdout only)")
+		os.Exit(1)
+	}
+
+	outPath := os.Args[1]
+	if err := writeSwatch(outPath, palette, pastels); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing swatch: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "wrote %s\n", outPath)
+}
+
+// writeSwatch builds a 640×480 PNG with three tier rows:
+//
+//	Row 0 (160px): 1 dark swatch centred horizontally
+//	Row 1 (160px): 6 vivid hues (power-5 at [1..3], power-3 at [4..6])
+//	Row 2 (160px): 6 pastel hues
+//
+// Each cell is padded by 4px on each side so colour boundaries are visible.
+func writeSwatch(path string, palette []entry, pastels []entry) error {
+	const (
+		imgW    = 640
+		imgH    = 480
+		rows    = 3
+		rowH    = imgH / rows // 160
+		padding = 4
+	)
+
+	img := image.NewRGBA(image.Rect(0, 0, imgW, imgH))
+
+	// Background: dark grey
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{R: 30, G: 30, B: 30, A: 255}), image.Point{}, draw.Src)
+
+	fillRect := func(x, y, w, h int, c color.RGBA) {
+		r := image.Rect(x+padding, y+padding, x+w-padding, y+h-padding)
+		draw.Draw(img, r, image.NewUniform(c), image.Point{}, draw.Src)
+	}
+
+	// Row 0: single dark swatch centred.
+	darkC := color.RGBA{R: palette[0].r, G: palette[0].g, B: palette[0].b, A: 255}
+	cellW := imgW / 6 // same width as a vivid cell so it aligns visually
+	startX := (imgW - cellW) / 2
+	fillRect(startX, 0, cellW, rowH, darkC)
+
+	// Row 1: 6 vivid hues (palette[1..6]).
+	vivid := palette[1:7]
+	cellWV := imgW / len(vivid)
+	for i, e := range vivid {
+		c := color.RGBA{R: e.r, G: e.g, B: e.b, A: 255}
+		fillRect(i*cellWV, rowH, cellWV, rowH, c)
+	}
+
+	// Row 2: 6 pastel hues.
+	cellWP := imgW / len(pastels)
+	for i, e := range pastels {
+		c := color.RGBA{R: e.r, G: e.g, B: e.b, A: 255}
+		fillRect(i*cellWP, 2*rowH, cellWP, rowH, c)
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, img)
 }

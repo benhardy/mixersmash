@@ -707,16 +707,109 @@ func TestCreaturePaletteSize(t *testing.T) {
 	}
 }
 
-// TestCreaturePaletteColorsUnique verifies that no two entries share the same
-// color.RGBA value.
+// TestCreaturePaletteColorsUnique verifies the colour-tier structure after
+// replacing the single cream with six pastel tints for Power=2 creatures.
+//
+// Expected structure:
+//   - 13 distinct colours total: 1 dark + 3 power-5 + 3 power-3 + 6 pastels.
+//   - Power=5 creatures use 3 distinct colours, each appearing exactly once.
+//   - Power=3 creatures use 3 distinct colours, each appearing exactly twice.
+//   - Power=2 creatures use exactly 6 distinct colours, all with high luminance
+//     (OKLab L >= 0.80, i.e. faint pastels), disjoint from the vivid/dark colours.
+//   - Exactly one Power=8 singleton colour.
+//
+// Exact RGBA values are intentionally not pinned so colour tuning does not
+// break this test.
 func TestCreaturePaletteColorsUnique(t *testing.T) {
-	seen := make(map[color.RGBA]int)
-	for i, e := range creaturePalette {
-		if prev, ok := seen[e.Color]; ok {
-			t.Errorf("creaturePalette[%d] and creaturePalette[%d] share color %v",
-				prev, i, e.Color)
+	// Count how many creatures share each distinct colour, and record which power
+	// tiers use each colour.
+	freq := make(map[color.RGBA]int)
+	colorPower := make(map[color.RGBA]map[int]bool)
+	for _, e := range creaturePalette {
+		freq[e.Color]++
+		if colorPower[e.Color] == nil {
+			colorPower[e.Color] = make(map[int]bool)
 		}
-		seen[e.Color] = i
+		colorPower[e.Color][e.Power] = true
+	}
+
+	if len(freq) != 13 {
+		t.Errorf("creaturePalette has %d distinct colours, want exactly 13", len(freq))
+	}
+
+	// --- Power=5: 3 distinct colours, each used exactly once. ---
+	power5Colors := make(map[color.RGBA]bool)
+	for _, e := range creaturePalette {
+		if e.Power == 5 {
+			power5Colors[e.Color] = true
+		}
+	}
+	if len(power5Colors) != 3 {
+		t.Errorf("Power=5 creatures have %d distinct colours, want 3", len(power5Colors))
+	}
+	for c := range power5Colors {
+		if freq[c] != 1 {
+			t.Errorf("Power=5 colour %v used by %d creatures, want 1", c, freq[c])
+		}
+	}
+
+	// --- Power=3: 3 distinct colours, each used exactly twice. ---
+	power3Colors := make(map[color.RGBA]bool)
+	for _, e := range creaturePalette {
+		if e.Power == 3 {
+			power3Colors[e.Color] = true
+		}
+	}
+	if len(power3Colors) != 3 {
+		t.Errorf("Power=3 creatures have %d distinct colours, want 3", len(power3Colors))
+	}
+	for c := range power3Colors {
+		if freq[c] != 2 {
+			t.Errorf("Power=3 colour %v used by %d creatures, want 2", c, freq[c])
+		}
+	}
+
+	// --- Power=2: 6 distinct pastel colours, all high-luminance, disjoint from vivid/dark. ---
+	power2Colors := make(map[color.RGBA]bool)
+	for _, e := range creaturePalette {
+		if e.Power == 2 {
+			power2Colors[e.Color] = true
+		}
+	}
+	if len(power2Colors) != 6 {
+		t.Errorf("Power=2 creatures have %d distinct colours, want 6", len(power2Colors))
+	}
+
+	// All pastel colours must have OKLab L >= 0.80 (high lightness).
+	for c := range power2Colors {
+		lab := sRGBToOKLab(c)
+		if lab[0] < 0.80 {
+			t.Errorf("Power=2 colour %v has OKLab L=%.4f, want >= 0.80", c, lab[0])
+		}
+	}
+
+	// Pastel colours must be disjoint from vivid/dark colours.
+	nonPower2Colors := make(map[color.RGBA]bool)
+	for _, e := range creaturePalette {
+		if e.Power != 2 {
+			nonPower2Colors[e.Color] = true
+		}
+	}
+	for c := range power2Colors {
+		if nonPower2Colors[c] {
+			t.Errorf("Power=2 colour %v also appears in a non-Power=2 tier", c)
+		}
+	}
+
+	// --- Power=8: exactly one singleton colour. ---
+	power8Singles := 0
+	for c, n := range freq {
+		if n == 1 && colorPower[c][8] {
+			power8Singles++
+		}
+	}
+	if power8Singles != 1 {
+		t.Errorf("expected exactly 1 singleton colour for Power=8, got %d", power8Singles)
 	}
 }
 
@@ -769,13 +862,13 @@ func TestCreaturePaletteRequiredNames(t *testing.T) {
 }
 
 // TestCreaturePalettePowerDistribution verifies that the palette has exactly
-// 10 creatures with Power=2, 7 with Power=3, 4 with Power=5, and 2 with Power=8.
+// 13 creatures with Power=2, 6 with Power=3, 3 with Power=5, and 1 with Power=8.
 func TestCreaturePalettePowerDistribution(t *testing.T) {
 	counts := make(map[int]int)
 	for _, e := range creaturePalette {
 		counts[e.Power]++
 	}
-	want := map[int]int{2: 10, 3: 7, 5: 4, 8: 2}
+	want := map[int]int{2: 13, 3: 6, 5: 3, 8: 1}
 	for power, wantCount := range want {
 		if got := counts[power]; got != wantCount {
 			t.Errorf("Power=%d count = %d, want %d", power, got, wantCount)
@@ -829,44 +922,54 @@ func TestCreaturePaletteNoDuplicateConnections(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// darkerShade
+// glyphTint
 // ---------------------------------------------------------------------------
 
-// TestDarkerShade verifies the floor(channel*0.15) formula and that alpha is
-// always forced to 255 regardless of input alpha.
-func TestDarkerShade(t *testing.T) {
+// TestGlyphTint verifies the luminance-adaptive tint: dark cells get near-white,
+// bright cells get near-black, and alpha is always 255.
+func TestGlyphTint(t *testing.T) {
+	nearBlack := color.RGBA{R: 30, G: 25, B: 20, A: 255}
+	nearWhite := color.RGBA{R: 230, G: 225, B: 215, A: 255}
+
 	cases := []struct {
 		name  string
 		input color.RGBA
 		want  color.RGBA
 	}{
 		{
-			name:  "mixed channels",
-			input: color.RGBA{R: 200, G: 100, B: 50, A: 255},
-			want:  color.RGBA{R: 30, G: 15, B: 7, A: 255},
+			// Near-black cell (OKLab L well below 0.65) → near-white tint.
+			name:  "near-black cell gets near-white tint",
+			input: color.RGBA{R: 51, G: 68, B: 51, A: 255},
+			want:  nearWhite,
 		},
 		{
-			name:  "all 255",
-			input: color.RGBA{R: 255, G: 255, B: 255, A: 255},
-			want:  color.RGBA{R: 38, G: 38, B: 38, A: 255},
+			// Cream cell (OKLab L well above 0.65) → near-black tint.
+			name:  "cream cell gets near-black tint",
+			input: color.RGBA{R: 242, G: 237, B: 224, A: 255},
+			want:  nearBlack,
 		},
 		{
-			name:  "all zero",
-			input: color.RGBA{R: 0, G: 0, B: 0, A: 255},
-			want:  color.RGBA{R: 0, G: 0, B: 0, A: 255},
+			// Vivid blue (OKLab L=0.6918 >= 0.65) → near-black tint.
+			name:  "vivid blue gets near-black tint",
+			input: color.RGBA{R: 113, G: 149, B: 255, A: 255},
+			want:  nearBlack,
 		},
 		{
-			name:  "alpha forced to 255 when input alpha differs",
-			input: color.RGBA{R: 200, G: 100, B: 50, A: 100},
-			want:  color.RGBA{R: 30, G: 15, B: 7, A: 255},
+			// Vivid red (OKLab L=0.6892 >= 0.65) → near-black tint; also confirms A=255.
+			name:  "vivid red gets near-black tint and A=255",
+			input: color.RGBA{R: 255, G: 93, B: 72, A: 255},
+			want:  nearBlack,
 		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := darkerShade(tc.input)
+			got := glyphTint(tc.input)
 			if got != tc.want {
-				t.Errorf("darkerShade(%v) = %v, want %v", tc.input, got, tc.want)
+				t.Errorf("glyphTint(%v) = %v, want %v", tc.input, got, tc.want)
+			}
+			if got.A != 255 {
+				t.Errorf("glyphTint(%v).A = %d, want 255", tc.input, got.A)
 			}
 		})
 	}
@@ -1195,7 +1298,7 @@ func TestRandomThemeConnections(t *testing.T) {
 }
 
 // TestRandomThemePowerDistribution verifies that randomTheme preserves the
-// original Fibonacci power distribution (10×2, 7×3, 4×5, 2×8).
+// power distribution (13×2, 6×3, 3×5, 1×8).
 func TestRandomThemePowerDistribution(t *testing.T) {
 	setActiveTheme(randomTheme{})
 	defer setActiveTheme(activeTheme)
@@ -1204,7 +1307,7 @@ func TestRandomThemePowerDistribution(t *testing.T) {
 	for _, e := range creaturePalette {
 		counts[e.Power]++
 	}
-	want := map[int]int{2: 10, 3: 7, 5: 4, 8: 2}
+	want := map[int]int{2: 13, 3: 6, 5: 3, 8: 1}
 	for power, wantCount := range want {
 		if got := counts[power]; got != wantCount {
 			t.Errorf("randomTheme: Power=%d count=%d, want %d", power, got, wantCount)
@@ -1274,7 +1377,7 @@ func TestColourThemeConnections(t *testing.T) {
 }
 
 // TestColourThemePowerDistribution verifies that colourTheme preserves the
-// original Fibonacci power distribution (10×2, 7×3, 4×5, 2×8).
+// power distribution (13×2, 6×3, 3×5, 1×8).
 func TestColourThemePowerDistribution(t *testing.T) {
 	setActiveTheme(colourTheme{})
 	defer setActiveTheme(activeTheme)
@@ -1283,7 +1386,7 @@ func TestColourThemePowerDistribution(t *testing.T) {
 	for _, e := range creaturePalette {
 		counts[e.Power]++
 	}
-	want := map[int]int{2: 10, 3: 7, 5: 4, 8: 2}
+	want := map[int]int{2: 13, 3: 6, 5: 3, 8: 1}
 	for power, wantCount := range want {
 		if got := counts[power]; got != wantCount {
 			t.Errorf("colourTheme: Power=%d count=%d, want %d", power, got, wantCount)
