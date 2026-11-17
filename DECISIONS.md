@@ -309,3 +309,29 @@ On the first user gesture, the shell requests fullscreen and calls `screen.orien
 Locking to one orientation via `screen.orientation.lock` is the most reliable cross-platform escape from handling all four device orientations. Full four-orientation correctness (including the two 180°-wrong orientations on Android before the lock) would require reading `screen.orientation.angle` on every resize and applying a conditional transform — this is deferred. iOS has no orientation-lock API at all; the in-game rotation is permanent there.
 
 ---
+
+## Performance and rendering (2026-11-17)
+
+**Frame sized to presented resolution (f582b7a)**
+The offscreen frame and canvas were allocated at `designSize × DeviceScaleFactor` but presented at approximately 0.6× that, so the compositor was processing around 3× more pixels than necessary. `frameScaleFor(sw, sh, portrait)` now sizes the frame and canvas to the actual presented resolution; `deviceCellSize` and sprite dimensions follow from that. Reallocation only triggers when the computed dimensions change. Input mapping inverts `presentGeoM` as before — no logic changes outside the two allocation and presentation seams.
+
+**Loading overlay held until landscape (7860a1e)**
+Fullscreen and orientation lock are asynchronous, so after tapping Start the board briefly rendered sideways in portrait before snapping to landscape. The overlay now stays up until the browser reports landscape via `orientationchange`/`resize` plus a 100ms poll, with a 1.5s timeout fallback for browsers where the lock never fires (iOS). The sideways flash is no longer visible.
+
+**Wall-clock animation timing (a24e928)**
+Animation progress was derived from `ebiten.Tick()`, which advances at 60/sec. On a high-refresh phone, `Draw` is called at 100–120 fps, so consecutive frames returned the same interpolated fraction and then jumped — producing microstutter. `elapsedFraction` now takes `(start, now time.Time, duration time.Duration)` and interpolates against wall time, so every rendered frame shows the correct sub-tick position regardless of display refresh rate. Animation durations are preserved as `time.Duration` constants (shuffle/drop 300ms, victim 400ms, target 250ms). Logic TPS stays 60; rendering smoothness is now refresh-rate independent. This was the primary fix for the reported janky animations.
+
+**GC at settle (ba683e1)**
+Under heavy play, occasional ~40ms frame spikes appeared while fps otherwise ran at 90–100 and the bake count was constant — consistent with periodic Go-WASM GC pauses. `enterWaiting()` now calls `runtime.GC()` once per settle, when the screen is static between moves. This cut spikes to ~33ms. A GOGC tuning approach was considered but rejected to avoid changing game feel.
+
+**Perf diagnostic readout (09aaa16, bf8f47a; disabled in 64f1892)**
+A temporary on-screen readout tracked `ActualFPS`/`ActualTPS`, sprites per frame, cumulative bake count, worst-frame-ms, and a latched 2-second window of min-fps/max-sprites. Gated behind `const showPerfDebug`; no `syscall/js` calls. Diagnosis: the jank was not draw-bound (fps held at 90–100, low-fps dips only to ~70) and not a rebake storm (bake count constant at one-per-creature) — the cause was cadence judder (fps > tps) and periodic GC spikes. The readout remains in the codebase, disabled (`showPerfDebug = false`).
+
+---
+
+## Process (2026-11-17)
+
+**ROADMAP.md added (81b1b1e)**
+Parks two deferred performance items: GOGC tuning and draw-call reduction, both gated on a `runtime.NumGC`-based measurement; and deferring the `LayoutF` sprite-cache clear to settle rather than mid-animation to avoid a re-bake storm on scale change.
+
+---
