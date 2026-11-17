@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"math/rand"
+	"time"
 )
 
 // Cell holds a grid cell's creature reference and health (1.0 = full, 0.0 = dead).
@@ -296,11 +297,20 @@ func applyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 	return result
 }
 
-// elapsedFraction returns how far through a phase we are as a 0→1 float32.
-// currentTick is the game tick at the time of evaluation, startTick is when
-// the phase began, and durationTicks is the total length of the phase.
-func elapsedFraction(currentTick, startTick, durationTicks int64) float32 {
-	return float32(currentTick-startTick) / float32(durationTicks)
+// elapsedFraction returns how far through a phase we are as a 0→1 float32,
+// clamped to [0, 1].  start is the wall-clock time when the phase began,
+// now is the current wall-clock time, and duration is the total phase length.
+// Using wall-clock time (rather than game ticks) allows smooth interpolation
+// at display refresh rates above 60 Hz.
+func elapsedFraction(start, now time.Time, duration time.Duration) float32 {
+	f := float32(now.Sub(start)) / float32(duration)
+	if f < 0 {
+		return 0
+	}
+	if f > 1 {
+		return 1
+	}
+	return f
 }
 
 // deviceCellCenter returns the device-pixel centre of a grid cell for the given

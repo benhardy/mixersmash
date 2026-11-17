@@ -36,10 +36,16 @@ const (
 	stateVictimMoving     = 4
 	stateColumnCollapsing = 5
 
-	shuffleTicks    = 18        // 0.3s at 60tps
-	dropTicks       = 18        // 0.3s at 60tps
-	victimTicks     = int64(24) // 0.4s at 60tps
-	targetAnimTicks = int64(15) // 0.25s at 60 TPS
+	// Animation durations expressed as wall-clock time.
+	// Values are equivalent to the original tick counts at 60 TPS:
+	//   shuffleDuration  = 18 ticks / 60 TPS = 300ms
+	//   dropDuration     = 18 ticks / 60 TPS = 300ms
+	//   victimDuration   = 24 ticks / 60 TPS = 400ms
+	//   targetAnimDuration = 15 ticks / 60 TPS = 250ms
+	shuffleDuration    = 18 * time.Second / 60 // 300ms
+	dropDuration       = 18 * time.Second / 60 // 300ms
+	victimDuration     = 24 * time.Second / 60 // 400ms
+	targetAnimDuration = 15 * time.Second / 60 // 250ms
 
 	healthDecrementKeep = float32(0.75)
 	healthMin           = float32(0.562)
@@ -71,7 +77,7 @@ type Game struct {
 	canvas       *ebiten.Image
 	frame        *ebiten.Image // landscape design-size offscreen frame; board renders here
 	currentState int           // which state are we in?
-	animStart    int64         // when did the current animation phase start?
+	animStart    time.Time     // when did the current animation phase start?
 	actionCol    int           // the column an action is happening
 	actionRow    int           // the row any given action is happening
 	moveAnims    []MoveAnim    // used for both shuffle and drop phases
@@ -96,7 +102,7 @@ type Game struct {
 
 	// target cell bounce animation fields
 	targetAnimating    bool
-	targetAnimStart    int64
+	targetAnimStart    time.Time
 	targetAnimStartR   float32
 	targetAnimPeakR    float32
 	targetAnimEndR     float32
@@ -158,7 +164,6 @@ func newGameState(grid *Grid) *Game {
 	return &Game{
 		grid:            grid,
 		currentState:    stateWaiting,
-		animStart:       0,
 		actionCol:       -1,
 		actionRow:       -1,
 		cellCount:       grid.Cols * grid.Rows,
@@ -485,7 +490,7 @@ func (g *Game) buildCollapseAnims() bool {
 		}
 	}
 
-	g.animStart = ebiten.Tick()
+	g.animStart = time.Now()
 	g.currentState = stateColumnCollapsing
 	return true
 }
@@ -527,7 +532,7 @@ func (g *Game) settleAfterRemoval() {
 // updateColumnCollapsing waits for the horizontal column-collapse animation to
 // complete, commits cell positions to canvas, and returns to stateWaiting.
 func (g *Game) updateColumnCollapsing() error {
-	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, dropTicks)
+	elapsed := elapsedFraction(g.animStart, time.Now(), dropDuration)
 	if elapsed >= 1.0 {
 		dcs := g.deviceCellSize
 		for _, anim := range g.moveAnims {
@@ -756,7 +761,7 @@ func (g *Game) handleTargetDeath(col, row int) {
 			x0, y0 := ncol*dcs, nrow*dcs
 			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
 		}
-		g.animStart = ebiten.Tick()
+		g.animStart = time.Now()
 		g.currentState = stateVictimMoving
 	} else {
 		// No victim — score the kill and go straight to drop.
@@ -766,7 +771,7 @@ func (g *Game) handleTargetDeath(col, row int) {
 			g.cellCount += spawned
 		}
 		if len(g.moveAnims) > 0 {
-			g.animStart = ebiten.Tick()
+			g.animStart = time.Now()
 			g.currentState = stateDropping
 		} else {
 			g.settleAfterRemoval()
@@ -798,7 +803,7 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	x0, y0 := col*dcs, row*dcs
 	g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
 	g.targetAnimating = true
-	g.targetAnimStart = ebiten.Tick()
+	g.targetAnimStart = time.Now()
 	g.targetAnimStartR = maxR * oldHealth
 	g.targetAnimPeakR = maxR * oldHealth * 1.1
 	g.targetAnimEndR = maxR * cell.Health
@@ -856,14 +861,14 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 
 	g.moveAnims = anims
 	g.currentState = stateShuffling
-	g.animStart = ebiten.Tick()
+	g.animStart = time.Now()
 	return true
 }
 
 // updateVictimMoving advances the victim movement animation and transitions to
 // stateDropping (or stateWaiting) when the animation completes.
 func (g *Game) updateVictimMoving() error {
-	t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
+	t := elapsedFraction(g.animStart, time.Now(), victimDuration)
 	if t >= 1.0 {
 		// All victims arrived — score the kill, kill them, and trigger drop.
 		victimColors := make([]color.RGBA, len(g.victims))
@@ -887,7 +892,7 @@ func (g *Game) updateVictimMoving() error {
 			g.cellCount += spawned
 		}
 		if len(g.moveAnims) > 0 {
-			g.animStart = ebiten.Tick()
+			g.animStart = time.Now()
 			g.currentState = stateDropping
 		} else {
 			g.settleAfterRemoval()
@@ -899,7 +904,7 @@ func (g *Game) updateVictimMoving() error {
 // updateShuffling waits for the shuffle animation to complete, then commits
 // final cell positions and returns to stateWaiting.
 func (g *Game) updateShuffling() error {
-	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, shuffleTicks)
+	elapsed := elapsedFraction(g.animStart, time.Now(), shuffleDuration)
 	if elapsed >= 1.0 {
 		dcs := g.deviceCellSize
 		for _, anim := range g.moveAnims {
@@ -919,7 +924,7 @@ func (g *Game) updateShuffling() error {
 // cell positions and returns to stateWaiting (or stateColumnCollapsing when
 // empty columns remain after the drop settles).
 func (g *Game) updateDropping() error {
-	elapsed := elapsedFraction(ebiten.Tick(), g.animStart, dropTicks)
+	elapsed := elapsedFraction(g.animStart, time.Now(), dropDuration)
 	if elapsed >= 1.0 {
 		dcs := g.deviceCellSize
 		for _, anim := range g.moveAnims {
@@ -953,7 +958,7 @@ func (g *Game) Update() error {
 	g.victimHints = g.victimHints[:0]
 
 	if g.targetAnimating {
-		if elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks) >= 1.0 {
+		if elapsedFraction(g.targetAnimStart, time.Now(), targetAnimDuration) >= 1.0 {
 			g.targetAnimating = false
 			g.drawCell(g.actionCol, g.actionRow, 1.0)
 		}
@@ -1132,7 +1137,7 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	if !g.targetAnimating {
 		return
 	}
-	t := elapsedFraction(ebiten.Tick(), g.targetAnimStart, targetAnimTicks)
+	t := elapsedFraction(g.targetAnimStart, time.Now(), targetAnimDuration)
 	t = min(t, 1.0)
 	var r float32
 	if t < 0.5 {
@@ -1160,11 +1165,11 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	xOff := float32(xOffset)
 	if len(g.moveAnims) > 0 {
 		var t float32
-		ticks := int64(shuffleTicks)
+		dur := shuffleDuration
 		if g.currentState == stateDropping || g.currentState == stateColumnCollapsing {
-			ticks = dropTicks
+			dur = dropDuration
 		}
-		t = elapsedFraction(ebiten.Tick(), g.animStart, ticks)
+		t = elapsedFraction(g.animStart, time.Now(), dur)
 		t = min(t, 1.0)
 		dcs := g.deviceCellSize
 		if dcs <= 0 {
@@ -1190,7 +1195,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	}
 
 	if g.currentState == stateVictimMoving {
-		t := elapsedFraction(ebiten.Tick(), g.animStart, victimTicks)
+		t := elapsedFraction(g.animStart, time.Now(), victimDuration)
 		t = min(t, 1.0)
 		for _, v := range g.victims {
 			var cx, cy float32
@@ -1489,7 +1494,7 @@ func main() {
 	grid := NewGrid(gridCols, gridRows)
 
 	game := newGameState(grid)
-	game.animStart = ebiten.Tick()
+	game.animStart = time.Now()
 
 	glyphFont, err := loadGlyphFont()
 	if err != nil {

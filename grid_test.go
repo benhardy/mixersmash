@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // cellWithColor returns a Cell with the given colour wrapped in a Creature.
@@ -103,13 +104,20 @@ func TestStateConstants(t *testing.T) {
 	}
 }
 
-// TestTickConstants documents the duration of each animation phase in ticks.
-func TestTickConstants(t *testing.T) {
-	if shuffleTicks != 18 {
-		t.Errorf("shuffleTicks = %d, want 18", shuffleTicks)
+// TestDurationConstants documents the wall-clock duration of each animation
+// phase and verifies that they equal the original tick-based values at 60 TPS.
+func TestDurationConstants(t *testing.T) {
+	if shuffleDuration != 300*time.Millisecond {
+		t.Errorf("shuffleDuration = %v, want 300ms", shuffleDuration)
 	}
-	if dropTicks != 18 {
-		t.Errorf("dropTicks = %d, want 18", dropTicks)
+	if dropDuration != 300*time.Millisecond {
+		t.Errorf("dropDuration = %v, want 300ms", dropDuration)
+	}
+	if victimDuration != 400*time.Millisecond {
+		t.Errorf("victimDuration = %v, want 400ms", victimDuration)
+	}
+	if targetAnimDuration != 250*time.Millisecond {
+		t.Errorf("targetAnimDuration = %v, want 250ms", targetAnimDuration)
 	}
 }
 
@@ -118,28 +126,50 @@ func TestTickConstants(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestElapsedFraction verifies the 0→1 progress formula across representative
-// inputs including the start, mid-point, and completion tick.
+// inputs including the start, mid-point, and completion time, with clamping.
 func TestElapsedFraction(t *testing.T) {
+	base := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	dur := 400 * time.Millisecond
+
 	cases := []struct {
-		name     string
-		current  int64
-		start    int64
-		duration int64
-		want     float32
+		name    string
+		elapsed time.Duration
+		want    float32
 	}{
-		{"zero elapsed", 10, 10, 5, 0.0},
-		{"half elapsed", 12, 10, 4, 0.5},
-		{"full elapsed", 15, 10, 5, 1.0},
-		{"over elapsed", 20, 10, 5, 2.0},
-		{"one tick in", 11, 10, 10, 0.1},
+		{"zero elapsed", 0, 0.0},
+		{"half elapsed", 200 * time.Millisecond, 0.5},
+		{"full elapsed", 400 * time.Millisecond, 1.0},
+		{"over elapsed clamped", 800 * time.Millisecond, 1.0},
+		{"one tenth in", 40 * time.Millisecond, 0.1},
 	}
 	for _, tc := range cases {
-		got := elapsedFraction(tc.current, tc.start, tc.duration)
-		if got != tc.want {
-			t.Errorf("%s: elapsedFraction(%d, %d, %d) = %v, want %v",
-				tc.name, tc.current, tc.start, tc.duration, got, tc.want)
-		}
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := elapsedFraction(base, base.Add(tc.elapsed), dur)
+			if got != tc.want {
+				t.Errorf("elapsedFraction elapsed=%v dur=%v = %v, want %v",
+					tc.elapsed, dur, got, tc.want)
+			}
+		})
 	}
+
+	// Sub-tick smoothness: two instants within the same 1/60s tick window must
+	// produce different fractions, proving wall-clock resolution is used.
+	t.Run("sub-tick smoothness", func(t *testing.T) {
+		start := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+		tickWindow := time.Second / 60 // ~16.67ms
+		now1 := start.Add(tickWindow / 3)
+		now2 := start.Add(2 * tickWindow / 3)
+		f1 := elapsedFraction(start, now1, shuffleDuration)
+		f2 := elapsedFraction(start, now2, shuffleDuration)
+		if f1 == f2 {
+			t.Errorf("sub-tick: elapsedFraction at %v and %v within same tick window returned identical fraction %v; wall-clock not used",
+				now1.Sub(start), now2.Sub(start), f1)
+		}
+		if f1 >= f2 {
+			t.Errorf("sub-tick: fraction should increase with time: f1=%v f2=%v", f1, f2)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -156,8 +186,8 @@ func TestNewGameStateInitialFields(t *testing.T) {
 	if g.currentState != stateWaiting {
 		t.Errorf("currentState = %d, want stateWaiting (%d)", g.currentState, stateWaiting)
 	}
-	if g.animStart != 0 {
-		t.Errorf("animStart = %d, want 0", g.animStart)
+	if !g.animStart.IsZero() {
+		t.Errorf("animStart = %v, want zero time.Time", g.animStart)
 	}
 	if g.actionCol != -1 {
 		t.Errorf("actionCol = %d, want -1", g.actionCol)
