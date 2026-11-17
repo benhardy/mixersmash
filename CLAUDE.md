@@ -84,6 +84,16 @@ The repo ships `.githooks/pre-commit` which runs gofmt, vet, build, test, and go
 - Avoid per frame: `ebiten.NewImage` allocations (reuse/cache); `syscall/js` calls (expensive JS boundary crossings — cache results, throttle, and gate debug readouts behind a `const debugHUD = false`); re-rendering static UI (cache the HUD to an `*ebiten.Image` with a dirty-check; re-render only when content or size changes); `text.NewGoXFace` allocation (hoist to a package-level var); `AppendTouchIDs` slice allocations (reuse a persistent buffer).
 - Do not invalidate the per-creature sprite cache mid-animation. Defer `LayoutF` scale-change clears to the next settle; clearing during an animation triggers a re-bake storm.
 
+# Headless visual capture
+
+To build and screenshot the running game without a display:
+
+```
+scripts/headless_capture.sh [output.png] [sleep_seconds]
+```
+
+Requires: Xvfb, ImageMagick (`import`), Mesa software GL. Run from the repo root. Default output is `/tmp/go2d_capture.png`; default warm-up is 4 seconds. The script starts its own Xvfb on `:98`, builds a fresh binary, runs the game, captures a full-screen PNG, then kills both processes. Use this for palette/rendering checks after colour changes.
+
 # Debugging workflow
 - Bisect before theorising. When a bug "started happening," git stash / check the last commit to confirm committed-vs-uncommitted, then narrow to the introducing change. Hunt the mechanism only after.
 - Commit each change after its own verification (a visual check for rendering changes). Keep the uncommitted suspect set to one thing; do not stack several unverified changes.
