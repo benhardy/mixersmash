@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -522,6 +523,9 @@ func (g *Game) repaintGrid() {
 func (g *Game) enterWaiting() {
 	g.repaintGrid()
 	g.currentState = stateWaiting
+	// Force a GC collection while the screen is static between moves, so the
+	// collector does not trigger mid-animation and cause visible frame spikes.
+	runtime.GC()
 }
 
 // settleAfterRemoval is called at every settle point that follows a cell
