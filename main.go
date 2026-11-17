@@ -1520,7 +1520,7 @@ func (g *Game) drawPerfDebug(frame *ebiten.Image) {
 }
 
 func main() {
-	ebiten.SetWindowSize(windowWidth, windowHeight)
+	ebiten.SetWindowSize(hudWidth+windowWidth, windowHeight)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowTitle("go2d grid")
 	ebiten.SetWindowClosingHandled(false)
