@@ -147,6 +147,16 @@ type Game struct {
 	worstWindowStart  time.Time
 	prevWindowWorstMs float64
 
+	// Min-FPS and max-sprite-count tracking over the same 2s window.
+	// minFpsWindow is the lowest ActualFPS sample seen in the current window
+	// (-1 means no sample yet).  maxSprWindow is the highest spritesThisFrame
+	// seen in the current window.  The prev* fields hold the completed window's
+	// values for display (same latch pattern as prevWindowWorstMs).
+	minFpsWindow     float64
+	maxSprWindow     int
+	prevWindowMinFps float64
+	prevWindowMaxSpr int
+
 	// HUD cache: g.hudImage is a persistent image of the HUD strip redrawn only
 	// when its content or size changes.  The last-rendered state is tracked in the
 	// fields below; a mismatch triggers a re-render.
@@ -1433,16 +1443,31 @@ func (g *Game) drawPerfDebug(frame *ebiten.Image) {
 		if deltaMs > g.worstFrameMs {
 			g.worstFrameMs = deltaMs
 		}
+
+		// Sample min-FPS and max-sprite-count for the current window.
+		fps := ebiten.ActualFPS()
+		if g.minFpsWindow < 0 || fps < g.minFpsWindow {
+			g.minFpsWindow = fps
+		}
+		if g.spritesThisFrame > g.maxSprWindow {
+			g.maxSprWindow = g.spritesThisFrame
+		}
+
 		// Advance the 2-second window when it has elapsed.
 		if g.worstWindowStart.IsZero() {
 			g.worstWindowStart = now
 		} else if now.Sub(g.worstWindowStart) >= 2*time.Second {
 			g.prevWindowWorstMs = g.worstFrameMs
+			g.prevWindowMinFps = g.minFpsWindow
+			g.prevWindowMaxSpr = g.maxSprWindow
 			g.worstFrameMs = deltaMs
+			g.minFpsWindow = fps
+			g.maxSprWindow = g.spritesThisFrame
 			g.worstWindowStart = now
 		}
 	} else {
 		g.worstWindowStart = now
+		g.minFpsWindow = -1
 	}
 	g.lastDrawTime = now
 
@@ -1450,6 +1475,7 @@ func (g *Game) drawPerfDebug(frame *ebiten.Image) {
 	line1 := fmt.Sprintf("fps %.0f  tps %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
 	line2 := fmt.Sprintf("max %.1fms", g.prevWindowWorstMs)
 	line3 := fmt.Sprintf("spr %d  bk %d", g.spritesThisFrame, g.bakeCount)
+	line4 := fmt.Sprintf("lo %.0f  spr^ %d", g.prevWindowMinFps, g.prevWindowMaxSpr)
 
 	const scale = 3.0
 	const lineSpacing = 13 // basicfont.Face7x13 glyph height
@@ -1460,6 +1486,7 @@ func (g *Game) drawPerfDebug(frame *ebiten.Image) {
 	w1, _ := text.Measure(line1, hudFace, 0)
 	w2, _ := text.Measure(line2, hudFace, 0)
 	w3, _ := text.Measure(line3, hudFace, 0)
+	w4, _ := text.Measure(line4, hudFace, 0)
 	maxW := w1
 	if w2 > maxW {
 		maxW = w2
@@ -1467,8 +1494,11 @@ func (g *Game) drawPerfDebug(frame *ebiten.Image) {
 	if w3 > maxW {
 		maxW = w3
 	}
+	if w4 > maxW {
+		maxW = w4
+	}
 	rectW := float32(maxW*scale + padX*2)
-	rectH := float32((lineSpacing*3)*scale + padY*2)
+	rectH := float32((lineSpacing*4)*scale + padY*2)
 
 	// Dark semi-transparent backing rect for legibility.
 	vector.FillRect(frame, 0, 0, rectW, rectH, color.RGBA{0, 0, 0, 180}, false)
@@ -1476,7 +1506,7 @@ func (g *Game) drawPerfDebug(frame *ebiten.Image) {
 	// Draw each line scaled 3x, white, top-left.
 	var opts text.DrawOptions
 	opts.ColorScale.ScaleWithColor(color.RGBA{0xFF, 0xFF, 0xFF, 0xFF})
-	for i, l := range []string{line1, line2, line3} {
+	for i, l := range []string{line1, line2, line3, line4} {
 		opts.GeoM.Reset()
 		opts.GeoM.Scale(scale, scale)
 		y := padY + float64(i)*lineSpacing*scale + lineSpacing*scale
