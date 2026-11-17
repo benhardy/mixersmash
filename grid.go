@@ -95,6 +95,22 @@ func cellFromPixel(px, py, cellSize int) (int, int) {
 	return px / cellSize, py / cellSize
 }
 
+// shuffleCount returns how many alive neighbours to include in a shuffle for a
+// clicked cell with the given Power and aliveCount alive 8-neighbours.
+//
+// Rules (Power values in play are 2, 3, 5, 8):
+//   - Power == 2 → 0 (no shuffle)
+//   - otherwise  → min(Power, aliveCount)
+func shuffleCount(power, aliveCount int) int {
+	if power == 2 {
+		return 0
+	}
+	if aliveCount < power {
+		return aliveCount
+	}
+	return power
+}
+
 // eightNeighbors returns all in-bounds (col+dx, row+dy) for dx,dy in
 // {-1,0,1}×{-1,0,1} excluding (0,0).
 func eightNeighbors(col, row, cols, rows int) [][2]int {

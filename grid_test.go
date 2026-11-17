@@ -1476,6 +1476,62 @@ func TestSpawnCDFRebuiltAfterTheme(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// shuffleCount
+// ---------------------------------------------------------------------------
+
+// TestShuffleCount verifies the pure helper that maps (power, aliveCount) to the
+// number of neighbours to shuffle.
+//
+// Rules:
+//   - Power == 2            → 0 for any aliveCount
+//   - aliveCount == 0       → 0 for any power
+//   - otherwise             → min(power, aliveCount)
+func TestShuffleCount(t *testing.T) {
+	cases := []struct {
+		name       string
+		power      int
+		aliveCount int
+		want       int
+	}{
+		// Power-2 cases: always 0 regardless of neighbours.
+		{name: "power2 alive0", power: 2, aliveCount: 0, want: 0},
+		{name: "power2 alive1", power: 2, aliveCount: 1, want: 0},
+		{name: "power2 alive8", power: 2, aliveCount: 8, want: 0},
+
+		// Zero alive neighbours: always 0 regardless of power.
+		{name: "power3 alive0", power: 3, aliveCount: 0, want: 0},
+		{name: "power5 alive0", power: 5, aliveCount: 0, want: 0},
+		{name: "power8 alive0", power: 8, aliveCount: 0, want: 0},
+
+		// Power-3: min(3, alive).
+		{name: "power3 alive1", power: 3, aliveCount: 1, want: 1},
+		{name: "power3 alive2", power: 3, aliveCount: 2, want: 2},
+		{name: "power3 alive3", power: 3, aliveCount: 3, want: 3},
+		{name: "power3 alive8", power: 3, aliveCount: 8, want: 3},
+
+		// Power-5: min(5, alive).
+		{name: "power5 alive3", power: 5, aliveCount: 3, want: 3},
+		{name: "power5 alive5", power: 5, aliveCount: 5, want: 5},
+		{name: "power5 alive8", power: 5, aliveCount: 8, want: 5},
+
+		// Power-8: min(8, alive).
+		{name: "power8 alive4", power: 8, aliveCount: 4, want: 4},
+		{name: "power8 alive7", power: 8, aliveCount: 7, want: 7},
+		{name: "power8 alive8", power: 8, aliveCount: 8, want: 8},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := shuffleCount(tc.power, tc.aliveCount)
+			if got != tc.want {
+				t.Errorf("shuffleCount(power=%d, alive=%d) = %d, want %d",
+					tc.power, tc.aliveCount, got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // sRGBToOKLab — unit tests
 // ---------------------------------------------------------------------------
 
@@ -1510,5 +1566,97 @@ func TestSRGBToOKLabRedGreenDistance(t *testing.T) {
 	dRO := dist(red, orange)
 	if dRG <= dRO {
 		t.Errorf("expected dist(red,green)=%f > dist(red,orange)=%f", dRG, dRO)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// commitCellAt — health decrement and power-2 instant-death rule
+// ---------------------------------------------------------------------------
+
+// TestNextHealthAfterHit exercises nextHealthAfterHit, the pure function that
+// encapsulates the cell-death health-decrement rule extracted from commitCellAt.
+func TestNextHealthAfterHit(t *testing.T) {
+	t.Run("power2 instant death", func(t *testing.T) {
+		cases := []float32{1.0, 0.75, 0.5625, 0.001}
+		for _, h := range cases {
+			if got := nextHealthAfterHit(2, h); got != 0 {
+				t.Errorf("nextHealthAfterHit(2, %v) = %v, want 0 (instant death)", h, got)
+			}
+		}
+	})
+
+	t.Run("power3 hit sequence", func(t *testing.T) {
+		// Hit 1: 1.0 * 0.75 = 0.75 > healthMin(0.562) → alive
+		h1 := nextHealthAfterHit(3, 1.0)
+		want1 := float32(1.0) * healthDecrementKeep
+		if h1 != want1 {
+			t.Errorf("hit 1: got %v, want %v", h1, want1)
+		}
+		if h1 <= 0 {
+			t.Errorf("hit 1: cell should survive, got health %v", h1)
+		}
+
+		// Hit 2: 0.75 * 0.75 = 0.5625 > healthMin(0.562) → alive
+		h2 := nextHealthAfterHit(3, h1)
+		want2 := want1 * healthDecrementKeep
+		if h2 != want2 {
+			t.Errorf("hit 2: got %v, want %v", h2, want2)
+		}
+		if h2 <= 0 {
+			t.Errorf("hit 2: cell should survive, got health %v", h2)
+		}
+
+		// Hit 3: 0.5625 * 0.75 = 0.421875 <= healthMin(0.562) → dead
+		h3 := nextHealthAfterHit(3, h2)
+		if h3 != 0 {
+			t.Errorf("hit 3: got %v, want 0 (should die at third hit)", h3)
+		}
+	})
+}
+
+// TestPower2CellDiesOnFirstHit verifies that a power-2 cell is killed by a
+// single hit via nextHealthAfterHit.
+func TestPower2CellDiesOnFirstHit(t *testing.T) {
+	if got := nextHealthAfterHit(2, 1.0); got != 0 {
+		t.Errorf("nextHealthAfterHit(2, 1.0) = %v, want 0 (instant death)", got)
+	}
+}
+
+// TestHigherPowerCellSurvivesFirstHit verifies that a power-3 cell is NOT
+// killed by a single hit.  After one application of healthDecrementKeep the
+// health is 0.75 — above both healthMin (0.562) and healthEpsilon (0.001),
+// so the cell remains alive.  A second hit brings health to 0.5625, which is
+// still above healthMin (0.562) by 0.0005, so the cell is still alive.
+// Only from three hits onward does the floor trigger and the cell die.
+//
+// Concretely this test asserts:
+//   - after hit 1: Health == 1.0 * 0.75 == 0.75 (> healthMin → alive)
+//   - after hit 2: Health == 0.75 * 0.75 == 0.5625 (> healthMin → alive)
+//   - after hit 3: Health would be 0.5625 * 0.75 == 0.421875; <= healthMin → dead
+func TestHigherPowerCellSurvivesFirstHit(t *testing.T) {
+	// Hit 1: must survive.
+	h1 := nextHealthAfterHit(3, 1.0)
+	if h1 <= 0 {
+		t.Errorf("power-3 cell after hit 1: Health = %v, want > 0 (cell should survive)", h1)
+	}
+	wantAfterHit1 := float32(1.0) * healthDecrementKeep
+	if h1 != wantAfterHit1 {
+		t.Errorf("power-3 cell after hit 1: Health = %v, want %v", h1, wantAfterHit1)
+	}
+
+	// Hit 2: must still survive.
+	h2 := nextHealthAfterHit(3, h1)
+	if h2 <= 0 {
+		t.Errorf("power-3 cell after hit 2: Health = %v, want > 0 (cell should survive)", h2)
+	}
+	wantAfterHit2 := wantAfterHit1 * healthDecrementKeep
+	if h2 != wantAfterHit2 {
+		t.Errorf("power-3 cell after hit 2: Health = %v, want %v", h2, wantAfterHit2)
+	}
+
+	// Hit 3: health drops to 0.421875 which is <= healthMin (0.562), so cell dies.
+	h3 := nextHealthAfterHit(3, h2)
+	if h3 != 0 {
+		t.Errorf("power-3 cell after hit 3: Health = %v, want 0 (should die at third hit)", h3)
 	}
 }

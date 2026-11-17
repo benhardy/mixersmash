@@ -63,6 +63,25 @@ const (
 	showPerfDebug = false
 )
 
+// nextHealthAfterHit returns a cell's health after one commit hit, given the
+// creature's power. Power-2 cells die instantly (return 0 regardless of
+// starting health). For all other power values the health is multiplied by
+// healthDecrementKeep; if the result falls at or below healthMin or below
+// healthEpsilon, 0 is returned instead.
+func nextHealthAfterHit(power int, health float32) float32 {
+	if power == 2 {
+		return 0
+	}
+	health *= healthDecrementKeep
+	if health <= healthMin {
+		return 0
+	}
+	if health < healthEpsilon {
+		return 0
+	}
+	return health
+}
+
 // compositeSpriteRefSize is the logical fallback side length used only before
 // the first LayoutF call sets g.spriteRefSize.  At runtime, spriteRefSize is
 // derived from deviceCellSize*2 (capped at 512) and updated on scale changes.
@@ -573,23 +592,15 @@ func (g *Game) commitCellAt(col, row int) error {
 	if cell.Health <= 0 {
 		return nil
 	}
-
 	oldHealth := cell.Health
-	cell.Health *= healthDecrementKeep
-	if cell.Health <= healthMin {
-		cell.Health = 0
-	}
-	if cell.Health < healthEpsilon {
-		cell.Health = 0.0
-	}
-
+	cell.Health = nextHealthAfterHit(cell.Creature.Power, cell.Health)
 	g.actionCol = col
 	g.actionRow = row
 
 	if cell.Health <= 0 {
 		g.handleTargetDeath(col, row)
-	} else if !g.handleTargetSurvival(col, row, cell, oldHealth) {
-		return nil
+	} else {
+		g.handleTargetSurvival(col, row, cell, oldHealth)
 	}
 	return nil
 }
@@ -743,16 +754,38 @@ func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrl
 // animate into it (transitioning to stateVictimMoving), or falls straight to
 // stateDropping when no victim exists.
 func (g *Game) handleTargetDeath(col, row int) {
-	// Capture target colour before the cell is cleared.
-	g.targetColor = g.grid.Cells[col][row].Color()
-	// Redraw immediately so cell disappears.
+	// Capture target colour and creature before the cell is cleared.
+	targetCell := g.grid.Cells[col][row]
+	g.targetColor = targetCell.Color()
+	// Redraw immediately so cell disappears from the canvas.
 	g.drawCell(col, row, 1.0)
 	g.cellCount-- // decrement for the clicked cell
 	victimCoords := connectionVictims(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
+
+	dcs := g.deviceCellSize
+	centerX, centerY := deviceCellCenter(col, row, dcs)
+
+	// Stationary victim entry for the clicked cell: shrinks in place over
+	// victimDuration so it matches the dying-neighbour animation.  Health=1.0
+	// gives it full initial radius; (1-t) in drawMoveAnims shrinks it to zero.
+	targetVictim := MoveAnim{
+		Col:      col,
+		Row:      row,
+		Cell:     Cell{Creature: targetCell.Creature, Health: 1.0},
+		FromX:    centerX,
+		FromY:    centerY,
+		ToX:      centerX,
+		ToY:      centerY,
+		PathType: 0, // straight line (stationary: From==To)
+	}
+
+	g.victims = g.victims[:0]
+	// Always add the clicked cell as the first victim so its colour is included
+	// in victimColors and it animates via the stateVictimMoving path.
+	g.victims = append(g.victims, targetVictim)
+
 	if len(victimCoords) > 0 {
-		dcs := g.deviceCellSize
-		toX, toY := deviceCellCenter(col, row, dcs)
-		g.victims = g.victims[:0]
+		toX, toY := centerX, centerY
 		for _, vc := range victimCoords {
 			ncol, nrow := vc[0], vc[1]
 			fromX, fromY := deviceCellCenter(ncol, nrow, dcs)
@@ -775,29 +808,17 @@ func (g *Game) handleTargetDeath(col, row int) {
 			x0, y0 := ncol*dcs, nrow*dcs
 			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
 		}
-		g.animStart = time.Now()
-		g.currentState = stateVictimMoving
-	} else {
-		// No victim — score the kill and go straight to drop.
-		g.score += scoreForKill(nil, g.targetColor)
-		spawned := g.buildDropAnims([]int{col})
-		if respawnCells {
-			g.cellCount += spawned
-		}
-		if len(g.moveAnims) > 0 {
-			g.animStart = time.Now()
-			g.currentState = stateDropping
-		} else {
-			g.settleAfterRemoval()
-		}
 	}
+	// Route through stateVictimMoving in all cases (including no-neighbours):
+	// scoring and drop happen in updateVictimMoving once the animation completes.
+	g.animStart = time.Now()
+	g.currentState = stateVictimMoving
 }
 
 // handleTargetSurvival handles the survival path after a cell has been damaged
-// but not killed: shuffles alive neighbours and sets up the bounce animation,
-// transitioning to stateShuffling. Returns false if there are no alive
-// neighbours and the caller should return nil without a state change.
-func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32) bool {
+// but not killed: shuffles a power-gated subset of alive neighbours and sets up
+// the bounce animation, transitioning to stateShuffling.
+func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32) {
 	// SURVIVAL PATH — shuffle alive neighbours, then set up bounce animation.
 	neighbors := eightNeighbors(col, row, g.grid.Cols, g.grid.Rows)
 	// Only shuffle alive cells — empty slots stay put.
@@ -807,11 +828,30 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 			aliveNeighbors = append(aliveNeighbors, n)
 		}
 	}
-	if len(aliveNeighbors) == 0 {
-		return false
+
+	// Determine how many neighbours to shuffle based on the clicked cell's Power.
+	var power int
+	if cell.Creature != nil {
+		power = cell.Creature.Power
+	}
+	count := shuffleCount(power, len(aliveNeighbors))
+
+	// Select count neighbours at random from aliveNeighbors.
+	// When count == 0 aliveNeighbors becomes empty; the animation still runs
+	// (clicked cell bounces and settles) with no neighbour moves, identical to
+	// the original behaviour when there were 0 alive neighbours.
+	if count > 0 {
+		perm := rand.Perm(len(aliveNeighbors))
+		shuffleNeighbors := make([][2]int, count)
+		for i := 0; i < count; i++ {
+			shuffleNeighbors[i] = aliveNeighbors[perm[i]]
+		}
+		aliveNeighbors = shuffleNeighbors
+	} else {
+		aliveNeighbors = nil
 	}
 
-	// Set up bounce animation now that we know a shuffle will proceed.
+	// Set up bounce animation — always runs regardless of shuffle count.
 	dcs := g.deviceCellSize
 	maxR := float32(dcs/2 - 2)
 	x0, y0 := col*dcs, row*dcs
@@ -876,7 +916,6 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	g.moveAnims = anims
 	g.currentState = stateShuffling
 	g.animStart = time.Now()
-	return true
 }
 
 // updateVictimMoving advances the victim movement animation and transitions to
@@ -885,17 +924,28 @@ func (g *Game) updateVictimMoving() error {
 	t := elapsedFraction(g.animStart, time.Now(), victimDuration)
 	if t >= 1.0 {
 		// All victims arrived — score the kill, kill them, and trigger drop.
+		// g.victims includes the stationary clicked-cell entry (index 0) whose
+		// colour feeds into victimColors for the same-colour bonus.
 		victimColors := make([]color.RGBA, len(g.victims))
 		for i, v := range g.victims {
 			victimColors[i] = v.Cell.Color()
 		}
 		g.score += scoreForKill(victimColors, g.targetColor)
 		colSet := map[int]bool{g.actionCol: true}
+		neighbourKills := 0
 		for _, v := range g.victims {
+			// The clicked cell (actionCol/actionRow) is already dead and its
+			// cellCount decrement already happened in handleTargetDeath; skip it
+			// to avoid a double-decrement.
+			if v.Col == g.actionCol && v.Row == g.actionRow {
+				colSet[v.Col] = true
+				continue
+			}
 			g.grid.Cells[v.Col][v.Row].Health = 0
 			colSet[v.Col] = true
+			neighbourKills++
 		}
-		g.cellCount -= len(g.victims)
+		g.cellCount -= neighbourKills
 		affectedCols := make([]int, 0, len(colSet))
 		for c := range colSet {
 			affectedCols = append(affectedCols, c)
