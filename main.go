@@ -118,7 +118,8 @@ type Game struct {
 	lastTouchY    int // last device-pixel Y while the tracked finger was down (raw screen coords)
 
 	// victim movement animation fields (one entry per simultaneous victim)
-	victims []MoveAnim
+	victimCount int
+	victimAnims []MoveAnim
 
 	// target cell bounce animation fields
 	targetAnimating    bool
@@ -200,7 +201,8 @@ func newGameState(grid *Grid) *Game {
 		hoverCol:        -1,
 		hoverRow:        -1,
 		victimHints:     nil,
-		victims:         nil,
+		victimAnims:     make([]MoveAnim, 0, 9), // max 9 simultaneous victims
+		victimCount:     0,
 		targetAnimating: false,
 	}
 }
@@ -779,10 +781,11 @@ func (g *Game) handleTargetDeath(col, row int) {
 		PathType: 0, // straight line (stationary: From==To)
 	}
 
-	g.victims = g.victims[:0]
+	g.victimCount = 0
 	// Always add the clicked cell as the first victim so its colour is included
 	// in victimColors and it animates via the stateVictimMoving path.
-	g.victims = append(g.victims, targetVictim)
+	g.victimAnims[g.victimCount] = targetVictim
+	g.victimCount++
 
 	if len(victimCoords) > 0 {
 		toX, toY := centerX, centerY
@@ -803,7 +806,8 @@ func (g *Game) handleTargetDeath(col, row int) {
 				CtrlY:       cy,
 				SpiralTurns: st,
 			}
-			g.victims = append(g.victims, v)
+			g.victimAnims[g.victimCount] = v
+			g.victimCount++
 			// Clear victim's canvas position (it is now an overlay animation).
 			x0, y0 := ncol*dcs, nrow*dcs
 			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
@@ -926,14 +930,15 @@ func (g *Game) updateVictimMoving() error {
 		// All victims arrived — score the kill, kill them, and trigger drop.
 		// g.victims includes the stationary clicked-cell entry (index 0) whose
 		// colour feeds into victimColors for the same-colour bonus.
-		victimColors := make([]color.RGBA, len(g.victims))
-		for i, v := range g.victims {
-			victimColors[i] = v.Cell.Color()
+		victimColors := make([]color.RGBA, g.victimCount)
+		for i := 0; i < g.victimCount; i++ {
+			victimColors[i] = g.victimAnims[i].Cell.Color()
 		}
 		g.score += scoreForKill(victimColors, g.targetColor)
 		colSet := map[int]bool{g.actionCol: true}
 		neighbourKills := 0
-		for _, v := range g.victims {
+		for i := 0; i < g.victimCount; i++ {
+			v := g.victimAnims[i]
 			// The clicked cell (actionCol/actionRow) is already dead and its
 			// cellCount decrement already happened in handleTargetDeath; skip it
 			// to avoid a double-decrement.
@@ -950,7 +955,7 @@ func (g *Game) updateVictimMoving() error {
 		for c := range colSet {
 			affectedCols = append(affectedCols, c)
 		}
-		g.victims = g.victims[:0]
+		g.victimCount = 0
 		spawned := g.buildDropAnims(affectedCols)
 		if respawnCells {
 			g.cellCount += spawned
@@ -1261,7 +1266,8 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	if g.currentState == stateVictimMoving {
 		t := elapsedFraction(g.animStart, time.Now(), victimDuration)
 		t = min(t, 1.0)
-		for _, v := range g.victims {
+		for i := 0; i < g.victimCount; i++ {
+			v := g.victimAnims[i]
 			var cx, cy float32
 			switch v.PathType {
 			case 0: // straight line
