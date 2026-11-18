@@ -260,10 +260,10 @@ func TestRandomColorNeverReturnsWhite(t *testing.T) {
 // eightNeighbors
 // ---------------------------------------------------------------------------
 
-// TestEightNeighborsCorner verifies that eightNeighbors(0,0,25,18) returns
+// TestEightNeighborsCorner verifies that eightNeighbors(nil,0,0,25,18) returns
 // exactly 3 results: {1,0}, {0,1}, {1,1}.
 func TestEightNeighborsCorner(t *testing.T) {
-	got := eightNeighbors(0, 0, 25, 18)
+	got := eightNeighbors(nil, 0, 0, 25, 18)
 	if len(got) != 3 {
 		t.Fatalf("eightNeighbors(0,0,25,18) returned %d results, want 3: %v", len(got), got)
 	}
@@ -279,19 +279,19 @@ func TestEightNeighborsCorner(t *testing.T) {
 	}
 }
 
-// TestEightNeighborsEdge verifies that eightNeighbors(0,5,25,18) returns
+// TestEightNeighborsEdge verifies that eightNeighbors(nil,0,5,25,18) returns
 // exactly 5 results (left edge, non-corner).
 func TestEightNeighborsEdge(t *testing.T) {
-	got := eightNeighbors(0, 5, 25, 18)
+	got := eightNeighbors(nil, 0, 5, 25, 18)
 	if len(got) != 5 {
 		t.Fatalf("eightNeighbors(0,5,25,18) returned %d results, want 5: %v", len(got), got)
 	}
 }
 
-// TestEightNeighborsCentre verifies that eightNeighbors(5,5,25,18) returns
+// TestEightNeighborsCentre verifies that eightNeighbors(nil,5,5,25,18) returns
 // exactly 8 results for an interior cell.
 func TestEightNeighborsCentre(t *testing.T) {
-	got := eightNeighbors(5, 5, 25, 18)
+	got := eightNeighbors(nil, 5, 5, 25, 18)
 	if len(got) != 8 {
 		t.Fatalf("eightNeighbors(5,5,25,18) returned %d results, want 8: %v", len(got), got)
 	}
@@ -336,7 +336,7 @@ func TestConnectionVictimsConnectedAliveNeighbour(t *testing.T) {
 	// Place connected creature at neighbour (2,2).
 	cells[2][2] = Cell{Creature: connected, Health: 1.0}
 
-	got := connectionVictims(cells, 1, 1, 3, 3)
+	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
 	if len(got) != 1 {
 		t.Fatalf("want 1 victim, got %d: %v", len(got), got)
 	}
@@ -354,7 +354,7 @@ func TestConnectionVictimsDeadConnectedNeighbour(t *testing.T) {
 	cells[1][1] = Cell{Creature: target, Health: 1.0}
 	cells[2][2] = Cell{Creature: connected, Health: 0.0} // dead
 
-	got := connectionVictims(cells, 1, 1, 3, 3)
+	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
 	if len(got) != 0 {
 		t.Errorf("want no victims (dead neighbour), got %d: %v", len(got), got)
 	}
@@ -390,7 +390,7 @@ func TestConnectionVictimsUnconnectedAliveNeighbour(t *testing.T) {
 	cells[1][1] = Cell{Creature: target, Health: 1.0}
 	cells[2][2] = Cell{Creature: unconnected, Health: 1.0}
 
-	got := connectionVictims(cells, 1, 1, 3, 3)
+	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
 	if len(got) != 0 {
 		t.Errorf("want no victims (unconnected creature), got %d: %v", len(got), got)
 	}
@@ -416,7 +416,7 @@ func TestConnectionVictimsMultipleConnectedNeighbours(t *testing.T) {
 	cells[0][0] = Cell{Creature: target.Connections[0], Health: 1.0}
 	cells[2][0] = Cell{Creature: target.Connections[1], Health: 1.0}
 
-	got := connectionVictims(cells, 1, 1, 3, 3)
+	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
 	if len(got) != 2 {
 		t.Fatalf("want 2 victims, got %d: %v", len(got), got)
 	}
@@ -438,7 +438,7 @@ func TestConnectionVictimsCornerTarget(t *testing.T) {
 	// Only 3 neighbours for corner (0,0): (1,0), (0,1), (1,1).
 	cells[1][1] = Cell{Creature: connected, Health: 1.0}
 
-	got := connectionVictims(cells, 0, 0, 5, 5)
+	got, _ := connectionVictims(nil, nil, cells, 0, 0, 5, 5)
 	if len(got) != 1 {
 		t.Fatalf("want 1 victim at corner, got %d: %v", len(got), got)
 	}
@@ -454,9 +454,9 @@ func TestConnectionVictimsNilCreatureTarget(t *testing.T) {
 	// cells[1][1] has Creature==nil by default.
 	cells[2][2] = Cell{Creature: &creaturePalette[0], Health: 1.0}
 
-	got := connectionVictims(cells, 1, 1, 3, 3)
-	if got != nil {
-		t.Errorf("want nil for nil-Creature target, got %v", got)
+	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
+	if len(got) != 0 {
+		t.Errorf("want empty result for nil-Creature target, got %v", got)
 	}
 }
 
@@ -474,7 +474,7 @@ func TestConnectionVictimsSameTypeAliveNeighbour(t *testing.T) {
 	// must NOT appear in target.Connections (no self-link invariant guarantees this).
 	cells[2][1] = Cell{Creature: target, Health: 1.0}
 
-	got := connectionVictims(cells, 1, 1, 3, 3)
+	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
 	if len(got) != 1 {
 		t.Fatalf("want 1 victim (same-type alive), got %d: %v", len(got), got)
 	}
@@ -491,7 +491,7 @@ func TestConnectionVictimsSameTypeDeadNeighbour(t *testing.T) {
 	cells[1][1] = Cell{Creature: target, Health: 1.0}
 	cells[2][1] = Cell{Creature: target, Health: 0.0} // dead same-type
 
-	got := connectionVictims(cells, 1, 1, 3, 3)
+	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
 	if len(got) != 0 {
 		t.Errorf("want no victims (dead same-type neighbour), got %d: %v", len(got), got)
 	}

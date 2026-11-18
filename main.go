@@ -117,6 +117,18 @@ type Game struct {
 	lastTouchX    int // last device-pixel X while the tracked finger was down (raw screen coords)
 	lastTouchY    int // last device-pixel Y while the tracked finger was down (raw screen coords)
 
+	// per-frame reuse buffers for touch ID slices (avoids per-frame allocation)
+	touchIDsBuf     []ebiten.TouchID // reused for ebiten.AppendTouchIDs
+	justPressedBuf  []ebiten.TouchID // reused for inpututil.AppendJustPressedTouchIDs
+	justReleasedBuf []ebiten.TouchID // reused for inpututil.AppendJustReleasedTouchIDs
+
+	// per-frame reuse buffers for neighbour coordinate slices (avoids per-frame allocation)
+	hoverNeighborsBuf  [][2]int // scratch for eightNeighbors inside connectionVictims (hover path)
+	hoverVictimsBuf    [][2]int // result buffer for connectionVictims (hover path)
+	survivalNbrsBuf    [][2]int // scratch for eightNeighbors in handleTargetSurvival
+	deathVictimScratch [][2]int // scratch for eightNeighbors inside connectionVictims (death path)
+	deathVictimsBuf    [][2]int // result buffer for connectionVictims (death path)
+
 	// victim movement animation fields (one entry per simultaneous victim)
 	victimCount int
 	victimAnims []MoveAnim
@@ -193,17 +205,25 @@ type Game struct {
 // calling this.
 func newGameState(grid *Grid) *Game {
 	return &Game{
-		grid:            grid,
-		currentState:    stateWaiting,
-		actionCol:       -1,
-		actionRow:       -1,
-		cellCount:       grid.Cols * grid.Rows,
-		hoverCol:        -1,
-		hoverRow:        -1,
-		victimHints:     nil,
-		victimAnims:     make([]MoveAnim, 0, 9), // max 9 simultaneous victims
-		victimCount:     0,
-		targetAnimating: false,
+		grid:               grid,
+		currentState:       stateWaiting,
+		actionCol:          -1,
+		actionRow:          -1,
+		cellCount:          grid.Cols * grid.Rows,
+		hoverCol:           -1,
+		hoverRow:           -1,
+		victimHints:        nil,
+		victimAnims:        make([]MoveAnim, 9), // max 9 simultaneous victims; index-assigned via victimCount
+		victimCount:        0,
+		targetAnimating:    false,
+		touchIDsBuf:        make([]ebiten.TouchID, 0, 10),
+		justPressedBuf:     make([]ebiten.TouchID, 0, 10),
+		justReleasedBuf:    make([]ebiten.TouchID, 0, 10),
+		hoverNeighborsBuf:  make([][2]int, 0, 8),
+		hoverVictimsBuf:    make([][2]int, 0, 8),
+		survivalNbrsBuf:    make([][2]int, 0, 8),
+		deathVictimScratch: make([][2]int, 0, 8),
+		deathVictimsBuf:    make([][2]int, 0, 8),
 	}
 }
 
@@ -377,7 +397,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		g.moveAnims = g.moveAnims[:0]
 	}
 	spawned := 0
-	seen := make(map[int]bool)
+	var seen [gridCols]bool
 	for _, col := range removedCols {
 		if seen[col] {
 			continue
@@ -385,12 +405,15 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		seen[col] = true
 
 		// Find which rows in this column are dead (holes just created this round).
-		var holeRows []int
+		var holeRowsArr [gridRows]int
+		holeRowsCount := 0
 		for row := 0; row < g.grid.Rows; row++ {
 			if g.grid.Cells[col][row].Health <= 0 {
-				holeRows = append(holeRows, row)
+				holeRowsArr[holeRowsCount] = row
+				holeRowsCount++
 			}
 		}
+		holeRows := holeRowsArr[:holeRowsCount]
 		if len(holeRows) == 0 {
 			continue
 		}
@@ -491,12 +514,15 @@ func (g *Game) buildCollapseAnims() bool {
 	dcs := g.deviceCellSize
 	cw := g.canvas.Bounds().Max.X
 	ch := g.canvas.Bounds().Max.Y
-	clearColSet := make(map[int]bool, len(moves)*2)
+	var clearColSet [gridCols]bool
 	for _, m := range moves {
 		clearColSet[m[0]] = true
 		clearColSet[m[1]] = true
 	}
-	for col := range clearColSet {
+	for col, marked := range clearColSet {
+		if !marked {
+			continue
+		}
 		x0 := col * dcs
 		x1 := x0 + dcs
 		x1 = min(x1, cw)
@@ -645,9 +671,12 @@ func (g *Game) updateWaiting() error {
 
 	// Determine whether any touch activity is happening this frame so the mouse
 	// path can be suppressed (dedupe: synthesised mouse clicks on touch devices).
-	currentTouches := ebiten.AppendTouchIDs(nil)
-	justPressed := inpututil.AppendJustPressedTouchIDs(nil)
-	justReleased := inpututil.AppendJustReleasedTouchIDs(nil)
+	g.touchIDsBuf = ebiten.AppendTouchIDs(g.touchIDsBuf[:0])
+	g.justPressedBuf = inpututil.AppendJustPressedTouchIDs(g.justPressedBuf[:0])
+	g.justReleasedBuf = inpututil.AppendJustReleasedTouchIDs(g.justReleasedBuf[:0])
+	currentTouches := g.touchIDsBuf
+	justPressed := g.justPressedBuf
+	justReleased := g.justReleasedBuf
 	touchFrameActive := g.touchActive || len(currentTouches) > 0 || len(justPressed) > 0 || len(justReleased) > 0
 
 	// Touch input block.
@@ -671,7 +700,8 @@ func (g *Game) updateWaiting() error {
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
-				g.victimHints = connectionVictims(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				g.hoverVictimsBuf, g.hoverNeighborsBuf = connectionVictims(g.hoverVictimsBuf, g.hoverNeighborsBuf, g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				g.victimHints = g.hoverVictimsBuf
 			}
 		}
 	}
@@ -701,7 +731,8 @@ func (g *Game) updateWaiting() error {
 		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 			if g.grid.Cells[hc][hr].Health > 0 {
 				g.hoverCol, g.hoverRow = hc, hr
-				g.victimHints = connectionVictims(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				g.hoverVictimsBuf, g.hoverNeighborsBuf = connectionVictims(g.hoverVictimsBuf, g.hoverNeighborsBuf, g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				g.victimHints = g.hoverVictimsBuf
 			}
 		}
 
@@ -762,7 +793,8 @@ func (g *Game) handleTargetDeath(col, row int) {
 	// Redraw immediately so cell disappears from the canvas.
 	g.drawCell(col, row, 1.0)
 	g.cellCount-- // decrement for the clicked cell
-	victimCoords := connectionVictims(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
+	g.deathVictimsBuf, g.deathVictimScratch = connectionVictims(g.deathVictimsBuf, g.deathVictimScratch, g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
+	victimCoords := g.deathVictimsBuf
 
 	dcs := g.deviceCellSize
 	centerX, centerY := deviceCellCenter(col, row, dcs)
@@ -824,35 +856,38 @@ func (g *Game) handleTargetDeath(col, row int) {
 // the bounce animation, transitioning to stateShuffling.
 func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32) {
 	// SURVIVAL PATH — shuffle alive neighbours, then set up bounce animation.
-	neighbors := eightNeighbors(col, row, g.grid.Cols, g.grid.Rows)
+	g.survivalNbrsBuf = eightNeighbors(g.survivalNbrsBuf, col, row, g.grid.Cols, g.grid.Rows)
+	neighbors := g.survivalNbrsBuf
 	// Only shuffle alive cells — empty slots stay put.
-	var aliveNeighbors [][2]int
+	var aliveNbrsArr [8][2]int
+	aliveNbrsCount := 0
 	for _, n := range neighbors {
 		if g.grid.Cells[n[0]][n[1]].Health > 0 {
-			aliveNeighbors = append(aliveNeighbors, n)
+			aliveNbrsArr[aliveNbrsCount] = n
+			aliveNbrsCount++
 		}
 	}
-
 	// Determine how many neighbours to shuffle based on the clicked cell's Power.
 	var power int
 	if cell.Creature != nil {
 		power = cell.Creature.Power
 	}
-	count := shuffleCount(power, len(aliveNeighbors))
+	count := shuffleCount(power, aliveNbrsCount)
 
 	// Select count neighbours at random from aliveNeighbors.
 	// When count == 0 aliveNeighbors becomes empty; the animation still runs
 	// (clicked cell bounces and settles) with no neighbour moves, identical to
 	// the original behaviour when there were 0 alive neighbours.
+	var aliveNeighbors [][2]int
 	if count > 0 {
-		perm := rand.Perm(len(aliveNeighbors))
-		shuffleNeighbors := make([][2]int, count)
+		perm := rand.Perm(aliveNbrsCount)
+		var shuffleNbrsArr [8][2]int
 		for i := 0; i < count; i++ {
-			shuffleNeighbors[i] = aliveNeighbors[perm[i]]
+			shuffleNbrsArr[i] = aliveNbrsArr[perm[i]]
 		}
-		aliveNeighbors = shuffleNeighbors
+		aliveNeighbors = shuffleNbrsArr[:count]
 	} else {
-		aliveNeighbors = nil
+		aliveNeighbors = aliveNbrsArr[:0]
 	}
 
 	// Set up bounce animation — always runs regardless of shuffle count.
@@ -873,10 +908,11 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 		col, row int
 		cell     Cell
 	}
-	orig := make([]neighborCell, len(aliveNeighbors))
+	var origArr [8]neighborCell
 	for i, n := range aliveNeighbors {
-		orig[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
+		origArr[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
 	}
+	orig := origArr[:len(aliveNeighbors)]
 
 	// Build MoveAnims: aliveNeighbor i moves to position perm[i].
 	anims := make([]MoveAnim, len(aliveNeighbors))
@@ -930,12 +966,13 @@ func (g *Game) updateVictimMoving() error {
 		// All victims arrived — score the kill, kill them, and trigger drop.
 		// g.victims includes the stationary clicked-cell entry (index 0) whose
 		// colour feeds into victimColors for the same-colour bonus.
-		victimColors := make([]color.RGBA, g.victimCount)
+		var victimColorsArr [9]color.RGBA
 		for i := 0; i < g.victimCount; i++ {
-			victimColors[i] = g.victimAnims[i].Cell.Color()
+			victimColorsArr[i] = g.victimAnims[i].Cell.Color()
 		}
-		g.score += scoreForKill(victimColors, g.targetColor)
-		colSet := map[int]bool{g.actionCol: true}
+		g.score += scoreForKill(victimColorsArr[:g.victimCount], g.targetColor)
+		var colSeen [gridCols]bool
+		colSeen[g.actionCol] = true
 		neighbourKills := 0
 		for i := 0; i < g.victimCount; i++ {
 			v := g.victimAnims[i]
@@ -943,20 +980,24 @@ func (g *Game) updateVictimMoving() error {
 			// cellCount decrement already happened in handleTargetDeath; skip it
 			// to avoid a double-decrement.
 			if v.Col == g.actionCol && v.Row == g.actionRow {
-				colSet[v.Col] = true
+				colSeen[v.Col] = true
 				continue
 			}
 			g.grid.Cells[v.Col][v.Row].Health = 0
-			colSet[v.Col] = true
+			colSeen[v.Col] = true
 			neighbourKills++
 		}
 		g.cellCount -= neighbourKills
-		affectedCols := make([]int, 0, len(colSet))
-		for c := range colSet {
-			affectedCols = append(affectedCols, c)
+		var affectedColsArr [gridCols]int
+		affectedColsCount := 0
+		for c := 0; c < gridCols; c++ {
+			if colSeen[c] {
+				affectedColsArr[affectedColsCount] = c
+				affectedColsCount++
+			}
 		}
 		g.victimCount = 0
-		spawned := g.buildDropAnims(affectedCols)
+		spawned := g.buildDropAnims(affectedColsArr[:affectedColsCount])
 		if respawnCells {
 			g.cellCount += spawned
 		}

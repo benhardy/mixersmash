@@ -111,10 +111,12 @@ func shuffleCount(power, aliveCount int) int {
 	return power
 }
 
-// eightNeighbors returns all in-bounds (col+dx, row+dy) for dx,dy in
-// {-1,0,1}×{-1,0,1} excluding (0,0).
-func eightNeighbors(col, row, cols, rows int) [][2]int {
-	var result [][2]int
+// eightNeighbors appends all in-bounds (col+dx, row+dy) for dx,dy in
+// {-1,0,1}×{-1,0,1} excluding (0,0) into buf (reset to [:0] first) and
+// returns the updated slice. The caller owns buf; pass a pre-allocated slice
+// to avoid per-call allocation once capacity stabilises at 8.
+func eightNeighbors(buf [][2]int, col, row, cols, rows int) [][2]int {
+	buf = buf[:0]
 	for dy := -1; dy <= 1; dy++ {
 		for dx := -1; dx <= 1; dx++ {
 			if dx == 0 && dy == 0 {
@@ -123,24 +125,27 @@ func eightNeighbors(col, row, cols, rows int) [][2]int {
 			nc := col + dx
 			nr := row + dy
 			if nc >= 0 && nc < cols && nr >= 0 && nr < rows {
-				result = append(result, [2]int{nc, nr})
+				buf = append(buf, [2]int{nc, nr})
 			}
 		}
 	}
-	return result
+	return buf
 }
 
-// connectionVictims returns all 8-neighbours of (col,row) with Health > 0
-// whose Creature pointer either equals the target's own Creature (same type,
-// pointer identity) or appears in cells[col][row].Creature.Connections.
-// Returns nil if the target cell has no Creature.
-func connectionVictims(cells [][]Cell, col, row, cols, rows int) [][2]int {
+// connectionVictims appends into buf all 8-neighbours of (col,row) with
+// Health > 0 whose Creature pointer either equals the target's own Creature
+// (same type, pointer identity) or appears in cells[col][row].Creature.Connections.
+// scratch is used internally for the eightNeighbors call and must not alias buf.
+// buf is reset to [:0] before use. Returns (updatedBuf, updatedScratch).
+// Returns (buf[:0], scratch) unchanged if the target cell has no Creature.
+func connectionVictims(buf, scratch [][2]int, cells [][]Cell, col, row, cols, rows int) ([][2]int, [][2]int) {
+	buf = buf[:0]
 	if cells[col][row].Creature == nil {
-		return nil
+		return buf, scratch
 	}
 	target := cells[col][row].Creature
-	var result [][2]int
-	for _, n := range eightNeighbors(col, row, cols, rows) {
+	scratch = eightNeighbors(scratch, col, row, cols, rows)
+	for _, n := range scratch {
 		nc, nr := n[0], n[1]
 		if cells[nc][nr].Health <= 0 {
 			continue
@@ -151,18 +156,18 @@ func connectionVictims(cells [][]Cell, col, row, cols, rows int) [][2]int {
 		neighbour := cells[nc][nr].Creature
 		// Same type (pointer equality) is always a victim.
 		if neighbour == target {
-			result = append(result, [2]int{nc, nr})
+			buf = append(buf, [2]int{nc, nr})
 			continue
 		}
 		// Connected type (membership in Connections) is also a victim.
 		for _, conn := range target.Connections {
 			if conn == neighbour {
-				result = append(result, [2]int{nc, nr})
+				buf = append(buf, [2]int{nc, nr})
 				break
 			}
 		}
 	}
-	return result
+	return buf, scratch
 }
 
 // scoreForKill returns the points earned for a single kill.
@@ -211,7 +216,7 @@ func scoreForKill(victimColors []color.RGBA, targetColor color.RGBA) int {
 // when holes appear at holeRows. Only returns entries for cells that actually change row.
 // Cells not in holeRows are "alive" and compact downward; holeRows are removed.
 func gravityMoves(numRows int, holeRows []int) [][2]int {
-	// Build a set of hole rows for fast lookup
+	// Build a set of hole rows for fast lookup.
 	holeSet := make(map[int]bool, len(holeRows))
 	for _, r := range holeRows {
 		holeSet[r] = true
