@@ -619,7 +619,7 @@ func (g *Game) commitCellAt(col, row int) error {
 	g.actionRow = row
 
 	if cell.Health <= 0 {
-		g.handleTargetDeath(col, row)
+		g.handleTargetDeath(col, row, oldHealth)
 	} else {
 		g.handleTargetSurvival(col, row, cell, oldHealth)
 	}
@@ -779,7 +779,7 @@ func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrl
 // drained to zero: redraws the dead cell, selects all tied-closest victims to
 // animate into it (transitioning to stateVictimMoving), or falls straight to
 // stateDropping when no victim exists.
-func (g *Game) handleTargetDeath(col, row int) {
+func (g *Game) handleTargetDeath(col int, row int, oldHealth float32) {
 	// Capture target colour and creature before the cell is cleared.
 	targetCell := g.grid.Cells[col][row]
 	g.targetColor = targetCell.Color()
@@ -793,12 +793,12 @@ func (g *Game) handleTargetDeath(col, row int) {
 	centerX, centerY := deviceCellCenter(col, row, dcs)
 
 	// Stationary victim entry for the clicked cell: shrinks in place over
-	// victimDuration so it matches the dying-neighbour animation.  Health=1.0
-	// gives it full initial radius; (1-t) in drawMoveAnims shrinks it to zero.
+	// victimDuration so it matches the dying-neighbour animation.  Health=oldHealth
+	// gives it previous radius; (1-t) in drawMoveAnims shrinks it to zero.
 	targetVictim := MoveAnim{
 		Col:      col,
 		Row:      row,
-		Cell:     Cell{Creature: targetCell.Creature, Health: 1.0},
+		Cell:     Cell{Creature: targetCell.Creature, Health: oldHealth},
 		FromX:    centerX,
 		FromY:    centerY,
 		ToX:      centerX,
