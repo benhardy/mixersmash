@@ -626,7 +626,6 @@ func (g *Game) commitCellAt(col, row int) error {
 	return nil
 }
 
-// updateWaiting handles hover recompute and click/touch processing while in stateWaiting.
 // containsTouchID reports whether ids contains id.
 func containsTouchID(ids []ebiten.TouchID, id ebiten.TouchID) bool {
 	for _, v := range ids {
@@ -637,24 +636,55 @@ func containsTouchID(ids []ebiten.TouchID, id ebiten.TouchID) bool {
 	return false
 }
 
+// findReleasedID reports whether target is present in ids.
+// Pure function used to test whether a specific touch ID has just been released.
+func findReleasedID(ids []ebiten.TouchID, target ebiten.TouchID) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
+}
+
+// frameDims returns the design-frame dimensions and HUD device-pixel width.
+// When g.frame is nil (pre-LayoutF) it falls back to the design constants with
+// no HUD, matching the inline logic previously in updateWaiting.
+func (g *Game) frameDims() (frameW, frameH float64, hudDevW int) {
+	if g.frame != nil {
+		frameW = float64(g.frame.Bounds().Dx())
+		frameH = float64(g.frame.Bounds().Dy())
+		hudDevW = g.hudDevW
+		return
+	}
+	frameW = float64(windowWidth)
+	frameH = float64(windowHeight)
+	return
+}
+
+// updateHover applies the alive-cell guard for grid cell (hc, hr): if the cell
+// is in bounds and has Health > 0 it sets g.hoverCol/g.hoverRow and recomputes
+// g.victimHints via connectionVictims, reusing the per-frame hover buffers.
+// If the cell is out of bounds or dead the hover state is left unchanged,
+// matching the original inline behaviour in both the touch and mouse paths.
+func (g *Game) updateHover(hc, hr int) {
+	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
+		if g.grid.Cells[hc][hr].Health > 0 {
+			g.hoverCol, g.hoverRow = hc, hr
+			g.hoverVictimsBuf, g.hoverNeighborsBuf = connectionVictims(g.hoverVictimsBuf, g.hoverNeighborsBuf, g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+			g.victimHints = g.hoverVictimsBuf
+		}
+	}
+}
+
+// updateWaiting handles hover recompute and click/touch processing while in stateWaiting.
 func (g *Game) updateWaiting() error {
 	dcs := g.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
 	}
 
-	// frameW/frameH: dimensions of the full (HUD+board) landscape design frame.
-	// When g.frame is nil (pre-LayoutF) fall back to design constants with no HUD.
-	var frameW, frameH float64
-	hudDevW := 0
-	if g.frame != nil {
-		frameW = float64(g.frame.Bounds().Dx())
-		frameH = float64(g.frame.Bounds().Dy())
-		hudDevW = g.hudDevW
-	} else {
-		frameW = float64(windowWidth)
-		frameH = float64(windowHeight)
-	}
+	frameW, frameH, hudDevW := g.frameDims()
 	sw := float64(g.screenW)
 	sh := float64(g.screenH)
 	if sw <= 0 {
@@ -690,28 +720,19 @@ func (g *Game) updateWaiting() error {
 		tx, ty := ebiten.TouchPosition(g.activeTouchID)
 		g.lastTouchX, g.lastTouchY = tx, ty
 		hc, hr := screenToBoard(float64(tx), float64(ty), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
-		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
-			if g.grid.Cells[hc][hr].Health > 0 {
-				g.hoverCol, g.hoverRow = hc, hr
-				g.hoverVictimsBuf, g.hoverNeighborsBuf = connectionVictims(g.hoverVictimsBuf, g.hoverNeighborsBuf, g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
-				g.victimHints = g.hoverVictimsBuf
-			}
-		}
+		g.updateHover(hc, hr)
 	}
 
 	// Release-to-commit: when the tracked finger lifts, commit using the stored last
 	// raw screen position, mapped to a board cell via screenToBoard.
 	// Do NOT re-read ebiten.TouchPosition for the released ID — on this Ebitengine
 	// version it returns (0,0) for an already-released touch.
-	for _, id := range justReleased {
-		if id == g.activeTouchID {
-			col, row := screenToBoard(float64(g.lastTouchX), float64(g.lastTouchY), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
-			// Clear touch state before commit so a reused ID cannot match stale state.
-			g.touchActive = false
-			if err := g.commitCellAt(col, row); err != nil {
-				return err
-			}
-			break
+	if findReleasedID(justReleased, g.activeTouchID) {
+		col, row := screenToBoard(float64(g.lastTouchX), float64(g.lastTouchY), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
+		// Clear touch state before commit so a reused ID cannot match stale state.
+		g.touchActive = false
+		if err := g.commitCellAt(col, row); err != nil {
+			return err
 		}
 	}
 
@@ -721,13 +742,7 @@ func (g *Game) updateWaiting() error {
 		// CursorPosition returns device-pixel screen coords; map to board via screenToBoard.
 		mx, my := ebiten.CursorPosition()
 		hc, hr := screenToBoard(float64(mx), float64(my), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
-		if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
-			if g.grid.Cells[hc][hr].Health > 0 {
-				g.hoverCol, g.hoverRow = hc, hr
-				g.hoverVictimsBuf, g.hoverNeighborsBuf = connectionVictims(g.hoverVictimsBuf, g.hoverNeighborsBuf, g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
-				g.victimHints = g.hoverVictimsBuf
-			}
-		}
+		g.updateHover(hc, hr)
 
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			px, py := ebiten.CursorPosition()

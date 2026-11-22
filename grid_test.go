@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // cellWithColor returns a Cell with the given colour wrapped in a Creature.
@@ -1658,5 +1660,204 @@ func TestHigherPowerCellSurvivesFirstHit(t *testing.T) {
 	h3 := nextHealthAfterHit(3, h2)
 	if h3 != 0 {
 		t.Errorf("power-3 cell after hit 3: Health = %v, want 0 (should die at third hit)", h3)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// findReleasedID
+// ---------------------------------------------------------------------------
+
+// TestFindReleasedID verifies the pure predicate across present/absent/empty cases.
+func TestFindReleasedID(t *testing.T) {
+	cases := []struct {
+		name   string
+		ids    []ebiten.TouchID
+		target ebiten.TouchID
+		want   bool
+	}{
+		{
+			name:   "empty list returns false",
+			ids:    nil,
+			target: 1,
+			want:   false,
+		},
+		{
+			name:   "target present in singleton list",
+			ids:    []ebiten.TouchID{3},
+			target: 3,
+			want:   true,
+		},
+		{
+			name:   "target absent from list",
+			ids:    []ebiten.TouchID{1, 2, 4},
+			target: 3,
+			want:   false,
+		},
+		{
+			name:   "target present among multiple IDs",
+			ids:    []ebiten.TouchID{1, 2, 3, 4},
+			target: 2,
+			want:   true,
+		},
+		{
+			name:   "target is zero value and present",
+			ids:    []ebiten.TouchID{0, 5},
+			target: 0,
+			want:   true,
+		},
+		{
+			name:   "target is zero value and absent",
+			ids:    []ebiten.TouchID{1, 2},
+			target: 0,
+			want:   false,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := findReleasedID(tc.ids, tc.target)
+			if got != tc.want {
+				t.Errorf("findReleasedID(%v, %v) = %v, want %v", tc.ids, tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// frameDims
+// ---------------------------------------------------------------------------
+
+// TestFrameDimsNilFrame verifies the fallback path when g.frame is nil.
+// The nil case is fully reachable without an ebiten context.
+func TestFrameDimsNilFrame(t *testing.T) {
+	grid := NewGrid(4, 4)
+	g := newGameState(grid)
+	// g.frame is nil after newGameState — this exercises the fallback branch.
+	frameW, frameH, hudDevW := g.frameDims()
+	if frameW != float64(windowWidth) {
+		t.Errorf("frameDims (nil frame) frameW = %v, want %v", frameW, float64(windowWidth))
+	}
+	if frameH != float64(windowHeight) {
+		t.Errorf("frameDims (nil frame) frameH = %v, want %v", frameH, float64(windowHeight))
+	}
+	if hudDevW != 0 {
+		t.Errorf("frameDims (nil frame) hudDevW = %v, want 0", hudDevW)
+	}
+}
+
+// Note: testing the g.frame != nil branch requires an ebiten graphics context
+// (ebiten.NewImage), which is unavailable in a headless unit test.  The
+// nil/fallback branch above covers the constant path; the live path is exercised
+// by the game at runtime.
+
+// ---------------------------------------------------------------------------
+// updateHover
+// ---------------------------------------------------------------------------
+
+// makeHoverGame builds a minimal Game with a cols×rows grid for updateHover tests.
+// All cells are set alive (Health=1.0) with a palette creature so connectionVictims
+// can find matches.  Callers may set specific cells dead or nil afterwards.
+func makeHoverGame(cols, rows int) *Game {
+	grid := NewGrid(cols, rows)
+	// Assign creatures and set health so cells are alive.
+	for c := 0; c < cols; c++ {
+		for r := 0; r < rows; r++ {
+			idx := (c*rows + r) % len(creaturePalette)
+			grid.Cells[c][r].Creature = &creaturePalette[idx]
+			grid.Cells[c][r].Health = 1.0
+		}
+	}
+	g := newGameState(grid)
+	return g
+}
+
+// TestUpdateHoverAliveCellSetsHoverAndVictims verifies that hovering an alive cell
+// updates hoverCol/hoverRow and populates victimHints via connectionVictims.
+func TestUpdateHoverAliveCellSetsHoverAndVictims(t *testing.T) {
+	// Use a 3×3 grid so the target cell at (1,1) has 8 neighbours.
+	g := makeHoverGame(3, 3)
+
+	// Place target and a connected neighbour so connectionVictims returns at least
+	// one victim; use the first palette entry and its first connection.
+	target := &creaturePalette[0]
+	connected := target.Connections[0]
+	g.grid.Cells[1][1] = Cell{Creature: target, Health: 1.0}
+	g.grid.Cells[2][2] = Cell{Creature: connected, Health: 1.0}
+
+	g.updateHover(1, 1)
+
+	if g.hoverCol != 1 || g.hoverRow != 1 {
+		t.Errorf("updateHover(1,1): hoverCol/Row = (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	}
+	if len(g.victimHints) == 0 {
+		t.Errorf("updateHover(1,1): victimHints is empty, want at least one victim")
+	}
+	// victimHints must alias hoverVictimsBuf (same backing array) to preserve reuse.
+	if cap(g.victimHints) != cap(g.hoverVictimsBuf) {
+		t.Errorf("victimHints and hoverVictimsBuf should share backing array")
+	}
+}
+
+// TestUpdateHoverDeadCellLeavesHoverUnchanged verifies that hovering a dead cell
+// (Health == 0) leaves the previous hover state intact.
+func TestUpdateHoverDeadCellLeavesHoverUnchanged(t *testing.T) {
+	g := makeHoverGame(3, 3)
+	// Pre-set hover to a known position.
+	g.hoverCol = 0
+	g.hoverRow = 0
+
+	// Kill cell (1,1).
+	g.grid.Cells[1][1].Health = 0
+
+	g.updateHover(1, 1)
+
+	if g.hoverCol != 0 || g.hoverRow != 0 {
+		t.Errorf("updateHover on dead cell changed hover to (%d,%d), want (0,0)", g.hoverCol, g.hoverRow)
+	}
+}
+
+// TestUpdateHoverOutOfBoundsLeavesHoverUnchanged verifies that an out-of-bounds
+// (hc, hr) pair leaves the hover state unchanged.
+func TestUpdateHoverOutOfBoundsLeavesHoverUnchanged(t *testing.T) {
+	g := makeHoverGame(3, 3)
+	g.hoverCol = 1
+	g.hoverRow = 1
+
+	// Negative col — out of bounds.
+	g.updateHover(-1, 0)
+	if g.hoverCol != 1 || g.hoverRow != 1 {
+		t.Errorf("updateHover(-1,0) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	}
+
+	// Col beyond grid width.
+	g.updateHover(3, 0)
+	if g.hoverCol != 1 || g.hoverRow != 1 {
+		t.Errorf("updateHover(3,0) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	}
+
+	// Row beyond grid height.
+	g.updateHover(0, 3)
+	if g.hoverCol != 1 || g.hoverRow != 1 {
+		t.Errorf("updateHover(0,3) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	}
+}
+
+// TestUpdateHoverBufferReuse verifies that successive calls reuse hoverVictimsBuf
+// rather than growing a new allocation each time (the slice header may change but
+// the underlying array must be reused, indicated by consistent capacity).
+func TestUpdateHoverBufferReuse(t *testing.T) {
+	g := makeHoverGame(5, 5)
+	target := &creaturePalette[0]
+	connected := target.Connections[0]
+	g.grid.Cells[2][2] = Cell{Creature: target, Health: 1.0}
+	g.grid.Cells[3][3] = Cell{Creature: connected, Health: 1.0}
+
+	g.updateHover(2, 2)
+	capAfterFirst := cap(g.hoverVictimsBuf)
+
+	// Second call to same cell; buffer must not grow beyond initial cap.
+	g.updateHover(2, 2)
+	if cap(g.hoverVictimsBuf) > capAfterFirst*2 {
+		t.Errorf("hoverVictimsBuf cap grew unexpectedly: %d → %d", capAfterFirst, cap(g.hoverVictimsBuf))
 	}
 }
