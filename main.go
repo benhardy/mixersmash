@@ -381,6 +381,78 @@ func (g *Game) emptyColumns() []int {
 	return result
 }
 
+// applyDropAndClear writes the gravity-compacted cells back into the grid and
+// clears the vacated canvas rects. It must be called before buildDropMoveAnims
+// so that the grid is in its final state when anims are built.
+//
+// col is the column being processed. holeRows is the slice of dead-cell row
+// indices in that column. moves is the [][2]int output of gravityMoves.
+// snapshot is a per-row copy of the column taken before any writes (aliasing
+// safety). spawned is incremented for each new cell written (respawnCells path).
+func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapshot []Cell) (spawned int) {
+	// Write moved alive cells to their new positions.
+	for _, m := range moves {
+		g.grid.Cells[col][m[1]] = snapshot[m[0]]
+	}
+
+	if respawnCells {
+		// Write new random cells into the top slots (0..len(holeRows)-1).
+		for i := 0; i < len(holeRows); i++ {
+			g.grid.Cells[col][i] = Cell{Creature: paletteCreature(), Health: 1.0}
+			spawned++
+		}
+	} else {
+		// Zero the top slots that were vacated and are not being filled.
+		for i := 0; i < len(holeRows); i++ {
+			g.grid.Cells[col][i] = Cell{} // Health=0, invisible; canvas already cleared by vacating moves
+		}
+	}
+
+	// Clear only the vacated canvas positions (clipped to canvas bounds).
+	dcs := g.deviceCellSize
+	cw := g.canvas.Bounds().Max.X // guard against canvas size mismatch
+	ch := g.canvas.Bounds().Max.Y
+	for _, m := range moves {
+		x0, y0 := col*dcs, m[0]*dcs
+		x1, y1 := x0+dcs, y0+dcs
+		x1 = min(x1, cw)
+		y1 = min(y1, ch)
+		if x0 < x1 && y0 < y1 {
+			g.canvas.SubImage(image.Rect(x0, y0, x1, y1)).(*ebiten.Image).Clear()
+		}
+	}
+	return spawned
+}
+
+// buildDropMoveAnims appends MoveAnim entries for a single column after the
+// grid has already been updated by applyDropAndClear. It does not touch the
+// canvas.
+//
+// col is the column. holeRows is the slice of dead-cell row indices. moves is
+// the [][2]int output of gravityMoves. dcs is g.deviceCellSize (passed in to
+// avoid re-reading from g).
+func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs int) {
+	// Anims for moved alive cells (from their old row to their new row).
+	for _, m := range moves {
+		cell := g.grid.Cells[col][m[1]]
+		fx, fy := deviceCellCenter(col, m[0], dcs)
+		tx, ty := deviceCellCenter(col, m[1], dcs)
+		g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+	}
+
+	if respawnCells {
+		// Anims for new cells animating in from above screen.
+		for i := 0; i < len(holeRows); i++ {
+			cell := g.grid.Cells[col][i]
+			fx := float32(col*dcs + dcs/2)
+			fy := float32(-dcs / 2)
+			tx, ty := deviceCellCenter(col, i, dcs)
+			g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+			// The canvas position for row i was vacated by the moved cell above — already cleared.
+		}
+	}
+}
+
 // buildDropAnims computes MoveAnim entries for each affected column: alive cells
 // compact downward, and new random cells fall from above the screen top.
 // Only canvas positions that cells are vacating are cleared — not the whole column.
@@ -413,62 +485,14 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 
 		moves := gravityMoves(g.grid.Rows, holeRows)
 
-		// Apply grid moves using a snapshot to avoid aliasing.
+		// Take a snapshot of the column before any writes (aliasing safety).
 		snapshot := make([]Cell, g.grid.Rows)
 		for row := 0; row < g.grid.Rows; row++ {
 			snapshot[row] = g.grid.Cells[col][row]
 		}
 
-		// Write moved alive cells to their new positions.
-		for _, m := range moves {
-			g.grid.Cells[col][m[1]] = snapshot[m[0]]
-		}
-
-		if !respawnCells {
-			// Zero the top slots that were vacated and are not being filled.
-			for i := 0; i < len(holeRows); i++ {
-				g.grid.Cells[col][i] = Cell{} // Health=0, invisible; canvas already cleared by vacating moves
-			}
-		}
-
-		if respawnCells {
-			// Write new random cells into the top slots (0..len(holeRows)-1).
-			for i := 0; i < len(holeRows); i++ {
-				g.grid.Cells[col][i] = Cell{Creature: paletteCreature(), Health: 1.0}
-				spawned++
-			}
-		}
-
-		// Create MoveAnims for moved alive cells — clear only their old (vacated) positions.
-		dcs := g.deviceCellSize
-		cw := g.canvas.Bounds().Max.X // guard against canvas size mismatch
-		ch := g.canvas.Bounds().Max.Y
-		for _, m := range moves {
-			cell := g.grid.Cells[col][m[1]]
-			fx, fy := deviceCellCenter(col, m[0], dcs)
-			tx, ty := deviceCellCenter(col, m[1], dcs)
-			g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
-			// Clear the vacated canvas position (clipped to canvas bounds).
-			x0, y0 := col*dcs, m[0]*dcs
-			x1, y1 := x0+dcs, y0+dcs
-			x1 = min(x1, cw)
-			y1 = min(y1, ch)
-			if x0 < x1 && y0 < y1 {
-				g.canvas.SubImage(image.Rect(x0, y0, x1, y1)).(*ebiten.Image).Clear()
-			}
-		}
-
-		if respawnCells {
-			// Create MoveAnims for new cells animating in from above screen.
-			for i := 0; i < len(holeRows); i++ {
-				cell := g.grid.Cells[col][i]
-				fx := float32(col*dcs + dcs/2)
-				fy := float32(-dcs / 2)
-				tx, ty := deviceCellCenter(col, i, dcs)
-				g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
-				// The canvas position for row i was vacated by the moved cell above — already cleared.
-			}
-		}
+		spawned += g.applyDropAndClear(col, holeRows, moves, snapshot)
+		g.buildDropMoveAnims(col, holeRows, moves, g.deviceCellSize)
 	}
 	return spawned
 }
