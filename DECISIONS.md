@@ -342,6 +342,19 @@ The gel/bevel shader visibly desaturates cells. Saturated-hue chroma is set high
 
 ---
 
+## Tooling (2026-11-22)
+
+**`make analyse` is on-demand, not commit-gated**
+A `make analyse` target runs gocyclo, gocognit, and maintidx for occasional complexity review. It is deliberately not wired into the pre-commit hook or `make lint`: the user does not want every commit blocked on complexity thresholds, only the ability to inspect them when it seems useful.
+
+**Tools run via `go run <tool>@latest`, not installed binaries**
+All three tools are invoked through `go run` rather than PATH-installed binaries or `go.mod` tool directives. This keeps `go.mod` clean and makes the target self-contained on any host with Go and network access. A PATH-based invocation of golangci-lint was tried first; it broke on the Mac host where golangci-lint is not installed.
+
+**maintidx runs through golangci-lint, not its standalone cmd**
+The standalone `maintidx` binary errors on this module with "package 'bytes' without types" because its loader lacks full type information. golangci-lint loads types correctly and runs maintidx cleanly, so golangci-lint is the execution vehicle for that metric.
+
+---
+
 ## Process (2026-11-17)
 
 **ROADMAP for parked ideas**

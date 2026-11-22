@@ -40,6 +40,7 @@ Read with Read. Modify with Edit/Write. Never use sed -i, tee, redirects, heredo
 - Vet/format: `go vet ./...` and `gofmt -l .` (or `goimports`). Run both before declaring work done.
 - Lint: `golangci-lint run ./...` (or `make lint`) before declaring work done. Enabled linters: staticcheck, errcheck, ineffassign, unused, gocritic.
 - Race check for anything concurrent: `go test -race ./...`
+- Complexity analysis (occasional, NOT commit-gated): `make analyse` — runs gocyclo, gocognit, and maintidx, all via `go run` (no install needed; first run builds golangci-lint, ~2 min, then cached).
 
 ## Pre-commit hook
 The repo ships `.githooks/pre-commit` which runs gofmt, vet, build, test, and golangci-lint (if available) on every commit. Activate it in a fresh clone with `make hooks`. Bypass in a pinch with `git commit --no-verify`.
