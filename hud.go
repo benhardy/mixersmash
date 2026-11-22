@@ -65,13 +65,7 @@ func (h *hud) draw(frame *ebiten.Image, hudDevW int, score int, hoverCol, hoverR
 	themeName := activeTheme.name()
 
 	// Dirty check: re-render the cache if anything changed.
-	needRender := h.image == nil ||
-		h.image.Bounds().Dx() != hudDevW ||
-		h.image.Bounds().Dy() != frameH ||
-		score != h.lastScore ||
-		hoverCol != h.lastHoverCol ||
-		hoverRow != h.lastHoverRow ||
-		themeName != h.lastTheme
+	needRender := h.needsRedraw(hudDevW, frameH, score, hoverCol, hoverRow, themeName)
 
 	if needRender {
 		// Allocate or reallocate the cache image when size changed.
@@ -123,27 +117,11 @@ func (h *hud) draw(frame *ebiten.Image, hudDevW int, score int, hoverCol, hoverR
 		}
 
 		// Build the list of text lines (wrapping long instruction text).
+		rawLines := h.buildTextLines(score, hoverCol, hoverRow, maxChars, grid)
 		type textLine struct{ s string }
-		lines := []textLine{
-			{"Level 1"},
-		}
-		for _, wrapped := range hudWrapText(activeTheme.instructions(), maxChars) {
-			lines = append(lines, textLine{wrapped})
-		}
-		lines = append(lines, textLine{"Score: " + strconv.Itoa(score)})
-
-		// Hovered piece info line (optional).
-		if hoverCol >= 0 && hoverRow >= 0 &&
-			hoverCol < grid.Cols && hoverRow < grid.Rows {
-			cell := &grid.Cells[hoverCol][hoverRow]
-			if cell.Health > 0 && cell.Creature != nil {
-				name := cell.Creature.Name
-				if len(name) > 0 {
-					name = strings.ToUpper(name[:1]) + name[1:]
-				}
-				lines = append(lines, textLine{""}) // blank spacer
-				lines = append(lines, textLine{name + " - " + strconv.Itoa(cell.Creature.Power)})
-			}
+		lines := make([]textLine, len(rawLines))
+		for i, s := range rawLines {
+			lines[i] = textLine{s}
 		}
 
 		// lineSpacing doubles the font height to leave a blank line between each
@@ -183,4 +161,42 @@ func (h *hud) draw(frame *ebiten.Image, hudDevW int, score int, hoverCol, hoverR
 
 	// Every frame: blit the cached HUD image into the frame at the HUD strip origin.
 	frame.DrawImage(h.image, nil)
+}
+
+// needsRedraw reports whether the HUD cache needs to be re-rendered.
+// It is true when the cache image is absent, the size has changed, or any
+// piece of displayed content has changed since the last render.
+func (h *hud) needsRedraw(hudDevW, frameH, score, hoverCol, hoverRow int, themeName string) bool {
+	return h.image == nil ||
+		h.image.Bounds().Dx() != hudDevW ||
+		h.image.Bounds().Dy() != frameH ||
+		score != h.lastScore ||
+		hoverCol != h.lastHoverCol ||
+		hoverRow != h.lastHoverRow ||
+		themeName != h.lastTheme
+}
+
+// buildTextLines returns the ordered list of HUD text strings: the fixed
+// "Level 1" header, theme instructions (wrapped to maxChars), score line, and
+// an optional blank spacer + "Name - Power" line when the hovered cell is
+// alive.  Pure; no ebiten calls.
+func (h *hud) buildTextLines(score, hoverCol, hoverRow, maxChars int, grid *Grid) []string {
+	var lines []string
+	lines = append(lines, "Level 1")
+	lines = append(lines, hudWrapText(activeTheme.instructions(), maxChars)...)
+	lines = append(lines, "Score: "+strconv.Itoa(score))
+
+	if hoverCol >= 0 && hoverRow >= 0 &&
+		hoverCol < grid.Cols && hoverRow < grid.Rows {
+		cell := &grid.Cells[hoverCol][hoverRow]
+		if cell.Health > 0 && cell.Creature != nil {
+			name := cell.Creature.Name
+			if len(name) > 0 {
+				name = strings.ToUpper(name[:1]) + name[1:]
+			}
+			lines = append(lines, "") // blank spacer
+			lines = append(lines, name+" - "+strconv.Itoa(cell.Creature.Power))
+		}
+	}
+	return lines
 }

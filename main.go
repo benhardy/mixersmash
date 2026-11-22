@@ -1282,12 +1282,8 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	xOff := float32(xOffset)
 	if len(g.moveAnims) > 0 {
-		var t float32
-		dur := shuffleDuration
-		if g.currentState == stateDropping || g.currentState == stateColumnCollapsing {
-			dur = dropDuration
-		}
-		t = elapsedFraction(g.animStart, time.Now(), dur)
+		dur := moveAnimDuration(g.currentState)
+		t := elapsedFraction(g.animStart, time.Now(), dur)
 		t = min(t, 1.0)
 		dcs := g.deviceCellSize
 		if dcs <= 0 {
@@ -1295,16 +1291,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		}
 		maxR := float32(dcs/2 - 2)
 		for _, anim := range g.moveAnims {
-			var cx, cy float32
-			if g.currentState == stateShuffling {
-				// Quadratic ease-in-out, then quadratic Bézier with eased t
-				et := easeInOutQuad(t)
-				cx, cy = quadBezier2(anim.FromX, anim.FromY, anim.CtrlX, anim.CtrlY, anim.ToX, anim.ToY, et)
-			} else {
-				// Drop: quadratic ease-in (gravity), straight line
-				posT := easeInQuad(t)
-				cx, cy = lerp2(anim.FromX, anim.FromY, anim.ToX, anim.ToY, posT)
-			}
+			cx, cy := moveAnimPos(anim, g.currentState, t)
 			r := maxR * anim.Cell.Health
 			if r > 0 {
 				g.drawCompositeSprite(dst, xOff+cx, cy, r, anim.Cell.Creature)
@@ -1317,22 +1304,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		t = min(t, 1.0)
 		for i := 0; i < g.victimCount; i++ {
 			v := g.victimAnims[i]
-			var cx, cy float32
-			switch v.PathType {
-			case 0: // straight line
-				cx, cy = lerp2(v.FromX, v.FromY, v.ToX, v.ToY, t)
-			case 1: // quadratic Bezier arc
-				cx, cy = quadBezier2(v.FromX, v.FromY, v.CtrlX, v.CtrlY, v.ToX, v.ToY, t)
-			case 2: // inward spiral (radius shrinks, angle rotates)
-				ddx := v.FromX - v.ToX
-				ddy := v.FromY - v.ToY
-				r0 := float32(math.Sqrt(float64(ddx*ddx + ddy*ddy)))
-				theta0 := float32(math.Atan2(float64(ddy), float64(ddx)))
-				r := r0 * (1 - t)
-				theta := theta0 + v.SpiralTurns*2*float32(math.Pi)*t
-				cx = v.ToX + r*float32(math.Cos(float64(theta)))
-				cy = v.ToY + r*float32(math.Sin(float64(theta)))
-			}
+			cx, cy := victimAnimPos(v, t)
 			dcs2 := g.deviceCellSize
 			if dcs2 <= 0 {
 				dcs2 = cellSize
