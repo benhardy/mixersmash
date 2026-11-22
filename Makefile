@@ -48,5 +48,5 @@ analyse:
 	-go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -over 10 -avg .
 	@echo "=== gocognit (cognitive complexity, over 10, top 15) ==="
 	-go run github.com/uudashr/gocognit/cmd/gocognit@latest -over 10 -top 15 .
-	@echo "=== maintidx (maintainability index) ==="
-	-golangci-lint run --no-config --disable-all --enable maintidx ./...
+	@echo "=== maintidx (maintainability index; fetched via go run on first use) ==="
+	-go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run --no-config --default=none --enable=maintidx ./...
