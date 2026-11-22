@@ -1,4 +1,4 @@
-.PHONY: all mac linux wasm serve test lint clean hooks
+.PHONY: all mac linux wasm serve test lint clean hooks analyse
 
 mac: mixersmash_darwin_arm64
 
@@ -40,3 +40,13 @@ hooks:
 clean:
 	rm -f mixersmash_darwin_arm64 mixersmash_linux_amd64
 	rm -f web/mixersmash.wasm web/wasm_exec.js web/wasm-meta.js
+
+# analyse runs code-complexity analysis (cyclomatic, cognitive, maintainability).
+# Non-zero exits from individual tools (threshold findings) are tolerated.
+analyse:
+	@echo "=== gocyclo (cyclomatic complexity, over 10) ==="
+	-go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -over 10 -avg .
+	@echo "=== gocognit (cognitive complexity, over 10, top 15) ==="
+	-go run github.com/uudashr/gocognit/cmd/gocognit@latest -over 10 -top 15 .
+	@echo "=== maintidx (maintainability index) ==="
+	-golangci-lint run --no-config --disable-all --enable maintidx ./...
