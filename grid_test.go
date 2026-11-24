@@ -156,7 +156,7 @@ func TestNewGameStateInitialFields(t *testing.T) {
 	if g.actionRow != -1 {
 		t.Errorf("actionRow = %d, want -1", g.actionRow)
 	}
-	if g.canvas != nil {
+	if g.view.canvas != nil {
 		t.Errorf("canvas should be nil after newGameState, got non-nil")
 	}
 	if g.grid != grid {

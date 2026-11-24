@@ -92,12 +92,12 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 	if sh < 1 {
 		sh = 1
 	}
-	g.screenW = sw
-	g.screenH = sh
-	g.portrait = sh > sw
+	g.view.screenW = sw
+	g.view.screenH = sh
+	g.view.portrait = sh > sw
 
 	// Compute the presented fit-scale k: device pixels per logical design unit.
-	k := frameScaleFor(sw, sh, g.portrait)
+	k := frameScaleFor(sw, sh, g.view.portrait)
 
 	// Frame at the presented size: designW×designH logical → round(·*k) device px.
 	hudW := int(math.Round(float64(hudWidth) * k))
@@ -108,19 +108,19 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 	// Realloc only when the target pixel dimensions differ from the current frame.
 	// Comparing Bounds() avoids thrashing on tiny mobile viewport jitter that
 	// produces the same integer dimensions.
-	needRealloc := g.frame == nil ||
-		g.frame.Bounds().Dx() != fw ||
-		g.frame.Bounds().Dy() != fh
+	needRealloc := g.view.frame == nil ||
+		g.view.frame.Bounds().Dx() != fw ||
+		g.view.frame.Bounds().Dy() != fh
 
 	if needRealloc {
-		g.renderScale = s
-		g.frameScale = k
-		g.hudDevW = hudW
+		g.view.renderScale = s
+		g.view.frameScale = k
+		g.view.hudDevW = hudW
 		// deviceCellSize is derived from boardW (not the full frame width).
-		g.deviceCellSize = deviceCellSizeFor(boardW)
-		g.spriteRefSize = spriteRefSizeFor(g.deviceCellSize)
-		g.frame = ebiten.NewImage(fw, fh)
-		g.canvas = ebiten.NewImage(boardW, fh)
+		g.view.deviceCellSize = deviceCellSizeFor(boardW)
+		g.view.spriteRefSize = spriteRefSizeFor(g.view.deviceCellSize)
+		g.view.frame = ebiten.NewImage(fw, fh)
+		g.view.canvas = ebiten.NewImage(boardW, fh)
 		// Invalidate per-organism sprite cache — sprites were baked at the old size.
 		for i := range organismPalette {
 			organismPalette[i].Sprite = nil

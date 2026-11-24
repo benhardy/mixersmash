@@ -81,13 +81,11 @@ var hudFace = text.NewGoXFace(basicfont.Face7x13)
 // Game is the Ebitengine game state.
 type Game struct {
 	grid         *Grid
-	canvas       *ebiten.Image
-	frame        *ebiten.Image // landscape design-size offscreen frame; board renders here
-	currentState gameState     // which state are we in?
-	animStart    time.Time     // when did the current animation phase start?
-	actionCol    int           // the column an action is happening
-	actionRow    int           // the row any given action is happening
-	moveAnims    []MoveAnim    // used for both shuffle and drop phases
+	currentState gameState  // which state are we in?
+	animStart    time.Time  // when did the current animation phase start?
+	actionCol    int        // the column an action is happening
+	actionRow    int        // the row any given action is happening
+	moveAnims    []MoveAnim // used for both shuffle and drop phases
 	glowShader   *ebiten.Shader
 	gelShader    *ebiten.Shader
 	cellCount    int // number of live cells currently in the grid
@@ -111,6 +109,23 @@ type Game struct {
 	// glyph rendering
 	glyphFont *text.GoTextFaceSource
 
+	// view holds device/presentation geometry and the offscreen render targets.
+	view viewState
+
+	// perf holds the per-frame performance counters for the showPerfDebug readout.
+	perf perfCounters
+
+	// hud holds the persistent HUD strip cache and its dirty-check state.
+	hud hud
+}
+
+// viewState holds the device/presentation geometry and offscreen render targets.
+// Every field is derived from the device (screen size, DPI, orientation) in
+// LayoutF and consumed by the Draw and coordinate-mapping paths.
+type viewState struct {
+	canvas *ebiten.Image
+	frame  *ebiten.Image // landscape design-size offscreen frame; board renders here
+
 	// HiDPI render scale — set once per LayoutF call; derived from
 	// ebiten.Monitor().DeviceScaleFactor().
 	renderScale    float64 // current device scale factor (1.0 on standard displays)
@@ -127,12 +142,6 @@ type Game struct {
 	// initialPainted is false until the first in-loop frame, at which point
 	// repaintGrid is called to bake all sprites with a live graphics context.
 	initialPainted bool
-
-	// perf holds the per-frame performance counters for the showPerfDebug readout.
-	perf perfCounters
-
-	// hud holds the persistent HUD strip cache and its dirty-check state.
-	hud hud
 }
 
 // perfCounters holds the performance instrumentation for the showPerfDebug
@@ -246,7 +255,7 @@ func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
 
 	// Use the device-pixel bake size when available; fall back to the logical
 	// constant before the first LayoutF call initialises spriteRefSize.
-	sz := g.spriteRefSize
+	sz := g.view.spriteRefSize
 	if sz <= 0 {
 		sz = compositeSpriteRefSize
 	}
@@ -312,7 +321,7 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o 
 	g.perf.spritesThisFrame++
 	// Scale so the sprite's inscribed circle (diameter = sprite bake size)
 	// matches the requested radius.
-	refSz := g.spriteRefSize
+	refSz := g.view.spriteRefSize
 	if refSz <= 0 {
 		refSz = compositeSpriteRefSize
 	}
@@ -332,13 +341,13 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o 
 // glow is composited onto the screen each frame in Draw().
 func (g *Game) drawCell(col, row int, cellFullness float32) {
 	cell := &g.grid.Cells[col][row]
-	cs := g.deviceCellSize
+	cs := g.view.deviceCellSize
 	csFloat := float32(cs)
 
 	// Clear exactly the cell rect — full pixel replacement, not a blend.
 	x0 := col * cs
 	y0 := row * cs
-	g.canvas.SubImage(image.Rect(x0, y0, x0+cs, y0+cs)).(*ebiten.Image).Clear()
+	g.view.canvas.SubImage(image.Rect(x0, y0, x0+cs, y0+cs)).(*ebiten.Image).Clear()
 
 	if cell.IsDead() {
 		return
@@ -348,7 +357,7 @@ func (g *Game) drawCell(col, row int, cellFullness float32) {
 	cy := float32(row*cs) + halfCs
 	maxRadius := halfCs - 2
 	radius := maxRadius * cellFullness * cell.Health
-	g.drawCompositeSprite(g.canvas, cx, cy, radius, cell.Organism)
+	g.drawCompositeSprite(g.view.canvas, cx, cy, radius, cell.Organism)
 }
 
 // emptyColumns returns the sorted indices of columns in which every cell has
@@ -398,16 +407,16 @@ func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapsh
 	}
 
 	// Clear only the vacated canvas positions (clipped to canvas bounds).
-	dcs := g.deviceCellSize
-	cw := g.canvas.Bounds().Max.X // guard against canvas size mismatch
-	ch := g.canvas.Bounds().Max.Y
+	dcs := g.view.deviceCellSize
+	cw := g.view.canvas.Bounds().Max.X // guard against canvas size mismatch
+	ch := g.view.canvas.Bounds().Max.Y
 	for _, m := range moves {
 		x0, y0 := col*dcs, m[0]*dcs
 		x1, y1 := x0+dcs, y0+dcs
 		x1 = min(x1, cw)
 		y1 = min(y1, ch)
 		if x0 < x1 && y0 < y1 {
-			g.canvas.SubImage(image.Rect(x0, y0, x1, y1)).(*ebiten.Image).Clear()
+			g.view.canvas.SubImage(image.Rect(x0, y0, x1, y1)).(*ebiten.Image).Clear()
 		}
 	}
 	return spawned
@@ -481,7 +490,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		}
 
 		spawned += g.applyDropAndClear(col, holeRows, moves, snapshot)
-		g.buildDropMoveAnims(col, holeRows, moves, g.deviceCellSize)
+		g.buildDropMoveAnims(col, holeRows, moves, g.view.deviceCellSize)
 	}
 	return spawned
 }
@@ -517,9 +526,9 @@ func (g *Game) buildCollapseAnims() bool {
 	// During the slide, stale painted cells at both source and destination positions
 	// would show through under the animating sprites, causing visible doubling.
 	// Columns not involved in any move are untouched.
-	dcs := g.deviceCellSize
-	cw := g.canvas.Bounds().Max.X
-	ch := g.canvas.Bounds().Max.Y
+	dcs := g.view.deviceCellSize
+	cw := g.view.canvas.Bounds().Max.X
+	ch := g.view.canvas.Bounds().Max.Y
 	var clearColSet [gridCols]bool
 	for _, m := range moves {
 		clearColSet[m[0]] = true
@@ -533,7 +542,7 @@ func (g *Game) buildCollapseAnims() bool {
 		x1 := x0 + dcs
 		x1 = min(x1, cw)
 		if x0 < x1 {
-			g.canvas.SubImage(image.Rect(x0, 0, x1, ch)).(*ebiten.Image).Clear()
+			g.view.canvas.SubImage(image.Rect(x0, 0, x1, ch)).(*ebiten.Image).Clear()
 		}
 	}
 
@@ -601,7 +610,7 @@ func (g *Game) settleAfterRemoval() {
 func (g *Game) updateColumnCollapsing() error {
 	elapsed := elapsedFraction(g.animStart, time.Now(), dropDuration)
 	if elapsed >= 1.0 {
-		dcs := g.deviceCellSize
+		dcs := g.view.deviceCellSize
 		for _, anim := range g.moveAnims {
 			col := int(anim.ToX) / dcs
 			row := int(anim.ToY) / dcs
@@ -623,7 +632,7 @@ func (g *Game) updateColumnCollapsing() error {
 // with a size interpolation and bounce to indicate it was clicked.
 // oldMixerHealth is the Mixer's health before this click; newMixerHealth is after.
 func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerHealth float32) {
-	dcs := g.deviceCellSize
+	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
 	}
@@ -696,7 +705,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		// Clear source positions on canvas (they will be drawn as moving overlays).
 		for _, n := range aliveNeighbors {
 			x0, y0 := n[0]*dcs, n[1]*dcs
-			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
+			g.view.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
 		}
 
 		// Write cells to their permuted destinations in the grid now (canvas repaint on settle).
@@ -802,7 +811,7 @@ func (g *Game) commitCellAt(col, row int) error {
 	g.actionRow = row
 	g.victimCount = 0
 
-	dcs := g.deviceCellSize
+	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
 	}
@@ -838,7 +847,7 @@ func (g *Game) commitCellAt(col, row int) error {
 			pt, cx, cy, st := victimPathParams(fromX, fromY, seedCenterX, seedCenterY)
 			// Clear victim's canvas position (it is now an overlay animation).
 			x0, y0 := c*dcs, r*dcs
-			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
+			g.view.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
 			v = MoveAnim{
 				Col:         c,
 				Row:         r,
@@ -888,10 +897,10 @@ func findReleasedID(ids []ebiten.TouchID, target ebiten.TouchID) bool {
 // When g.frame is nil (pre-LayoutF) it falls back to the design constants with
 // no HUD, matching the inline logic previously in updateWaiting.
 func (g *Game) frameDims() (frameW, frameH float64, hudDevW int) {
-	if g.frame != nil {
-		frameW = float64(g.frame.Bounds().Dx())
-		frameH = float64(g.frame.Bounds().Dy())
-		hudDevW = g.hudDevW
+	if g.view.frame != nil {
+		frameW = float64(g.view.frame.Bounds().Dx())
+		frameH = float64(g.view.frame.Bounds().Dy())
+		hudDevW = g.view.hudDevW
 		return
 	}
 	frameW = float64(windowWidth)
@@ -927,14 +936,14 @@ func (g *Game) updateHover(hc, hr int) {
 
 // updateWaiting handles hover recompute and click/touch processing while in stateWaiting.
 func (g *Game) updateWaiting() error {
-	dcs := g.deviceCellSize
+	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
 	}
 
 	frameW, frameH, hudDevW := g.frameDims()
-	sw := float64(g.screenW)
-	sh := float64(g.screenH)
+	sw := float64(g.view.screenW)
+	sh := float64(g.view.screenH)
 	if sw <= 0 {
 		sw = frameW
 		sh = frameH
@@ -967,7 +976,7 @@ func (g *Game) updateWaiting() error {
 	if g.input.touchActive && containsTouchID(currentTouches, g.input.activeTouchID) {
 		tx, ty := ebiten.TouchPosition(g.input.activeTouchID)
 		g.input.lastTouchX, g.input.lastTouchY = tx, ty
-		hc, hr := screenToBoard(float64(tx), float64(ty), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
+		hc, hr := screenToBoard(float64(tx), float64(ty), sw, sh, frameW, frameH, g.view.portrait, hudDevW, dcs)
 		g.updateHover(hc, hr)
 	}
 
@@ -976,7 +985,7 @@ func (g *Game) updateWaiting() error {
 	// Do NOT re-read ebiten.TouchPosition for the released ID — on this Ebitengine
 	// version it returns (0,0) for an already-released touch.
 	if findReleasedID(justReleased, g.input.activeTouchID) {
-		col, row := screenToBoard(float64(g.input.lastTouchX), float64(g.input.lastTouchY), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
+		col, row := screenToBoard(float64(g.input.lastTouchX), float64(g.input.lastTouchY), sw, sh, frameW, frameH, g.view.portrait, hudDevW, dcs)
 		// Clear touch state before commit so a reused ID cannot match stale state.
 		g.input.touchActive = false
 		if err := g.commitCellAt(col, row); err != nil {
@@ -989,12 +998,12 @@ func (g *Game) updateWaiting() error {
 		// Hover recompute.
 		// CursorPosition returns device-pixel screen coords; map to board via screenToBoard.
 		mx, my := ebiten.CursorPosition()
-		hc, hr := screenToBoard(float64(mx), float64(my), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
+		hc, hr := screenToBoard(float64(mx), float64(my), sw, sh, frameW, frameH, g.view.portrait, hudDevW, dcs)
 		g.updateHover(hc, hr)
 
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			px, py := ebiten.CursorPosition()
-			col, row := screenToBoard(float64(px), float64(py), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
+			col, row := screenToBoard(float64(px), float64(py), sw, sh, frameW, frameH, g.view.portrait, hudDevW, dcs)
 			if err := g.commitCellAt(col, row); err != nil {
 				return err
 			}
@@ -1050,7 +1059,7 @@ func (g *Game) updateDropping() error {
 	if elapsed < 1.0 {
 		return nil
 	}
-	dcs := g.deviceCellSize
+	dcs := g.view.deviceCellSize
 	for _, anim := range g.moveAnims {
 		col := int(anim.ToX) / dcs
 		row := int(anim.ToY) / dcs
@@ -1069,9 +1078,9 @@ func (g *Game) Update() error {
 	// that ebiten.NewImage / DrawRectShader / text.Draw have a valid backend.
 	// This must run before any state logic so the canvas is fully painted
 	// before the first Draw call.
-	if !g.initialPainted {
+	if !g.view.initialPainted {
 		g.repaintGrid()
-		g.initialPainted = true
+		g.view.initialPainted = true
 	}
 
 	ebiten.SetWindowTitle(fmt.Sprintf("MixerSmash — cells: %d  score: %d", g.cellCount, g.score))
@@ -1117,54 +1126,54 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// Render the board into the landscape frame image.
 	// Guard: frame may be nil on the very first frame before LayoutF runs.
-	if g.frame == nil {
+	if g.view.frame == nil {
 		screen.Fill(color.Black)
 		return
 	}
-	g.frame.Fill(color.Black)
+	g.view.frame.Fill(color.Black)
 
 	// Board destination: the right portion of the frame, offset by hudDeviceW.
 	// We draw directly into g.frame using an explicit x-offset rather than a
 	// SubImage, because Ebiten SubImage-as-destination clips but does NOT
 	// translate the origin — board-local coords at x=0 would land at x=0 in
 	// the frame and be hidden under the HUD strip.
-	frameH := g.frame.Bounds().Dy()
-	frameW := g.frame.Bounds().Dx()
-	hudDevW := g.hudDevW
+	frameH := g.view.frame.Bounds().Dy()
+	frameW := g.view.frame.Bounds().Dx()
+	hudDevW := g.view.hudDevW
 
-	g.drawCanvas(g.frame, hudDevW)
-	g.drawVictimLine(g.frame, hudDevW)
-	g.drawTargetBounce(g.frame, hudDevW)
-	g.drawMoveAnims(g.frame, hudDevW)
+	g.drawCanvas(g.view.frame, hudDevW)
+	g.drawVictimLine(g.view.frame, hudDevW)
+	g.drawTargetBounce(g.view.frame, hudDevW)
+	g.drawMoveAnims(g.view.frame, hudDevW)
 
 	// Draw the HUD strip in the left portion of the frame.
-	g.hud.draw(g.frame, hudDevW, g.score, g.input.hoverCol, g.input.hoverRow, g.grid)
+	g.hud.draw(g.view.frame, hudDevW, g.score, g.input.hoverCol, g.input.hoverRow, g.grid)
 
 	// Draw orientation debug readout (gated by showOrientationDebug const).
 	if showOrientationDebug {
-		g.drawOrientationDebug(g.frame)
+		g.drawOrientationDebug(g.view.frame)
 	}
 
 	// Draw performance readout (gated by showPerfDebug const).
 	if showPerfDebug {
-		g.drawPerfDebug(g.frame)
+		g.drawPerfDebug(g.view.frame)
 	}
 
 	// Present the frame onto the actual screen.
 	screen.Fill(color.Black)
 	fw := float64(frameW)
 	fh := float64(frameH)
-	sw := float64(g.screenW)
-	sh := float64(g.screenH)
+	sw := float64(g.view.screenW)
+	sh := float64(g.view.screenH)
 	if sw <= 0 {
 		// LayoutF not yet called; fall back to screen bounds.
 		sw = float64(screen.Bounds().Dx())
 		sh = float64(screen.Bounds().Dy())
 	}
 	var opts ebiten.DrawImageOptions
-	opts.GeoM = presentGeoM(g.portrait, sw, sh, fw, fh)
+	opts.GeoM = presentGeoM(g.view.portrait, sw, sh, fw, fh)
 	opts.Filter = ebiten.FilterLinear
-	screen.DrawImage(g.frame, &opts)
+	screen.DrawImage(g.view.frame, &opts)
 }
 
 // presentGeoM returns the GeoM that maps g.frame onto the screen.
@@ -1207,11 +1216,11 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 	if g.input.hoverCol == -1 || len(g.input.victimHints) == 0 {
 		return
 	}
-	dcs := g.deviceCellSize
+	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
 	}
-	s := g.renderScale
+	s := g.view.renderScale
 	if s <= 0 {
 		s = 1.0
 	}
@@ -1246,12 +1255,12 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 // drawCanvas blits the persistent offscreen canvas into dst at an explicit
 // x-offset so board-local pixel coords land at the right position in the frame.
 func (g *Game) drawCanvas(dst *ebiten.Image, xOffset int) {
-	if dst == nil || g.canvas == nil {
+	if dst == nil || g.view.canvas == nil {
 		return
 	}
 	var opts ebiten.DrawImageOptions
 	opts.GeoM.Translate(float64(xOffset), 0)
-	dst.DrawImage(g.canvas, &opts)
+	dst.DrawImage(g.view.canvas, &opts)
 }
 
 // drawTargetBounce renders the target cell bounce animation.
@@ -1272,7 +1281,7 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 		eased := easeInQuad(lt) // ease-in: slow at peak, fast at end
 		r = lerp(g.targetAnimPeakR, g.targetAnimEndR, eased)
 	}
-	dcs := g.deviceCellSize
+	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
 	}
@@ -1290,7 +1299,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		dur := moveAnimDuration(g.currentState)
 		t := elapsedFraction(g.animStart, time.Now(), dur)
 		t = min(t, 1.0)
-		dcs := g.deviceCellSize
+		dcs := g.view.deviceCellSize
 		if dcs <= 0 {
 			dcs = cellSize
 		}
@@ -1325,7 +1334,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		for i := 0; i < g.victimCount; i++ {
 			v := g.victimAnims[i]
 			cx, cy := victimAnimPos(v, t)
-			dcs2 := g.deviceCellSize
+			dcs2 := g.view.deviceCellSize
 			if dcs2 <= 0 {
 				dcs2 = cellSize
 			}
@@ -1345,7 +1354,7 @@ func (g *Game) drawOrientationDebug(frame *ebiten.Image) {
 		return
 	}
 	orient := "L"
-	if g.portrait {
+	if g.view.portrait {
 		orient = "P"
 	}
 	angle := deviceOrientationAngle()
@@ -1353,7 +1362,7 @@ func (g *Game) drawOrientationDebug(frame *ebiten.Image) {
 	if angle < 0 {
 		angleStr = "n/a"
 	}
-	line := fmt.Sprintf("%s %dx%d ang=%s sc=%.2f", orient, g.screenW, g.screenH, angleStr, g.renderScale)
+	line := fmt.Sprintf("%s %dx%d ang=%s sc=%.2f", orient, g.view.screenW, g.view.screenH, angleStr, g.view.renderScale)
 	var opts text.DrawOptions
 	opts.ColorScale.ScaleWithColor(color.RGBA{0xFF, 0xFF, 0x00, 0xFF})
 	const marginBottom = 16
@@ -1484,19 +1493,19 @@ func main() {
 	// The frame is [ HUD strip (hudDevW) | board (boardW) ] wide.
 	// deviceCellSize is derived from boardW (not the full frame width).
 	s := deviceScale()
-	game.renderScale = s
+	game.view.renderScale = s
 	initSW := int(math.Round(float64(windowWidth) * s))
 	initSH := int(math.Round(float64(windowHeight) * s))
 	k := frameScaleFor(initSW, initSH, false) // initial: landscape assumed
-	game.frameScale = k
+	game.view.frameScale = k
 	hudW := int(math.Round(float64(hudWidth) * k))
 	boardW := int(math.Round(float64(windowWidth) * k))
 	dh := int(math.Round(float64(windowHeight) * k))
-	game.hudDevW = hudW
-	game.deviceCellSize = deviceCellSizeFor(boardW)
-	game.spriteRefSize = spriteRefSizeFor(game.deviceCellSize)
-	game.frame = ebiten.NewImage(hudW+boardW, dh)
-	game.canvas = ebiten.NewImage(boardW, dh)
+	game.view.hudDevW = hudW
+	game.view.deviceCellSize = deviceCellSizeFor(boardW)
+	game.view.spriteRefSize = spriteRefSizeFor(game.view.deviceCellSize)
+	game.view.frame = ebiten.NewImage(hudW+boardW, dh)
+	game.view.canvas = ebiten.NewImage(boardW, dh)
 
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
