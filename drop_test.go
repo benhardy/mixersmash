@@ -33,7 +33,7 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	}
 
 	g := &Game{
-		grid: &Grid{Cols: cols, Rows: rows, Cells: cells},
+		board: boardState{grid: &Grid{Cols: cols, Rows: rows, Cells: cells}},
 	}
 
 	holeRows := []int{2}

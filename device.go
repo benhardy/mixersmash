@@ -126,8 +126,8 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 			organismPalette[i].Sprite = nil
 		}
 		// Repaint all live cells into the new device-sized canvas.
-		for c := 0; c < g.grid.Cols; c++ {
-			for r := 0; r < g.grid.Rows; r++ {
+		for c := 0; c < g.board.grid.Cols; c++ {
+			for r := 0; r < g.board.grid.Rows; r++ {
 				g.drawCell(c, r, 1.0)
 			}
 		}

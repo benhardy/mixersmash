@@ -159,7 +159,7 @@ func TestNewGameStateInitialFields(t *testing.T) {
 	if g.view.canvas != nil {
 		t.Errorf("canvas should be nil after newGameState, got non-nil")
 	}
-	if g.grid != grid {
+	if g.board.grid != grid {
 		t.Errorf("grid pointer mismatch")
 	}
 }
@@ -907,7 +907,7 @@ func TestUpdateHoverDeadCellLeavesHoverUnchanged(t *testing.T) {
 	g.input.hoverRow = 0
 
 	// Kill cell (1,1).
-	g.grid.Cells[1][1].Health = 0
+	g.board.grid.Cells[1][1].Health = 0
 
 	g.updateHover(1, 1)
 
