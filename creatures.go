@@ -37,15 +37,15 @@ func init() {
 }
 
 // Organism pairs a display name with its emoji glyph and a unique background colour.
-// Sprite holds the lazily-baked composite *ebiten.Image for this organism; nil
-// until the first call to compositeCachedSprite for this organism pointer.
 // PairID groups each animal with its matching food (0..10).
 // IsAnimal distinguishes the animal (true) from the food (false) in each pair.
+// The lazily-baked composite sprite for an organism is held separately in the
+// render layer (Game.spriteCache), keyed by organism pointer, so this type
+// carries no rendering handles.
 type Organism struct {
 	Name     string
 	Glyph    rune
 	Color    color.RGBA
-	Sprite   *ebiten.Image
 	PairID   int
 	IsAnimal bool
 	IsMixer  bool

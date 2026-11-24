@@ -85,6 +85,11 @@ type Game struct {
 	gelShader  *ebiten.Shader
 	glyphFont  *text.GoTextFaceSource
 
+	// spriteCache holds the lazily-baked composite sprite per organism, keyed by
+	// organism pointer. Cleared on a device-scale change (LayoutF) so sprites
+	// rebake at the new size. This is a render cache, not game state.
+	spriteCache map[*Organism]*ebiten.Image
+
 	// board holds the logical game-board model: cell grid, live-cell count, score.
 	board boardState
 
@@ -219,6 +224,7 @@ type inputState struct {
 // calling this.
 func newGameState(grid *Grid) *Game {
 	return &Game{
+		spriteCache: make(map[*Organism]*ebiten.Image),
 		board: boardState{
 			grid:      grid,
 			cellCount: grid.Cols * grid.Rows,
@@ -242,7 +248,7 @@ func newGameState(grid *Grid) *Game {
 }
 
 // compositeCachedSprite returns a pre-rendered composite *ebiten.Image for o,
-// building and caching it on o.Sprite on first call.  The image carries a
+// building and caching it in g.spriteCache on first call.  The image carries a
 // circa-2003 Apple Aqua jelly-button look rendered via the gel fragment shader:
 //
 //  1. Base image — an sz×sz opaque image filled with o.Color, then the organism
@@ -262,8 +268,8 @@ func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
 	if o == nil || g.glyphFont == nil {
 		return nil
 	}
-	if o.Sprite != nil {
-		return o.Sprite
+	if s := g.spriteCache[o]; s != nil {
+		return s
 	}
 
 	// Compile the gel shader once per game instance (lazy, mirrors glowShader).
@@ -326,7 +332,7 @@ func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
 	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
 
 	g.perf.bakeCount++
-	o.Sprite = composite
+	g.spriteCache[o] = composite
 	return composite
 }
 
