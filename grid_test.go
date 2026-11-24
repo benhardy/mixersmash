@@ -144,17 +144,17 @@ func TestNewGameStateInitialFields(t *testing.T) {
 	grid := NewGrid(4, 4)
 	g := newGameState(grid)
 
-	if g.currentState != stateWaiting {
-		t.Errorf("currentState = %d, want stateWaiting (%d)", g.currentState, stateWaiting)
+	if g.anim.currentState != stateWaiting {
+		t.Errorf("currentState = %d, want stateWaiting (%d)", g.anim.currentState, stateWaiting)
 	}
-	if !g.animStart.IsZero() {
-		t.Errorf("animStart = %v, want zero time.Time", g.animStart)
+	if !g.anim.animStart.IsZero() {
+		t.Errorf("animStart = %v, want zero time.Time", g.anim.animStart)
 	}
-	if g.actionCol != -1 {
-		t.Errorf("actionCol = %d, want -1", g.actionCol)
+	if g.anim.actionCol != -1 {
+		t.Errorf("actionCol = %d, want -1", g.anim.actionCol)
 	}
-	if g.actionRow != -1 {
-		t.Errorf("actionRow = %d, want -1", g.actionRow)
+	if g.anim.actionRow != -1 {
+		t.Errorf("actionRow = %d, want -1", g.anim.actionRow)
 	}
 	if g.view.canvas != nil {
 		t.Errorf("canvas should be nil after newGameState, got non-nil")

@@ -80,31 +80,18 @@ var hudFace = text.NewGoXFace(basicfont.Face7x13)
 
 // Game is the Ebitengine game state.
 type Game struct {
-	grid         *Grid
-	currentState gameState  // which state are we in?
-	animStart    time.Time  // when did the current animation phase start?
-	actionCol    int        // the column an action is happening
-	actionRow    int        // the row any given action is happening
-	moveAnims    []MoveAnim // used for both shuffle and drop phases
-	glowShader   *ebiten.Shader
-	gelShader    *ebiten.Shader
-	cellCount    int // number of live cells currently in the grid
-	score        int // cumulative score
+	grid       *Grid
+	glowShader *ebiten.Shader
+	gelShader  *ebiten.Shader
+	cellCount  int // number of live cells currently in the grid
+	score      int // cumulative score
+
+	// anim holds the animation/state-machine state: current phase, phase timing,
+	// the in-flight action cell, and the active move/victim/target animations.
+	anim animState
 
 	// input holds pointer/touch tracking and hover-hint state derived from device input.
 	input inputState
-
-	// victim movement animation fields (one entry per simultaneous victim)
-	victimCount int
-	victimAnims []MoveAnim
-
-	// target cell bounce animation fields
-	targetAnimating    bool
-	targetAnimStart    time.Time
-	targetAnimStartR   float32
-	targetAnimPeakR    float32
-	targetAnimEndR     float32
-	targetAnimOrganism *Organism
 
 	// glyph rendering
 	glyphFont *text.GoTextFaceSource
@@ -117,6 +104,30 @@ type Game struct {
 
 	// hud holds the persistent HUD strip cache and its dirty-check state.
 	hud hud
+}
+
+// animState holds the update/animation state machine: the current phase, the
+// wall-clock start of the active phase, the in-flight action cell, and the
+// move/victim/target animation buffers. It is driven by the update* methods and
+// consumed by the draw* methods.
+type animState struct {
+	currentState gameState  // which state are we in?
+	animStart    time.Time  // when did the current animation phase start?
+	actionCol    int        // the column an action is happening
+	actionRow    int        // the row any given action is happening
+	moveAnims    []MoveAnim // used for both shuffle and drop phases
+
+	// victim movement animation fields (one entry per simultaneous victim)
+	victimCount int
+	victimAnims []MoveAnim
+
+	// target cell bounce animation fields
+	targetAnimating    bool
+	targetAnimStart    time.Time
+	targetAnimStartR   float32
+	targetAnimPeakR    float32
+	targetAnimEndR     float32
+	targetAnimOrganism *Organism
 }
 
 // viewState holds the device/presentation geometry and offscreen render targets.
@@ -200,14 +211,16 @@ type inputState struct {
 // calling this.
 func newGameState(grid *Grid) *Game {
 	return &Game{
-		grid:            grid,
-		currentState:    stateWaiting,
-		actionCol:       -1,
-		actionRow:       -1,
-		cellCount:       grid.Cols * grid.Rows,
-		victimAnims:     make([]MoveAnim, gridCols*gridRows), // flood can clear up to Cols*Rows cells
-		victimCount:     0,
-		targetAnimating: false,
+		grid:      grid,
+		cellCount: grid.Cols * grid.Rows,
+		anim: animState{
+			currentState:    stateWaiting,
+			actionCol:       -1,
+			actionRow:       -1,
+			victimAnims:     make([]MoveAnim, gridCols*gridRows), // flood can clear up to Cols*Rows cells
+			victimCount:     0,
+			targetAnimating: false,
+		},
 		input: inputState{
 			hoverCol:        -1,
 			hoverRow:        -1,
@@ -435,7 +448,7 @@ func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs i
 		cell := g.grid.Cells[col][m[1]]
 		fx, fy := deviceCellCenter(col, m[0], dcs)
 		tx, ty := deviceCellCenter(col, m[1], dcs)
-		g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+		g.anim.moveAnims = append(g.anim.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 	}
 
 	if respawnCells {
@@ -445,7 +458,7 @@ func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs i
 			fx := float32(col*dcs + dcs/2)
 			fy := float32(-dcs / 2)
 			tx, ty := deviceCellCenter(col, i, dcs)
-			g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+			g.anim.moveAnims = append(g.anim.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 			// The canvas position for row i was vacated by the moved cell above — already cleared.
 		}
 	}
@@ -456,8 +469,8 @@ func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs i
 // Only canvas positions that cells are vacating are cleared — not the whole column.
 // Returns the number of new cells spawned (non-zero only when respawnCells is true).
 func (g *Game) buildDropAnims(removedCols []int) int {
-	if cap(g.moveAnims) > 0 {
-		g.moveAnims = g.moveAnims[:0]
+	if cap(g.anim.moveAnims) > 0 {
+		g.anim.moveAnims = g.anim.moveAnims[:0]
 	}
 	spawned := 0
 	var seen [gridCols]bool
@@ -547,8 +560,8 @@ func (g *Game) buildCollapseAnims() bool {
 	}
 
 	// Build horizontal MoveAnims.
-	if cap(g.moveAnims) > 0 {
-		g.moveAnims = g.moveAnims[:0]
+	if cap(g.anim.moveAnims) > 0 {
+		g.anim.moveAnims = g.anim.moveAnims[:0]
 	}
 	for _, m := range moves {
 		oldCol, newCol := m[0], m[1]
@@ -559,12 +572,12 @@ func (g *Game) buildCollapseAnims() bool {
 			}
 			fx, fy := deviceCellCenter(oldCol, r, dcs)
 			tx, ty := deviceCellCenter(newCol, r, dcs)
-			g.moveAnims = append(g.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+			g.anim.moveAnims = append(g.anim.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 		}
 	}
 
-	g.animStart = time.Now()
-	g.currentState = stateColumnCollapsing
+	g.anim.animStart = time.Now()
+	g.anim.currentState = stateColumnCollapsing
 	return true
 }
 
@@ -584,7 +597,7 @@ func (g *Game) repaintGrid() {
 // canvas drift is corrected on every settle.
 func (g *Game) enterWaiting() {
 	g.repaintGrid()
-	g.currentState = stateWaiting
+	g.anim.currentState = stateWaiting
 	// Force a GC collection while the screen is static between moves, so the
 	// collector does not trigger mid-animation and cause visible frame spikes.
 	runtime.GC()
@@ -608,17 +621,17 @@ func (g *Game) settleAfterRemoval() {
 // updateColumnCollapsing waits for the horizontal column-collapse animation to
 // complete, commits cell positions to canvas, and returns to stateWaiting.
 func (g *Game) updateColumnCollapsing() error {
-	elapsed := elapsedFraction(g.animStart, time.Now(), dropDuration)
+	elapsed := elapsedFraction(g.anim.animStart, time.Now(), dropDuration)
 	if elapsed >= 1.0 {
 		dcs := g.view.deviceCellSize
-		for _, anim := range g.moveAnims {
+		for _, anim := range g.anim.moveAnims {
 			col := int(anim.ToX) / dcs
 			row := int(anim.ToY) / dcs
 			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
 				g.drawCell(col, row, 1.0)
 			}
 		}
-		g.moveAnims = nil
+		g.anim.moveAnims = nil
 		g.enterWaiting()
 	}
 	return nil
@@ -714,9 +727,9 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 			g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
 		}
 	}
-	g.moveAnims = anims
-	g.animStart = time.Now()
-	g.currentState = stateShuffling
+	g.anim.moveAnims = anims
+	g.anim.animStart = time.Now()
+	g.anim.currentState = stateShuffling
 }
 
 // updateShuffling waits for the shuffle animation to complete. For a non-killing
@@ -724,17 +737,17 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 // killing click (the action cell IsDead() after BumpHealth reached 0) it routes
 // into the drop pipeline so the dead Mixer's column collapses.
 func (g *Game) updateShuffling() error {
-	elapsed := elapsedFraction(g.animStart, time.Now(), shuffleDuration)
+	elapsed := elapsedFraction(g.anim.animStart, time.Now(), shuffleDuration)
 	if elapsed < 1.0 {
 		return nil
 	}
-	g.moveAnims = nil
+	g.anim.moveAnims = nil
 	// Check whether the mixer at the action position was killed this click.
-	killed := g.actionCol >= 0 &&
-		g.actionCol < g.grid.Cols &&
-		g.actionRow >= 0 &&
-		g.actionRow < g.grid.Rows &&
-		g.grid.Cells[g.actionCol][g.actionRow].IsDead()
+	killed := g.anim.actionCol >= 0 &&
+		g.anim.actionCol < g.grid.Cols &&
+		g.anim.actionRow >= 0 &&
+		g.anim.actionRow < g.grid.Rows &&
+		g.grid.Cells[g.anim.actionCol][g.anim.actionRow].IsDead()
 	if !killed {
 		g.enterWaiting()
 		return nil
@@ -749,13 +762,13 @@ func (g *Game) updateShuffling() error {
 	// falling cells in actionCol, so painting them first is harmless.  Without
 	// this repaint the non-actionCol neighbours stay blank throughout the drop.
 	g.repaintGrid()
-	spawned := g.buildDropAnims([]int{g.actionCol})
+	spawned := g.buildDropAnims([]int{g.anim.actionCol})
 	if respawnCells {
 		g.cellCount += spawned
 	}
-	if len(g.moveAnims) > 0 {
-		g.animStart = time.Now()
-		g.currentState = stateDropping
+	if len(g.anim.moveAnims) > 0 {
+		g.anim.animStart = time.Now()
+		g.anim.currentState = stateDropping
 	} else {
 		g.settleAfterRemoval()
 	}
@@ -769,8 +782,8 @@ func (g *Game) commitMixer(cell *Cell, col int, row int) error {
 	}
 	g.drawCell(col, row, 1.0)
 	// Record the action position so updateShuffling can detect a killing click.
-	g.actionCol = col
-	g.actionRow = row
+	g.anim.actionCol = col
+	g.anim.actionRow = row
 	// Show new size, shuffle neighbours.  On the killing click the mixer
 	// shrinks to 0 during this animation; updateShuffling will route to the
 	// drop pipeline when it detects IsDead() at the action position.
@@ -807,9 +820,9 @@ func (g *Game) commitCellAt(col, row int) error {
 		return nil
 	}
 
-	g.actionCol = col
-	g.actionRow = row
-	g.victimCount = 0
+	g.anim.actionCol = col
+	g.anim.actionRow = row
+	g.anim.victimCount = 0
 
 	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
@@ -863,12 +876,12 @@ func (g *Game) commitCellAt(col, row int) error {
 				Rotations:   0,
 			}
 		}
-		g.victimAnims[g.victimCount] = v
-		g.victimCount++
+		g.anim.victimAnims[g.anim.victimCount] = v
+		g.anim.victimCount++
 	}
 
-	g.animStart = time.Now()
-	g.currentState = stateVictimMoving
+	g.anim.animStart = time.Now()
+	g.anim.currentState = stateVictimMoving
 	return nil
 }
 
@@ -1016,17 +1029,17 @@ func (g *Game) updateWaiting() error {
 // updateVictimMoving advances the victim movement animation and transitions to
 // stateDropping (or stateWaiting) when the animation completes.
 func (g *Game) updateVictimMoving() error {
-	t := elapsedFraction(g.animStart, time.Now(), victimDuration)
+	t := elapsedFraction(g.anim.animStart, time.Now(), victimDuration)
 	if t < 1.0 {
 		return nil
 	}
 	// Animation complete — score the clear and trigger drop.
 	// All victim cells already have Health=0 (set in commitCellAt).
-	g.score += scoreForCluster(g.victimCount)
+	g.score += scoreForCluster(g.anim.victimCount)
 	var colSeen [gridCols]bool
-	colSeen[g.actionCol] = true
-	for i := 0; i < g.victimCount; i++ {
-		v := g.victimAnims[i]
+	colSeen[g.anim.actionCol] = true
+	for i := 0; i < g.anim.victimCount; i++ {
+		v := g.anim.victimAnims[i]
 		colSeen[v.Col] = true
 	}
 	var affectedColsArr [gridCols]int
@@ -1037,14 +1050,14 @@ func (g *Game) updateVictimMoving() error {
 			affectedColsCount++
 		}
 	}
-	g.victimCount = 0
+	g.anim.victimCount = 0
 	spawned := g.buildDropAnims(affectedColsArr[:affectedColsCount])
 	if respawnCells {
 		g.cellCount += spawned
 	}
-	if len(g.moveAnims) > 0 {
-		g.animStart = time.Now()
-		g.currentState = stateDropping
+	if len(g.anim.moveAnims) > 0 {
+		g.anim.animStart = time.Now()
+		g.anim.currentState = stateDropping
 	} else {
 		g.settleAfterRemoval()
 	}
@@ -1055,19 +1068,19 @@ func (g *Game) updateVictimMoving() error {
 // cell positions and returns to stateWaiting (or stateColumnCollapsing when
 // empty columns remain after the drop settles).
 func (g *Game) updateDropping() error {
-	elapsed := elapsedFraction(g.animStart, time.Now(), dropDuration)
+	elapsed := elapsedFraction(g.anim.animStart, time.Now(), dropDuration)
 	if elapsed < 1.0 {
 		return nil
 	}
 	dcs := g.view.deviceCellSize
-	for _, anim := range g.moveAnims {
+	for _, anim := range g.anim.moveAnims {
 		col := int(anim.ToX) / dcs
 		row := int(anim.ToY) / dcs
 		if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
 			g.drawCell(col, row, 1.0)
 		}
 	}
-	g.moveAnims = nil
+	g.anim.moveAnims = nil
 	g.settleAfterRemoval()
 	return nil
 }
@@ -1089,14 +1102,14 @@ func (g *Game) Update() error {
 	g.input.hoverCol, g.input.hoverRow = -1, -1
 	g.input.victimHints = g.input.victimHints[:0]
 
-	if g.targetAnimating {
-		if elapsedFraction(g.targetAnimStart, time.Now(), targetAnimDuration) >= 1.0 {
-			g.targetAnimating = false
-			g.drawCell(g.actionCol, g.actionRow, 1.0)
+	if g.anim.targetAnimating {
+		if elapsedFraction(g.anim.targetAnimStart, time.Now(), targetAnimDuration) >= 1.0 {
+			g.anim.targetAnimating = false
+			g.drawCell(g.anim.actionCol, g.anim.actionRow, 1.0)
 		}
 	}
 
-	switch g.currentState {
+	switch g.anim.currentState {
 	case stateWaiting:
 		return g.updateWaiting()
 	case stateShuffling:
@@ -1266,28 +1279,28 @@ func (g *Game) drawCanvas(dst *ebiten.Image, xOffset int) {
 // drawTargetBounce renders the target cell bounce animation.
 // xOffset is added to the board-local X coordinate before drawing into dst.
 func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
-	if !g.targetAnimating {
+	if !g.anim.targetAnimating {
 		return
 	}
-	t := elapsedFraction(g.targetAnimStart, time.Now(), targetAnimDuration)
+	t := elapsedFraction(g.anim.targetAnimStart, time.Now(), targetAnimDuration)
 	t = min(t, 1.0)
 	var r float32
 	if t < 0.5 {
 		lt := t * 2              // 0→1 in phase 1
 		eased := easeOutQuad(lt) // ease-out: fast start, slow at peak
-		r = lerp(g.targetAnimStartR, g.targetAnimPeakR, eased)
+		r = lerp(g.anim.targetAnimStartR, g.anim.targetAnimPeakR, eased)
 	} else {
 		lt := (t - 0.5) * 2     // 0→1 in phase 2
 		eased := easeInQuad(lt) // ease-in: slow at peak, fast at end
-		r = lerp(g.targetAnimPeakR, g.targetAnimEndR, eased)
+		r = lerp(g.anim.targetAnimPeakR, g.anim.targetAnimEndR, eased)
 	}
 	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
 	}
-	cx, cy := deviceCellCenter(g.actionCol, g.actionRow, dcs)
+	cx, cy := deviceCellCenter(g.anim.actionCol, g.anim.actionRow, dcs)
 	if r > 0 {
-		g.drawCompositeSprite(dst, cx+float32(xOffset), cy, r, g.targetAnimOrganism)
+		g.drawCompositeSprite(dst, cx+float32(xOffset), cy, r, g.anim.targetAnimOrganism)
 	}
 }
 
@@ -1295,19 +1308,19 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 // xOffset is added to all board-local X coordinates before drawing into dst.
 func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	xOff := float32(xOffset)
-	if len(g.moveAnims) > 0 {
-		dur := moveAnimDuration(g.currentState)
-		t := elapsedFraction(g.animStart, time.Now(), dur)
+	if len(g.anim.moveAnims) > 0 {
+		dur := moveAnimDuration(g.anim.currentState)
+		t := elapsedFraction(g.anim.animStart, time.Now(), dur)
 		t = min(t, 1.0)
 		dcs := g.view.deviceCellSize
 		if dcs <= 0 {
 			dcs = cellSize
 		}
 		maxR := float32(dcs/2 - 2)
-		for _, anim := range g.moveAnims {
-			cx, cy := moveAnimPos(anim, g.currentState, t)
+		for _, anim := range g.anim.moveAnims {
+			cx, cy := moveAnimPos(anim, g.anim.currentState, t)
 			var r float32
-			if g.currentState == stateShuffling && anim.Rotations != 0 {
+			if g.anim.currentState == stateShuffling && anim.Rotations != 0 {
 				// Clicked-mixer entry only: interpolate radius from old health to new health
 				// with a gentle bounce envelope so the shrink is visually sprung.
 				// Identified by Rotations!=0 (set to 1 only on the prepended mixer entry in
@@ -1328,11 +1341,11 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		}
 	}
 
-	if g.currentState == stateVictimMoving {
-		t := elapsedFraction(g.animStart, time.Now(), victimDuration)
+	if g.anim.currentState == stateVictimMoving {
+		t := elapsedFraction(g.anim.animStart, time.Now(), victimDuration)
 		t = min(t, 1.0)
-		for i := 0; i < g.victimCount; i++ {
-			v := g.victimAnims[i]
+		for i := 0; i < g.anim.victimCount; i++ {
+			v := g.anim.victimAnims[i]
 			cx, cy := victimAnimPos(v, t)
 			dcs2 := g.view.deviceCellSize
 			if dcs2 <= 0 {
@@ -1470,7 +1483,7 @@ func main() {
 	grid := NewGrid(gridCols, gridRows)
 
 	game := newGameState(grid)
-	game.animStart = time.Now()
+	game.anim.animStart = time.Now()
 
 	glyphFont, err := loadGlyphFont()
 	if err != nil {

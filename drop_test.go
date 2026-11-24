@@ -43,8 +43,8 @@ func TestBuildDropMoveAnims(t *testing.T) {
 
 	// respawnCells is false (compile-time constant), so only moved-cell anims are produced.
 	wantCount := len(moves) // 2
-	if len(g.moveAnims) != wantCount {
-		t.Fatalf("moveAnims count = %d; want %d", len(g.moveAnims), wantCount)
+	if len(g.anim.moveAnims) != wantCount {
+		t.Fatalf("moveAnims count = %d; want %d", len(g.anim.moveAnims), wantCount)
 	}
 
 	tests := []struct {
@@ -66,7 +66,7 @@ func TestBuildDropMoveAnims(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			a := g.moveAnims[i]
+			a := g.anim.moveAnims[i]
 			if a.FromX != tc.fromX || a.FromY != tc.fromY {
 				t.Errorf("anim[%d] From = (%.1f,%.1f); want (%.1f,%.1f)",
 					i, a.FromX, a.FromY, tc.fromX, tc.fromY)
