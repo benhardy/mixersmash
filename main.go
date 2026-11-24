@@ -18,6 +18,11 @@ import (
 	"golang.org/x/image/font/basicfont"
 )
 
+// gameState identifies which phase of the update/animation state machine the
+// game is in. It is a distinct type so the dispatch switch and the state-aware
+// animation helpers cannot be passed an arbitrary int.
+type gameState int
+
 const (
 	windowWidth  = 800
 	windowHeight = 600
@@ -30,11 +35,11 @@ const (
 	// Widened to 280 so that 3x-scaled debug text fits comfortably.
 	hudWidth = 280
 
-	stateWaiting          = 1
-	stateShuffling        = 2
-	stateDropping         = 3
-	stateVictimMoving     = 4
-	stateColumnCollapsing = 5
+	stateWaiting          gameState = 1
+	stateShuffling        gameState = 2
+	stateDropping         gameState = 3
+	stateVictimMoving     gameState = 4
+	stateColumnCollapsing gameState = 5
 
 	// Animation durations expressed as wall-clock time.
 	// Values are equivalent to the original tick counts at 60 TPS:
@@ -78,7 +83,7 @@ type Game struct {
 	grid         *Grid
 	canvas       *ebiten.Image
 	frame        *ebiten.Image // landscape design-size offscreen frame; board renders here
-	currentState int           // which state are we in?
+	currentState gameState     // which state are we in?
 	animStart    time.Time     // when did the current animation phase start?
 	actionCol    int           // the column an action is happening
 	actionRow    int           // the row any given action is happening

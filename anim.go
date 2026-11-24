@@ -9,7 +9,7 @@ import (
 // moveAnimDuration returns the wall-clock animation duration for the given
 // game state.  stateDropping and stateColumnCollapsing use dropDuration;
 // all other states (including stateShuffling) use shuffleDuration.
-func moveAnimDuration(state int) time.Duration {
+func moveAnimDuration(state gameState) time.Duration {
 	if state == stateDropping || state == stateColumnCollapsing {
 		return dropDuration
 	}
@@ -20,7 +20,7 @@ func moveAnimDuration(state int) time.Duration {
 // time t.  For stateShuffling the path is a quadratic ease-in-out Bézier; for
 // all other states it is a quadratic ease-in straight-line lerp.
 // Math copied verbatim from drawMoveAnims.
-func moveAnimPos(anim MoveAnim, state int, t float32) (cx, cy float32) {
+func moveAnimPos(anim MoveAnim, state gameState, t float32) (cx, cy float32) {
 	if state == stateShuffling {
 		et := easeInOutQuad(t)
 		cx, cy = quadBezier2(anim.FromX, anim.FromY, anim.CtrlX, anim.CtrlY, anim.ToX, anim.ToY, et)

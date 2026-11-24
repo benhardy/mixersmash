@@ -12,7 +12,7 @@ func TestMoveAnimDuration(t *testing.T) {
 	t.Helper()
 
 	tests := []struct {
-		state int
+		state gameState
 		want  time.Duration
 	}{
 		{stateShuffling, shuffleDuration},
