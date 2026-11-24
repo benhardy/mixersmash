@@ -38,7 +38,7 @@ Read with Read. Modify with Edit/Write. Never use sed -i, tee, redirects, heredo
 - Build: `go build ./...`
 - Test: `go test ./...` (single package: `go test ./pkg/foo -run TestName -v`)
 - Vet/format: `go vet ./...` and `gofmt -l .` (or `goimports`). Run both before declaring work done.
-- Lint: `golangci-lint run ./...` (or `make lint`) before declaring work done. Enabled linters: staticcheck, errcheck, ineffassign, unused, gocritic.
+- Lint: `golangci-lint run ./...` before declaring work done — run it directly, not only via the pre-commit hook. Enabled linters: staticcheck, errcheck, ineffassign, unused, gocritic. `golangci-lint` v2.15.0, `gopls` v0.24.0, and `golangci-lint-langserver` are installed on PATH (`~/go/bin`).
 - Race check for anything concurrent: `go test -race ./...`
 - Complexity analysis (occasional, NOT commit-gated): `make analyse` — runs gocyclo, gocognit, and maintidx, all via `go run` (no install needed; first run builds golangci-lint, ~2 min, then cached).
 
@@ -55,9 +55,13 @@ The repo ships `.githooks/pre-commit` which runs gofmt, vet, build, test, and go
 - Don't add dependencies without asking. Stdlib first.
 - Don't hand-edit go.mod/go.sum. Use `go get` and `go mod tidy`.
 
+## Code navigation
+- For symbol-level navigation (go-to-definition, find-references, implementations, workspace-symbol search) prefer `gopls` over grepping files — it is faster and accurate for locating definitions and call-sites before edits or renames.
+- `gopls` CLI: `gopls definition`, `gopls references`, `gopls symbols`, `gopls call_hierarchy`. It is also usable via an LSP integration.
+- For plain text search (string literals, comments, patterns) continue using the Grep tool, not bash grep/rg.
+
 ## Shell hygiene (avoids permission prompts)
 - No `$(...)` or backticks in commands. Use plain paths or separate commands.
-- Search code with the Grep tool, not bash grep/rg.
 - One command per call. Avoid long `&&`/pipe chains.
 
 ## Code style
