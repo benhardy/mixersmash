@@ -8,9 +8,11 @@ import (
 
 // Cell holds a grid cell's organism reference and health (1.0 = full, 0.0 = dead).
 // A nil Organism means the cell is empty/dead.
+// MixerClicks counts how many times this cell has been activated as a Mixer; zero by default.
 type Cell struct {
-	Organism *Organism
-	Health   float32
+	Organism    *Organism
+	Health      float32
+	MixerClicks int
 }
 
 // Color returns the palette colour for this cell's organism, or a zero color.RGBA

@@ -44,11 +44,13 @@ type Organism struct {
 	Sprite   *ebiten.Image
 	PairID   int
 	IsAnimal bool
+	IsMixer  bool
 }
 
-// organismPalette is the master list of 22 Australian animal/food pair organisms.
-// Each consecutive pair shares a PairID and Color; one entry is the animal (IsAnimal=true),
-// the other is the food (IsAnimal=false).
+// organismPalette is the master list of organisms: 22 Australian animal/food
+// pair entries (PairIDs 0..10) plus one Mixer entry (PairID -1, IsMixer=true).
+// Each animal/food pair shares a PairID and Color; one entry is the animal
+// (IsAnimal=true), the other is the food (IsAnimal=false).
 var organismPalette = []Organism{
 	{Name: "Kangaroo", Glyph: '🦘', Color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, PairID: 0, IsAnimal: true},
 	{Name: "Grass", Glyph: '🌿', Color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, PairID: 0, IsAnimal: false},
@@ -72,6 +74,7 @@ var organismPalette = []Organism{
 	{Name: "Roots", Glyph: '🥕', Color: color.RGBA{R: 210, G: 119, B: 250, A: 255}, PairID: 9, IsAnimal: false},
 	{Name: "Kookaburra", Glyph: '🦅', Color: color.RGBA{R: 249, G: 102, B: 188, A: 255}, PairID: 10, IsAnimal: true},
 	{Name: "Worms", Glyph: '\U0001FAB1', Color: color.RGBA{R: 249, G: 102, B: 188, A: 255}, PairID: 10, IsAnimal: false},
+	{Name: "Mixer", Glyph: '\U0001F300', Color: color.RGBA{R: 255, G: 255, B: 255, A: 255}, PairID: -1, IsAnimal: false, IsMixer: true},
 }
 
 // paletteOrganism returns a pointer to a random entry in organismPalette.

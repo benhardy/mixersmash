@@ -381,10 +381,10 @@ func TestGravityMovesAllHoles(t *testing.T) {
 // organismPalette — structure and palette-level invariants
 // ---------------------------------------------------------------------------
 
-// TestOrganismPaletteSize verifies the palette has exactly 22 entries.
+// TestOrganismPaletteSize verifies the palette has exactly 23 entries.
 func TestOrganismPaletteSize(t *testing.T) {
-	if len(organismPalette) != 22 {
-		t.Errorf("organismPalette has %d entries, want exactly 22", len(organismPalette))
+	if len(organismPalette) != 23 {
+		t.Errorf("organismPalette has %d entries, want exactly 23", len(organismPalette))
 	}
 }
 
@@ -724,15 +724,36 @@ func TestHorizontalCollapseMoves(t *testing.T) {
 // TestOrganismPalettePairStructure — new palette invariants
 // ---------------------------------------------------------------------------
 
-// TestOrganismPalettePairStructure verifies that the 22-entry Australian
-// animal/food palette has the correct pair structure:
-//   - exactly 22 entries
-//   - PairIDs 0..10 each appear exactly twice
-//   - for each PairID exactly one entry has IsAnimal=true and one false
-//   - both entries in each pair share the same Color
+// TestOrganismPalettePairStructure verifies that the palette has the correct
+// structure: exactly one Mixer entry (PairID -1, IsAnimal false, IsMixer true)
+// and 22 non-mixer entries forming 11 animal/food pairs (PairIDs 0..10).
 func TestOrganismPalettePairStructure(t *testing.T) {
-	if len(organismPalette) != 22 {
-		t.Fatalf("organismPalette has %d entries, want 22", len(organismPalette))
+	// Separate mixer entries from non-mixer entries.
+	var mixers []Organism
+	var nonMixers []Organism
+	for _, e := range organismPalette {
+		if e.IsMixer {
+			mixers = append(mixers, e)
+		} else {
+			nonMixers = append(nonMixers, e)
+		}
+	}
+
+	// Exactly one Mixer entry.
+	if len(mixers) != 1 {
+		t.Fatalf("palette has %d IsMixer entries, want exactly 1", len(mixers))
+	}
+	m := mixers[0]
+	if m.PairID != -1 {
+		t.Errorf("Mixer PairID = %d, want -1", m.PairID)
+	}
+	if m.IsAnimal {
+		t.Errorf("Mixer IsAnimal = true, want false")
+	}
+
+	// Exactly 22 non-mixer entries.
+	if len(nonMixers) != 22 {
+		t.Fatalf("palette has %d non-mixer entries, want 22", len(nonMixers))
 	}
 
 	type pairInfo struct {
@@ -742,8 +763,8 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 		colors  []color.RGBA
 	}
 	pairs := make(map[int]*pairInfo)
-	for i := range organismPalette {
-		e := &organismPalette[i]
+	for i := range nonMixers {
+		e := &nonMixers[i]
 		if pairs[e.PairID] == nil {
 			pairs[e.PairID] = &pairInfo{}
 		}
@@ -777,10 +798,10 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 		}
 	}
 
-	// Verify no unexpected PairIDs.
+	// Verify no unexpected PairIDs among non-mixer entries.
 	for id := range pairs {
 		if id < 0 || id > 10 {
-			t.Errorf("unexpected PairID %d in palette", id)
+			t.Errorf("unexpected PairID %d in non-mixer palette entries", id)
 		}
 	}
 }
