@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"log"
 	"math"
+	"math/rand"
 	"runtime"
 	"strconv"
 	"time"
@@ -537,13 +538,41 @@ func (g *Game) buildCollapseAnims() bool {
 	return true
 }
 
+// mixerFullness returns the visual fullness (0..1) for a Mixer cell based on
+// how many times it has been clicked: 0 clicks → 1.0, 1 click → 0.667,
+// 2 clicks → 0.333.
+func mixerFullness(clicks int) float32 {
+	switch clicks {
+	case 1:
+		return 2.0 / 3.0
+	case 2:
+		return 1.0 / 3.0
+	default:
+		return 1.0
+	}
+}
+
+// mixerClickOutcome returns the new MixerClicks value and whether the click
+// should clear the cell. Clicks 1 and 2 increment the counter; click 3 clears.
+// Input clicks is the current value before this click.
+func mixerClickOutcome(clicks int) (newClicks int, clears bool) {
+	newClicks = clicks + 1
+	clears = newClicks >= 3
+	return newClicks, clears
+}
+
 // repaintGrid redraws every cell from the model onto the offscreen canvas,
 // fully re-syncing canvas state with the grid. Dead cells are cleared to blank.
 // This is called only at settle points (no animation is in flight).
 func (g *Game) repaintGrid() {
 	for c := 0; c < g.grid.Cols; c++ {
 		for r := 0; r < g.grid.Rows; r++ {
-			g.drawCell(c, r, 1.0)
+			cell := &g.grid.Cells[c][r]
+			fullness := float32(1.0)
+			if cell.Organism != nil && cell.Organism.IsMixer {
+				fullness = mixerFullness(cell.MixerClicks)
+			}
+			g.drawCell(c, r, fullness)
 		}
 	}
 }
@@ -593,6 +622,103 @@ func (g *Game) updateColumnCollapsing() error {
 	return nil
 }
 
+// buildShuffleAnims gathers all alive 8-neighbours of the Mixer at (col, row),
+// Fisher-Yates shuffles their positions, writes the permuted cells back into
+// the grid, clears their canvas rects, and sets up bezier MoveAnim entries.
+// Transitions to stateShuffling.
+func (g *Game) buildShuffleAnims(col, row int) {
+	dcs := g.deviceCellSize
+	if dcs <= 0 {
+		dcs = cellSize
+	}
+
+	var nbuf [8][2]int
+	neighbors := eightNeighbors(nbuf[:0], col, row, g.grid.Cols, g.grid.Rows)
+
+	// Collect alive neighbours.
+	var aliveNeighbors [][2]int
+	for _, n := range neighbors {
+		if g.grid.Cells[n[0]][n[1]].Health > 0 {
+			aliveNeighbors = append(aliveNeighbors, n)
+		}
+	}
+
+	if len(aliveNeighbors) == 0 {
+		// No neighbours to shuffle; just settle.
+		g.enterWaiting()
+		return
+	}
+
+	// Fisher-Yates shuffle the positions (perm[i] = destination index for neighbour i).
+	perm := rand.Perm(len(aliveNeighbors))
+
+	// Snapshot cells before modifying grid.
+	type neighborCell struct {
+		col, row int
+		cell     Cell
+	}
+	orig := make([]neighborCell, len(aliveNeighbors))
+	for i, n := range aliveNeighbors {
+		orig[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
+	}
+
+	// Build MoveAnims: neighbour i animates from its current centre to perm[i]'s centre.
+	anims := make([]MoveAnim, len(aliveNeighbors))
+	for i := range aliveNeighbors {
+		src := orig[i]
+		dst := aliveNeighbors[perm[i]]
+		fx, fy := deviceCellCenter(src.col, src.row, dcs)
+		tx, ty := deviceCellCenter(dst[0], dst[1], dcs)
+		dx := tx - fx
+		dy := ty - fy
+		dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+		var ctrlX, ctrlY float32
+		if dist > 0 {
+			pX := -dy / dist
+			pY := dx / dist
+			sign := float32(1)
+			if rand.Intn(2) == 0 {
+				sign = -1
+			}
+			offset := sign * dist * (0.3 + rand.Float32()*0.7)
+			ctrlX = (fx+tx)*0.5 + pX*offset
+			ctrlY = (fy+ty)*0.5 + pY*offset
+		} else {
+			ctrlX = fx
+			ctrlY = fy
+		}
+		anims[i] = MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
+	}
+
+	// Clear source positions on canvas (they will be drawn as moving overlays).
+	for _, n := range aliveNeighbors {
+		x0, y0 := n[0]*dcs, n[1]*dcs
+		g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
+	}
+
+	// Write cells to their permuted destinations in the grid now (canvas repaint on settle).
+	for i := range aliveNeighbors {
+		dst := aliveNeighbors[perm[i]]
+		g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
+	}
+
+	g.moveAnims = anims
+	g.animStart = time.Now()
+	g.currentState = stateShuffling
+}
+
+// updateShuffling waits for the shuffle animation to complete, then repaints
+// the full grid canvas and returns to stateWaiting. repaintGrid handles Mixer
+// cells with their current MixerClicks fullness, so no additional logic is needed.
+func (g *Game) updateShuffling() error {
+	elapsed := elapsedFraction(g.animStart, time.Now(), shuffleDuration)
+	if elapsed >= 1.0 {
+		g.moveAnims = nil
+		g.enterWaiting()
+	}
+	return nil
+}
+
 // commitCellAt clears the flood-match cluster rooted at an animal cell through
 // the victim-shrink→drop pipeline. Clicking a non-animal, empty, or dead cell
 // is a no-op. Out-of-bounds clicks are ignored.
@@ -601,10 +727,51 @@ func (g *Game) commitCellAt(col, row int) error {
 		return nil
 	}
 	cell := &g.grid.Cells[col][row]
-	if cell.Organism == nil || !cell.Organism.IsAnimal {
+	if cell.Health <= 0 {
 		return nil
 	}
-	if cell.Health <= 0 {
+
+	// Mixer click path: increment click count and either shuffle or remove.
+	if cell.Organism != nil && cell.Organism.IsMixer {
+		outcome, clears := mixerClickOutcome(cell.MixerClicks)
+		cell.MixerClicks = outcome
+		if !clears {
+			// Clicks 1 and 2: show new size, shuffle neighbours.
+			g.repaintGrid()
+			g.buildShuffleAnims(col, row)
+			return nil
+		}
+		// Click 3: remove the Mixer cell via victim-shrink pipeline.
+		dcs := g.deviceCellSize
+		if dcs <= 0 {
+			dcs = cellSize
+		}
+		organism := cell.Organism
+		oldHealth := cell.Health
+		cell.Health = 0
+		g.cellCount--
+		g.drawCell(col, row, 1.0)
+		g.actionCol = col
+		g.actionRow = row
+		g.victimCount = 0
+		fromX, fromY := deviceCellCenter(col, row, dcs)
+		g.victimAnims[0] = MoveAnim{
+			Col:      col,
+			Row:      row,
+			Cell:     Cell{Organism: organism, Health: oldHealth},
+			FromX:    fromX,
+			FromY:    fromY,
+			ToX:      fromX,
+			ToY:      fromY,
+			PathType: 0,
+		}
+		g.victimCount = 1
+		g.animStart = time.Now()
+		g.currentState = stateVictimMoving
+		return nil
+	}
+
+	if cell.Organism == nil || !cell.Organism.IsAnimal {
 		return nil
 	}
 
@@ -902,6 +1069,8 @@ func (g *Game) Update() error {
 	switch g.currentState {
 	case stateWaiting:
 		return g.updateWaiting()
+	case stateShuffling:
+		return g.updateShuffling()
 	case stateVictimMoving:
 		return g.updateVictimMoving()
 	case stateDropping:
