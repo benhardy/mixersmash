@@ -8,14 +8,22 @@ import (
 
 // Cell holds a grid cell's organism reference and health (1.0 = full, 0.0 = dead).
 // A nil Organism means the cell is empty/dead.
-// MixerClicks counts how many times this cell has been activated as a Mixer; zero by default.
 type Cell struct {
 	Organism *Organism
 	Health   float32
 }
 
-func (c *Cell) BumpHealth(delta float32) {
+// Kills a cell stone dead, returning its old health. The caller must redraw the cell after calling Die().
+func (c *Cell) Die() float32 {
+	oldHealth := c.Health
+	c.Health = 0
+	return oldHealth
+}
+
+func (c *Cell) BumpHealth(delta float32) float32 {
+	oldHealth := c.Health
 	c.Health = max(c.Health+delta, 0)
+	return oldHealth
 }
 
 func (c *Cell) IsDead() bool {
@@ -41,6 +49,10 @@ func (c Cell) Color() color.RGBA {
 // Col, Row, PathType, and SpiralTurns are used only by the victim-move phase.
 // PathType: 0 = straight line, 1 = quadratic Bézier arc, 2 = inward spiral.
 // SpiralTurns: signed — positive = CCW, negative = CW.
+//
+// NewHealth is used only for the Mixer's stationary shuffle entry: it holds the
+// post-click health so the bounce animation can interpolate from Cell.Health
+// (pre-click) to NewHealth (post-click). Zero for all other entries.
 type MoveAnim struct {
 	FromX, FromY float32
 	ToX, ToY     float32
@@ -50,6 +62,8 @@ type MoveAnim struct {
 	Row          int     // victim-move phase: original grid row
 	PathType     int     // victim-move phase: 0=straight, 1=arc, 2=spiral
 	SpiralTurns  float32 // victim-move phase: signed turn count
+	Rotations    float32 // victim-move phase: signed rotation count
+	NewHealth    float32 // Mixer shuffle entry only: post-click health (zero for neighbours)
 }
 
 // Grid holds the grid dimensions and per-cell colours.

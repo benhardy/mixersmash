@@ -600,7 +600,10 @@ func (g *Game) updateColumnCollapsing() error {
 // Fisher-Yates shuffles their positions, writes the permuted cells back into
 // the grid, clears their canvas rects, and sets up bezier MoveAnim entries.
 // Transitions to stateShuffling.
-func (g *Game) buildShuffleAnims(col, row int) {
+// Also makes an animation for the mixer itself, which is not moved but is drawn
+// with a size interpolation and bounce to indicate it was clicked.
+// oldMixerHealth is the Mixer's health before this click; newMixerHealth is after.
+func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerHealth float32) {
 	dcs := g.deviceCellSize
 	if dcs <= 0 {
 		dcs = cellSize
@@ -616,117 +619,134 @@ func (g *Game) buildShuffleAnims(col, row int) {
 			aliveNeighbors = append(aliveNeighbors, n)
 		}
 	}
-
-	if len(aliveNeighbors) == 0 {
-		// No neighbours to shuffle; just settle.
-		g.enterWaiting()
-		return
+	mixerAnim := MoveAnim{
+		FromX:     float32(col*dcs + dcs/2),
+		FromY:     float32(row*dcs + dcs/2),
+		ToX:       float32(col*dcs + dcs/2),
+		ToY:       float32(row*dcs + dcs/2),
+		CtrlX:     float32(col*dcs + dcs/2),
+		CtrlY:     float32(row*dcs + dcs/2),
+		Cell:      Cell{Organism: g.grid.Cells[col][row].Organism, Health: oldMixerHealth},
+		NewHealth: newMixerHealth,
+		PathType:  0, // stationary path
+		Rotations: 1, // reserved for future spin; currently unused
 	}
+	anims := make([]MoveAnim, len(aliveNeighbors)+1) // +1 for the mixer itself
+	anims[0] = mixerAnim
+	if len(aliveNeighbors) > 0 {
+		// Fisher-Yates shuffle the positions (perm[i] = destination index for neighbour i).
+		perm := rand.Perm(len(aliveNeighbors))
 
-	// Fisher-Yates shuffle the positions (perm[i] = destination index for neighbour i).
-	perm := rand.Perm(len(aliveNeighbors))
-
-	// Snapshot cells before modifying grid.
-	type neighborCell struct {
-		col, row int
-		cell     Cell
-	}
-	orig := make([]neighborCell, len(aliveNeighbors))
-	for i, n := range aliveNeighbors {
-		orig[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
-	}
-
-	// Build MoveAnims: neighbour i animates from its current centre to perm[i]'s centre.
-	anims := make([]MoveAnim, len(aliveNeighbors))
-	for i := range aliveNeighbors {
-		src := orig[i]
-		dst := aliveNeighbors[perm[i]]
-		fx, fy := deviceCellCenter(src.col, src.row, dcs)
-		tx, ty := deviceCellCenter(dst[0], dst[1], dcs)
-		dx := tx - fx
-		dy := ty - fy
-		dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-		var ctrlX, ctrlY float32
-		if dist > 0 {
-			pX := -dy / dist
-			pY := dx / dist
-			sign := float32(1)
-			if rand.Intn(2) == 0 {
-				sign = -1
-			}
-			offset := sign * dist * (0.3 + rand.Float32()*0.7)
-			ctrlX = (fx+tx)*0.5 + pX*offset
-			ctrlY = (fy+ty)*0.5 + pY*offset
-		} else {
-			ctrlX = fx
-			ctrlY = fy
+		// Snapshot cells before modifying grid.
+		type neighborCell struct {
+			col, row int
+			cell     Cell
 		}
-		anims[i] = MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
-	}
+		orig := make([]neighborCell, len(aliveNeighbors))
+		for i, n := range aliveNeighbors {
+			orig[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
+		}
 
-	// Clear source positions on canvas (they will be drawn as moving overlays).
-	for _, n := range aliveNeighbors {
-		x0, y0 := n[0]*dcs, n[1]*dcs
-		g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
-	}
+		// Build MoveAnims: neighbour i animates from its current centre to perm[i]'s centre.
+		for i := range aliveNeighbors {
+			src := orig[i]
+			dst := aliveNeighbors[perm[i]]
+			fx, fy := deviceCellCenter(src.col, src.row, dcs)
+			tx, ty := deviceCellCenter(dst[0], dst[1], dcs)
+			dx := tx - fx
+			dy := ty - fy
+			dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+			var ctrlX, ctrlY float32
+			if dist > 0 {
+				pX := -dy / dist
+				pY := dx / dist
+				sign := float32(1)
+				if rand.Intn(2) == 0 {
+					sign = -1
+				}
+				offset := sign * dist * (0.3 + rand.Float32()*0.7)
+				ctrlX = (fx+tx)*0.5 + pX*offset
+				ctrlY = (fy+ty)*0.5 + pY*offset
+			} else {
+				ctrlX = fx
+				ctrlY = fy
+			}
+			anims[i+1] = MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
+		}
 
-	// Write cells to their permuted destinations in the grid now (canvas repaint on settle).
-	for i := range aliveNeighbors {
-		dst := aliveNeighbors[perm[i]]
-		g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
-	}
+		// Clear source positions on canvas (they will be drawn as moving overlays).
+		for _, n := range aliveNeighbors {
+			x0, y0 := n[0]*dcs, n[1]*dcs
+			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
+		}
 
+		// Write cells to their permuted destinations in the grid now (canvas repaint on settle).
+		for i := range aliveNeighbors {
+			dst := aliveNeighbors[perm[i]]
+			g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
+		}
+	}
 	g.moveAnims = anims
 	g.animStart = time.Now()
 	g.currentState = stateShuffling
 }
 
-// updateShuffling waits for the shuffle animation to complete, then repaints
-// the full grid canvas and returns to stateWaiting. repaintGrid handles Mixer
-// cells with their current MixerClicks fullness, so no additional logic is needed.
+// updateShuffling waits for the shuffle animation to complete. For a non-killing
+// click it repaints the full grid canvas and returns to stateWaiting. For a
+// killing click (the action cell IsDead() after BumpHealth reached 0) it routes
+// into the drop pipeline so the dead Mixer's column collapses.
 func (g *Game) updateShuffling() error {
 	elapsed := elapsedFraction(g.animStart, time.Now(), shuffleDuration)
-	if elapsed >= 1.0 {
-		g.moveAnims = nil
+	if elapsed < 1.0 {
+		return nil
+	}
+	g.moveAnims = nil
+	// Check whether the mixer at the action position was killed this click.
+	killed := g.actionCol >= 0 &&
+		g.actionCol < g.grid.Cols &&
+		g.actionRow >= 0 &&
+		g.actionRow < g.grid.Rows &&
+		g.grid.Cells[g.actionCol][g.actionRow].IsDead()
+	if !killed {
 		g.enterWaiting()
+		return nil
+	}
+	// Route the dead column through the drop/collapse pipeline.
+	// No flood score is added for a Mixer removal.
+	//
+	// Repaint all columns that were part of the shuffle before entering the drop.
+	// buildShuffleAnims cleared the canvas rects for all shuffled neighbours
+	// (across potentially multiple columns), and those blank rects persist on the
+	// canvas.  buildDropAnims will immediately re-clear the source rows of the
+	// falling cells in actionCol, so painting them first is harmless.  Without
+	// this repaint the non-actionCol neighbours stay blank throughout the drop.
+	g.repaintGrid()
+	spawned := g.buildDropAnims([]int{g.actionCol})
+	if respawnCells {
+		g.cellCount += spawned
+	}
+	if len(g.moveAnims) > 0 {
+		g.animStart = time.Now()
+		g.currentState = stateDropping
+	} else {
+		g.settleAfterRemoval()
 	}
 	return nil
 }
 
 func (g *Game) commitMixer(cell *Cell, col int, row int) error {
-	oldHealth := cell.Health
-	cell.BumpHealth(mixerHealthChangeOnClick)
-	if !cell.IsDead() {
-		// Clicks 1 and 2: show new size, shuffle neighbours.
-		g.repaintGrid()
-		g.buildShuffleAnims(col, row)
-		return nil
+	oldHealth := cell.BumpHealth(mixerHealthChangeOnClick)
+	if cell.IsDead() {
+		g.cellCount--
 	}
-	// Click 3: remove the Mixer cell via victim-shrink pipeline.
-	dcs := g.deviceCellSize
-	if dcs <= 0 {
-		dcs = cellSize
-	}
-	organism := cell.Organism
-	g.cellCount--
 	g.drawCell(col, row, 1.0)
+	// Record the action position so updateShuffling can detect a killing click.
 	g.actionCol = col
 	g.actionRow = row
-	g.victimCount = 0
-	fromX, fromY := deviceCellCenter(col, row, dcs)
-	g.victimAnims[0] = MoveAnim{
-		Col:      col,
-		Row:      row,
-		Cell:     Cell{Organism: organism, Health: oldHealth},
-		FromX:    fromX,
-		FromY:    fromY,
-		ToX:      fromX,
-		ToY:      fromY,
-		PathType: 0,
-	}
-	g.victimCount = 1
-	g.animStart = time.Now()
-	g.currentState = stateVictimMoving
+	// Show new size, shuffle neighbours.  On the killing click the mixer
+	// shrinks to 0 during this animation; updateShuffling will route to the
+	// drop pipeline when it detects IsDead() at the action position.
+	g.buildShuffleAnims(col, row, oldHealth, cell.Health)
 	return nil
 }
 
@@ -784,14 +804,15 @@ func (g *Game) commitCellAt(col, row int) error {
 		if c == col && r == row {
 			// Seed cell: shrinks in place (stationary).
 			v = MoveAnim{
-				Col:      c,
-				Row:      r,
-				Cell:     Cell{Organism: organism, Health: oldHealth},
-				FromX:    fromX,
-				FromY:    fromY,
-				ToX:      fromX,
-				ToY:      fromY,
-				PathType: 0,
+				Col:       c,
+				Row:       r,
+				Cell:      Cell{Organism: organism, Health: oldHealth},
+				FromX:     fromX,
+				FromY:     fromY,
+				ToX:       fromX,
+				ToY:       fromY,
+				PathType:  0,
+				Rotations: 0,
 			}
 		} else {
 			// Non-seed: animate toward the seed using spiral/curved path.
@@ -811,6 +832,7 @@ func (g *Game) commitCellAt(col, row int) error {
 				CtrlX:       cx,
 				CtrlY:       cy,
 				SpiralTurns: st,
+				Rotations:   0,
 			}
 		}
 		g.victimAnims[g.victimCount] = v
@@ -864,21 +886,23 @@ func (g *Game) frameDims() (frameW, frameH float64, hudDevW int) {
 // For non-animal or empty cells, victimHints is cleared.
 // If the cell is out of bounds or dead the hover state is left unchanged.
 func (g *Game) updateHover(hc, hr int) {
-	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
-		cell := g.grid.Cells[hc][hr]
-		if !cell.IsDead() {
-			g.hoverCol, g.hoverRow = hc, hr
-			if cell.Organism != nil && cell.Organism.IsAnimal {
-				cluster := floodMatchCluster(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
-				if clusterHasFood(g.grid.Cells, cluster) {
-					g.victimHints = cluster
-				} else {
-					g.victimHints = g.victimHints[:0]
-				}
-			} else {
-				g.victimHints = g.victimHints[:0]
-			}
-		}
+	if hc < 0 || hc >= g.grid.Cols || hr < 0 || hr >= g.grid.Rows {
+		return
+	}
+	cell := g.grid.Cells[hc][hr]
+	if cell.IsDead() {
+		return
+	}
+	g.hoverCol, g.hoverRow = hc, hr
+	if cell.Organism == nil || !cell.Organism.IsAnimal {
+		g.victimHints = g.victimHints[:0]
+		return
+	}
+	cluster := floodMatchCluster(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+	if clusterHasFood(g.grid.Cells, cluster) {
+		g.victimHints = cluster
+	} else {
+		g.victimHints = g.victimHints[:0]
 	}
 }
 
@@ -965,35 +989,36 @@ func (g *Game) updateWaiting() error {
 // stateDropping (or stateWaiting) when the animation completes.
 func (g *Game) updateVictimMoving() error {
 	t := elapsedFraction(g.animStart, time.Now(), victimDuration)
-	if t >= 1.0 {
-		// Animation complete — score the clear and trigger drop.
-		// All victim cells already have Health=0 (set in commitCellAt).
-		g.score += scoreForCluster(g.victimCount)
-		var colSeen [gridCols]bool
-		colSeen[g.actionCol] = true
-		for i := 0; i < g.victimCount; i++ {
-			v := g.victimAnims[i]
-			colSeen[v.Col] = true
+	if t < 1.0 {
+		return nil
+	}
+	// Animation complete — score the clear and trigger drop.
+	// All victim cells already have Health=0 (set in commitCellAt).
+	g.score += scoreForCluster(g.victimCount)
+	var colSeen [gridCols]bool
+	colSeen[g.actionCol] = true
+	for i := 0; i < g.victimCount; i++ {
+		v := g.victimAnims[i]
+		colSeen[v.Col] = true
+	}
+	var affectedColsArr [gridCols]int
+	affectedColsCount := 0
+	for c := 0; c < gridCols; c++ {
+		if colSeen[c] {
+			affectedColsArr[affectedColsCount] = c
+			affectedColsCount++
 		}
-		var affectedColsArr [gridCols]int
-		affectedColsCount := 0
-		for c := 0; c < gridCols; c++ {
-			if colSeen[c] {
-				affectedColsArr[affectedColsCount] = c
-				affectedColsCount++
-			}
-		}
-		g.victimCount = 0
-		spawned := g.buildDropAnims(affectedColsArr[:affectedColsCount])
-		if respawnCells {
-			g.cellCount += spawned
-		}
-		if len(g.moveAnims) > 0 {
-			g.animStart = time.Now()
-			g.currentState = stateDropping
-		} else {
-			g.settleAfterRemoval()
-		}
+	}
+	g.victimCount = 0
+	spawned := g.buildDropAnims(affectedColsArr[:affectedColsCount])
+	if respawnCells {
+		g.cellCount += spawned
+	}
+	if len(g.moveAnims) > 0 {
+		g.animStart = time.Now()
+		g.currentState = stateDropping
+	} else {
+		g.settleAfterRemoval()
 	}
 	return nil
 }
@@ -1003,18 +1028,19 @@ func (g *Game) updateVictimMoving() error {
 // empty columns remain after the drop settles).
 func (g *Game) updateDropping() error {
 	elapsed := elapsedFraction(g.animStart, time.Now(), dropDuration)
-	if elapsed >= 1.0 {
-		dcs := g.deviceCellSize
-		for _, anim := range g.moveAnims {
-			col := int(anim.ToX) / dcs
-			row := int(anim.ToY) / dcs
-			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				g.drawCell(col, row, 1.0)
-			}
-		}
-		g.moveAnims = nil
-		g.settleAfterRemoval()
+	if elapsed < 1.0 {
+		return nil
 	}
+	dcs := g.deviceCellSize
+	for _, anim := range g.moveAnims {
+		col := int(anim.ToX) / dcs
+		row := int(anim.ToY) / dcs
+		if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
+			g.drawCell(col, row, 1.0)
+		}
+	}
+	g.moveAnims = nil
+	g.settleAfterRemoval()
 	return nil
 }
 
@@ -1252,7 +1278,22 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		maxR := float32(dcs/2 - 2)
 		for _, anim := range g.moveAnims {
 			cx, cy := moveAnimPos(anim, g.currentState, t)
-			r := maxR * anim.Cell.Health
+			var r float32
+			if g.currentState == stateShuffling && anim.Rotations != 0 {
+				// Clicked-mixer entry only: interpolate radius from old health to new health
+				// with a gentle bounce envelope so the shrink is visually sprung.
+				// Identified by Rotations!=0 (set to 1 only on the prepended mixer entry in
+				// buildShuffleAnims); neighbour Mixers have Rotations==0 and fall through
+				// to the standard radius path below. Works for NewHealth==0 (final click).
+				// anim.Cell.Health = pre-click health; anim.NewHealth = post-click health.
+				et := easeInOutQuad(t)
+				base := lerp(anim.Cell.Health, anim.NewHealth, et)
+				// Bounce: gentle spring envelope peaks at t=0.5, amplitude 15%.
+				bounce := base * (1 + 0.15*float32(math.Sin(float64(t)*math.Pi)))
+				r = maxR * bounce
+			} else {
+				r = maxR * anim.Cell.Health
+			}
 			if r > 0 {
 				g.drawCompositeSprite(dst, xOff+cx, cy, r, anim.Cell.Organism)
 			}
