@@ -361,3 +361,25 @@ The standalone `maintidx` binary errors on this module with "package 'bytes' wit
 Ideas that are plausible improvements but lack the measurement to justify acting on them now are recorded in ROADMAP.md rather than acted on speculatively or discarded. The current parked items (GOGC tuning, draw-call reduction, deferring sprite-cache clears to settle) each carry an explicit evidence gate — the measurement that would need to show a problem before the idea is worth implementing. This keeps the codebase stable while preserving the rationale for revisiting.
 
 ---
+
+## Animal/food matching re-theme (2026-11-24)
+
+**Domain recentred on Australian animals and their food**
+The game's subject matter was changed from an abstract creature/power graph to Australian animals matched with the food they eat. The type rename `Creature` → `Organism` reflects the broadened domain (animals and food items are both organisms). No mechanical meaning attaches to the rename; it is a naming-correctness fix.
+
+**Core mechanic: flood-clear a cluster only when a paired food is present**
+Clicking an animal flood-clears its 8-way-connected same-animal cluster plus any food tiles adjacent to that cluster, but only if the cluster contains at least one food tile paired to that animal. A lone animal cluster with no adjacent food cannot be cleared.
+
+The food-required gate was chosen to make play about deliberately building animal+food clusters rather than freely clearing any group. Without the gate, a player can clear any lone animal for free — the food requirement adds the combinatorial constraint that gives the matching its strategic weight.
+
+Scoring is super-linear: `clusterSize²`. This rewards patience and cluster-building over rapid small clears.
+
+**Power/health/shuffle system and connection-graph themes dropped**
+The Power tier, health, shuffle-on-click, and connection-graph mechanic were all removed. The matching model supersedes them structurally: the cluster+food rule is the new decision space. The removal is a large simplification — roughly the last several months of connection-graph work was reverted or deleted.
+
+Alternative considered: keep Power as a difficulty multiplier (larger-Power animals require a bigger paired cluster to clear). Rejected — it re-introduces a hidden variable and pulls player attention away from the visible animal/food matching, which is the game's identity.
+
+**Colour as a hue link between animal and food**
+Each animal/food pair shares one hue. The visual effect is that scanning the board for a matching cluster is a colour-grouping task as well as a spatial one. Glyphs are placeholder emoji pending an SVG sprite overhaul; several are inaccurate stand-ins for animals that lack a standard Unicode glyph.
+
+---
