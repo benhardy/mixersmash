@@ -23,6 +23,10 @@ var mixerSmashTitlePNG []byte
 // titleImage is the decoded title image, loaded once at startup.
 var titleImage *ebiten.Image
 
+const (
+	mixerBias = 2
+)
+
 func init() {
 	img, _, err := image.Decode(bytes.NewReader(mixerSmashTitlePNG))
 	if err != nil {
@@ -82,7 +86,11 @@ var organismPalette = []Organism{
 // The pointer is stable because organismPalette is a package-level slice
 // that is never reallocated after init.
 func paletteOrganism() *Organism {
-	return &organismPalette[rand.Intn(len(organismPalette))]
+	which := rand.Intn(len(organismPalette) + mixerBias)
+	if which >= len(organismPalette) {
+		which = len(organismPalette) - 1 // Mixer entry with bias
+	}
+	return &organismPalette[which]
 }
 
 // sRGBToOKLab converts a colour.RGBA to OKLab [L, a, b].
