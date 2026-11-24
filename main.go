@@ -138,7 +138,7 @@ type Game struct {
 	targetAnimStartR   float32
 	targetAnimPeakR    float32
 	targetAnimEndR     float32
-	targetAnimCreature *Creature
+	targetAnimOrganism *Organism
 
 	// glyph rendering
 	glyphFont *text.GoTextFaceSource
@@ -220,12 +220,12 @@ func newGameState(grid *Grid) *Game {
 	}
 }
 
-// compositeCachedSprite returns a pre-rendered composite *ebiten.Image for cr,
-// building and caching it on cr.Sprite on first call.  The image carries a
+// compositeCachedSprite returns a pre-rendered composite *ebiten.Image for o,
+// building and caching it on o.Sprite on first call.  The image carries a
 // circa-2003 Apple Aqua jelly-button look rendered via the gel fragment shader:
 //
-//  1. Base image — an sz×sz opaque image filled with cr.Color, then the creature
-//     glyph cr.Glyph (tinted glyphTint(cr.Color)) drawn directly onto it.  The
+//  1. Base image — an sz×sz opaque image filled with o.Color, then the organism
+//     glyph o.Glyph (tinted glyphTint(o.Color)) drawn directly onto it.  The
 //     base image is fully opaque so its rgb values equal straight (non-premultiplied) rgb.
 //  2. Gel shader pass — gelShaderSrc runs via DrawRectShader, sampling the base
 //     image (Images[0]) at each pixel to obtain the local colour, then applies
@@ -236,13 +236,13 @@ func newGameState(grid *Grid) *Game {
 // The glyph is embedded under the gel lighting (gradient, gloss, rim all apply
 // over it), giving an inset "carved into jelly" appearance.
 //
-// Returns nil if cr is nil, the font is not loaded, or the gel shader fails to compile.
-func (g *Game) compositeCachedSprite(cr *Creature) *ebiten.Image {
-	if cr == nil || g.glyphFont == nil {
+// Returns nil if o is nil, the font is not loaded, or the gel shader fails to compile.
+func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
+	if o == nil || g.glyphFont == nil {
 		return nil
 	}
-	if cr.Sprite != nil {
-		return cr.Sprite
+	if o.Sprite != nil {
+		return o.Sprite
 	}
 
 	// Compile the gel shader once per game instance (lazy, mirrors glowShader).
@@ -262,10 +262,10 @@ func (g *Game) compositeCachedSprite(cr *Creature) *ebiten.Image {
 		sz = compositeSpriteRefSize
 	}
 	half := float32(sz) / 2
-	clr := cr.Color
+	clr := o.Color
 
 	// ------------------------------------------------------------------ //
-	// Step 1: build the base image — opaque fill colour + creature glyph.
+	// Step 1: build the base image — opaque fill colour + organism glyph.
 	// This is the source image the gel shader will sample.
 	// The image is fully opaque (A=255 everywhere after the fill), so the
 	// shader can use sampled .rgb directly as straight colour values.
@@ -278,7 +278,7 @@ func (g *Game) compositeCachedSprite(cr *Creature) *ebiten.Image {
 		Source: g.glyphFont,
 		Size:   glyphSize,
 	}
-	str := string(cr.Glyph)
+	str := string(o.Glyph)
 	w, h := text.Measure(str, face, 0)
 	tint := glyphTint(clr)
 	var drawOpts text.DrawOptions
@@ -305,18 +305,18 @@ func (g *Game) compositeCachedSprite(cr *Creature) *ebiten.Image {
 	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
 
 	g.bakeCount++
-	cr.Sprite = composite
+	o.Sprite = composite
 	return composite
 }
 
-// drawCompositeSprite blits the pre-rendered composite creature sprite for cr
+// drawCompositeSprite blits the pre-rendered composite organism sprite for o
 // centred at (cx, cy) scaled so its inscribed circle matches radius.  Does
-// nothing if radius < 1, cr is nil, or the sprite could not be baked.
-func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, cr *Creature) {
-	if cr == nil || radius < 1 {
+// nothing if radius < 1, o is nil, or the sprite could not be baked.
+func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o *Organism) {
+	if o == nil || radius < 1 {
 		return
 	}
-	img := g.compositeCachedSprite(cr)
+	img := g.compositeCachedSprite(o)
 	if img == nil {
 		return
 	}
@@ -359,7 +359,7 @@ func (g *Game) drawCell(col, row int, cellFullness float32) {
 	cy := float32(row*cs) + halfCs
 	maxRadius := halfCs - 2
 	radius := maxRadius * cellFullness * cell.Health
-	g.drawCompositeSprite(g.canvas, cx, cy, radius, cell.Creature)
+	g.drawCompositeSprite(g.canvas, cx, cy, radius, cell.Organism)
 }
 
 // emptyColumns returns the sorted indices of columns in which every cell has
@@ -398,7 +398,7 @@ func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapsh
 	if respawnCells {
 		// Write new random cells into the top slots (0..len(holeRows)-1).
 		for i := 0; i < len(holeRows); i++ {
-			g.grid.Cells[col][i] = Cell{Creature: paletteCreature(), Health: 1.0}
+			g.grid.Cells[col][i] = Cell{Organism: paletteOrganism(), Health: 1.0}
 			spawned++
 		}
 	} else {
@@ -638,7 +638,7 @@ func (g *Game) commitCellAt(col, row int) error {
 		return nil
 	}
 	oldHealth := cell.Health
-	cell.Health = nextHealthAfterHit(cell.Creature.Power, cell.Health)
+	cell.Health = nextHealthAfterHit(cell.Organism.Power, cell.Health)
 	g.actionCol = col
 	g.actionRow = row
 
@@ -837,7 +837,7 @@ func (g *Game) handleTargetDeath(col int, row int, oldHealth float32) {
 	targetVictim := MoveAnim{
 		Col:      col,
 		Row:      row,
-		Cell:     Cell{Creature: targetCell.Creature, Health: oldHealth},
+		Cell:     Cell{Organism: targetCell.Organism, Health: oldHealth},
 		FromX:    centerX,
 		FromY:    centerY,
 		ToX:      centerX,
@@ -901,8 +901,8 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	}
 	// Determine how many neighbours to shuffle based on the clicked cell's Power.
 	var power int
-	if cell.Creature != nil {
-		power = cell.Creature.Power
+	if cell.Organism != nil {
+		power = cell.Organism.Power
 	}
 	count := shuffleCount(power, aliveNbrsCount)
 
@@ -932,7 +932,7 @@ func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32)
 	g.targetAnimStartR = maxR * oldHealth
 	g.targetAnimPeakR = maxR * oldHealth * 1.1
 	g.targetAnimEndR = maxR * cell.Health
-	g.targetAnimCreature = g.grid.Cells[col][row].Creature
+	g.targetAnimOrganism = g.grid.Cells[col][row].Organism
 	perm := rand.Perm(len(aliveNeighbors))
 
 	// Collect neighbour cells before rearranging.
@@ -1297,7 +1297,7 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	}
 	cx, cy := deviceCellCenter(g.actionCol, g.actionRow, dcs)
 	if r > 0 {
-		g.drawCompositeSprite(dst, cx+float32(xOffset), cy, r, g.targetAnimCreature)
+		g.drawCompositeSprite(dst, cx+float32(xOffset), cy, r, g.targetAnimOrganism)
 	}
 }
 
@@ -1318,7 +1318,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 			cx, cy := moveAnimPos(anim, g.currentState, t)
 			r := maxR * anim.Cell.Health
 			if r > 0 {
-				g.drawCompositeSprite(dst, xOff+cx, cy, r, anim.Cell.Creature)
+				g.drawCompositeSprite(dst, xOff+cx, cy, r, anim.Cell.Organism)
 			}
 		}
 	}
@@ -1335,7 +1335,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 			}
 			radius := float32(dcs2/2-2) * v.Cell.Health * (1 - t)
 			if radius > 0 {
-				g.drawCompositeSprite(dst, xOff+cx, cy, radius, v.Cell.Creature)
+				g.drawCompositeSprite(dst, xOff+cx, cy, radius, v.Cell.Organism)
 			}
 		}
 	}

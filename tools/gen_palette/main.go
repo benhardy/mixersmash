@@ -1,9 +1,9 @@
 //go:build ignore
 
-// gen_palette generates the creature colour palette for the new power-tier scheme.
+// gen_palette generates the organism colour palette for the new power-tier scheme.
 //
 // Output: 13 colours as color.RGBA literals printed to stdout (paste into
-// creaturePalette in creatures.go). Optionally also writes a 640x480 PNG
+// organismPalette in creatures.go). Optionally also writes a 640x480 PNG
 // swatch sheet showing every generated colour as a filled rectangle.
 //
 // Usage:
@@ -148,8 +148,8 @@ func main() {
 		palette = append(palette, entry{r, g, b, power3Labels[i]})
 	}
 
-	fmt.Println("// Creature colour palette — 13 entries (1 dark + 6 vivid + 6 pastel).")
-	fmt.Println("// Paste into creaturePalette in creatures.go.")
+	fmt.Println("// Organism colour palette — 13 entries (1 dark + 6 vivid + 6 pastel).")
+	fmt.Println("// Paste into organismPalette in creatures.go.")
 	fmt.Printf("// OKLCh parameters for saturated hues: L=%.2f, C=%.2f, base hue=%.0f°\n", L, C, baseHue)
 	fmt.Println()
 	for _, e := range palette {
@@ -173,7 +173,7 @@ func main() {
 	}
 
 	fmt.Println()
-	fmt.Printf("// 6 pastel hues for power-2 creatures: L=%.2f, C=%.2f, in-between hues.\n", Lp, Cp)
+	fmt.Printf("// 6 pastel hues for power-2 organisms: L=%.2f, C=%.2f, in-between hues.\n", Lp, Cp)
 
 	var pastels []entry
 	for i, h := range pastelHues {

@@ -22,14 +22,14 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	const cols = 1
 	const rows = 4
 
-	cr := func() *Creature { return &Creature{} }
+	cr := func() *Organism { return &Organism{} }
 
 	cells := make([][]Cell, cols)
 	cells[0] = []Cell{
-		{Creature: nil, Health: 0},    // row 0: vacated slot
-		{Creature: cr(), Health: 1.0}, // row 1: compacted from row 0
-		{Creature: cr(), Health: 1.0}, // row 2: compacted from row 1
-		{Creature: cr(), Health: 1.0}, // row 3: unchanged
+		{Organism: nil, Health: 0},    // row 0: vacated slot
+		{Organism: cr(), Health: 1.0}, // row 1: compacted from row 0
+		{Organism: cr(), Health: 1.0}, // row 2: compacted from row 1
+		{Organism: cr(), Health: 1.0}, // row 3: unchanged
 	}
 
 	g := &Game{

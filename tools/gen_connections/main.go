@@ -9,6 +9,8 @@
 // targets by sampling without replacement from all other nodes using the
 // seeded PRNG.
 //
+// Operates on organism names (string keys); no Organism type reference needed.
+//
 // Run with: go run tools/gen_connections/main.go
 package main
 

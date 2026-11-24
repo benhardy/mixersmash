@@ -6,21 +6,21 @@ import (
 	"time"
 )
 
-// Cell holds a grid cell's creature reference and health (1.0 = full, 0.0 = dead).
-// A nil Creature means the cell is empty/dead.
+// Cell holds a grid cell's organism reference and health (1.0 = full, 0.0 = dead).
+// A nil Organism means the cell is empty/dead.
 type Cell struct {
-	Creature *Creature
+	Organism *Organism
 	Health   float32
 }
 
-// Color returns the palette colour for this cell's creature, or a zero color.RGBA
-// (A=0) if the cell is empty (Creature == nil). All palette colours have A=255,
+// Color returns the palette colour for this cell's organism, or a zero color.RGBA
+// (A=0) if the cell is empty (Organism == nil). All palette colours have A=255,
 // so A=0 is a safe sentinel for an empty cell.
 func (c Cell) Color() color.RGBA {
-	if c.Creature == nil {
+	if c.Organism == nil {
 		return color.RGBA{}
 	}
-	return c.Creature.Color
+	return c.Organism.Color
 }
 
 // MoveAnim describes the animated movement of a cell from one pixel position to
@@ -57,7 +57,7 @@ func NewGrid(cols, rows int) *Grid {
 		cells[c] = make([]Cell, rows)
 		for r := 0; r < rows; r++ {
 			cells[c][r] = Cell{
-				Creature: paletteCreature(),
+				Organism: paletteOrganism(),
 				Health:   1.0,
 			}
 		}
@@ -133,27 +133,27 @@ func eightNeighbors(buf [][2]int, col, row, cols, rows int) [][2]int {
 }
 
 // connectionVictims appends into buf all 8-neighbours of (col,row) with
-// Health > 0 whose Creature pointer either equals the target's own Creature
-// (same type, pointer identity) or appears in cells[col][row].Creature.Connections.
+// Health > 0 whose Organism pointer either equals the target's own Organism
+// (same type, pointer identity) or appears in cells[col][row].Organism.Connections.
 // scratch is used internally for the eightNeighbors call and must not alias buf.
 // buf is reset to [:0] before use. Returns (updatedBuf, updatedScratch).
-// Returns (buf[:0], scratch) unchanged if the target cell has no Creature.
+// Returns (buf[:0], scratch) unchanged if the target cell has no Organism.
 func connectionVictims(buf, scratch [][2]int, cells [][]Cell, col, row, cols, rows int) ([][2]int, [][2]int) {
 	buf = buf[:0]
-	if cells[col][row].Creature == nil {
+	if cells[col][row].Organism == nil {
 		return buf, scratch
 	}
-	target := cells[col][row].Creature
+	target := cells[col][row].Organism
 	scratch = eightNeighbors(scratch, col, row, cols, rows)
 	for _, n := range scratch {
 		nc, nr := n[0], n[1]
 		if cells[nc][nr].Health <= 0 {
 			continue
 		}
-		if cells[nc][nr].Creature == nil {
+		if cells[nc][nr].Organism == nil {
 			continue
 		}
-		neighbour := cells[nc][nr].Creature
+		neighbour := cells[nc][nr].Organism
 		// Same type (pointer equality) is always a victim.
 		if neighbour == target {
 			buf = append(buf, [2]int{nc, nr})

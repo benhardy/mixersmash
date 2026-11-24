@@ -189,13 +189,13 @@ func (h *hud) buildTextLines(score, hoverCol, hoverRow, maxChars int, grid *Grid
 	if hoverCol >= 0 && hoverRow >= 0 &&
 		hoverCol < grid.Cols && hoverRow < grid.Rows {
 		cell := &grid.Cells[hoverCol][hoverRow]
-		if cell.Health > 0 && cell.Creature != nil {
-			name := cell.Creature.Name
+		if cell.Health > 0 && cell.Organism != nil {
+			name := cell.Organism.Name
 			if len(name) > 0 {
 				name = strings.ToUpper(name[:1]) + name[1:]
 			}
 			lines = append(lines, "") // blank spacer
-			lines = append(lines, name+" - "+strconv.Itoa(cell.Creature.Power))
+			lines = append(lines, name+" - "+strconv.Itoa(cell.Organism.Power))
 		}
 	}
 	return lines
