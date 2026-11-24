@@ -60,6 +60,8 @@ const (
 	// showPerfDebug controls the per-frame performance readout drawn in the
 	// bottom-right corner of the frame.  Set false to compile it out entirely.
 	showPerfDebug = false
+
+	mixerHealthChangeOnClick = float32(-0.334) // each click reduces health
 )
 
 // compositeSpriteRefSize is the logical fallback side length used only before
@@ -319,7 +321,7 @@ func (g *Game) drawCell(col, row int, cellFullness float32) {
 	y0 := row * cs
 	g.canvas.SubImage(image.Rect(x0, y0, x0+cs, y0+cs)).(*ebiten.Image).Clear()
 
-	if cell.Health <= 0 {
+	if cell.IsDead() {
 		return
 	}
 	halfCs := csFloat / 2
@@ -538,41 +540,13 @@ func (g *Game) buildCollapseAnims() bool {
 	return true
 }
 
-// mixerFullness returns the visual fullness (0..1) for a Mixer cell based on
-// how many times it has been clicked: 0 clicks → 1.0, 1 click → 0.667,
-// 2 clicks → 0.333.
-func mixerFullness(clicks int) float32 {
-	switch clicks {
-	case 1:
-		return 2.0 / 3.0
-	case 2:
-		return 1.0 / 3.0
-	default:
-		return 1.0
-	}
-}
-
-// mixerClickOutcome returns the new MixerClicks value and whether the click
-// should clear the cell. Clicks 1 and 2 increment the counter; click 3 clears.
-// Input clicks is the current value before this click.
-func mixerClickOutcome(clicks int) (newClicks int, clears bool) {
-	newClicks = clicks + 1
-	clears = newClicks >= 3
-	return newClicks, clears
-}
-
 // repaintGrid redraws every cell from the model onto the offscreen canvas,
 // fully re-syncing canvas state with the grid. Dead cells are cleared to blank.
 // This is called only at settle points (no animation is in flight).
 func (g *Game) repaintGrid() {
 	for c := 0; c < g.grid.Cols; c++ {
 		for r := 0; r < g.grid.Rows; r++ {
-			cell := &g.grid.Cells[c][r]
-			fullness := float32(1.0)
-			if cell.Organism != nil && cell.Organism.IsMixer {
-				fullness = mixerFullness(cell.MixerClicks)
-			}
-			g.drawCell(c, r, fullness)
+			g.drawCell(c, r, 1.0)
 		}
 	}
 }
@@ -638,7 +612,7 @@ func (g *Game) buildShuffleAnims(col, row int) {
 	// Collect alive neighbours.
 	var aliveNeighbors [][2]int
 	for _, n := range neighbors {
-		if g.grid.Cells[n[0]][n[1]].Health > 0 {
+		if !g.grid.Cells[n[0]][n[1]].IsDead() {
 			aliveNeighbors = append(aliveNeighbors, n)
 		}
 	}
@@ -727,15 +701,15 @@ func (g *Game) commitCellAt(col, row int) error {
 		return nil
 	}
 	cell := &g.grid.Cells[col][row]
-	if cell.Health <= 0 {
+	if cell.IsDead() {
 		return nil
 	}
 
 	// Mixer click path: increment click count and either shuffle or remove.
 	if cell.Organism != nil && cell.Organism.IsMixer {
-		outcome, clears := mixerClickOutcome(cell.MixerClicks)
-		cell.MixerClicks = outcome
-		if !clears {
+		oldHealth := cell.Health
+		cell.BumpHealth(mixerHealthChangeOnClick)
+		if !cell.IsDead() {
 			// Clicks 1 and 2: show new size, shuffle neighbours.
 			g.repaintGrid()
 			g.buildShuffleAnims(col, row)
@@ -747,8 +721,6 @@ func (g *Game) commitCellAt(col, row int) error {
 			dcs = cellSize
 		}
 		organism := cell.Organism
-		oldHealth := cell.Health
-		cell.Health = 0
 		g.cellCount--
 		g.drawCell(col, row, 1.0)
 		g.actionCol = col
@@ -890,7 +862,7 @@ func (g *Game) frameDims() (frameW, frameH float64, hudDevW int) {
 func (g *Game) updateHover(hc, hr int) {
 	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
 		cell := g.grid.Cells[hc][hr]
-		if cell.Health > 0 {
+		if !cell.IsDead() {
 			g.hoverCol, g.hoverRow = hc, hr
 			if cell.Organism != nil && cell.Organism.IsAnimal {
 				cluster := floodMatchCluster(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)

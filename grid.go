@@ -10,9 +10,16 @@ import (
 // A nil Organism means the cell is empty/dead.
 // MixerClicks counts how many times this cell has been activated as a Mixer; zero by default.
 type Cell struct {
-	Organism    *Organism
-	Health      float32
-	MixerClicks int
+	Organism *Organism
+	Health   float32
+}
+
+func (c *Cell) BumpHealth(delta float32) {
+	c.Health = max(c.Health+delta, 0)
+}
+
+func (c *Cell) IsDead() bool {
+	return c.Health <= 0
 }
 
 // Color returns the palette colour for this cell's organism, or a zero color.RGBA
