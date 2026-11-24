@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"math/rand"
 	"time"
 )
 
@@ -28,6 +29,40 @@ func moveAnimPos(anim MoveAnim, state int, t float32) (cx, cy float32) {
 		cx, cy = lerp2(anim.FromX, anim.FromY, anim.ToX, anim.ToY, posT)
 	}
 	return cx, cy
+}
+
+// victimPathParams selects a random path type for a flood victim animating
+// (fromX,fromY) to (toX,toY) and returns PathType, CtrlX, CtrlY, and
+// SpiralTurns for use in a MoveAnim victim entry.
+func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrlY, spiralTurns float32) {
+	pathType = rand.Intn(3)
+	dx := toX - fromX
+	dy := toY - fromY
+	dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	if pathType == 1 { // Bezier arc: control point perpendicular to the line
+		midX := (fromX + toX) * 0.5
+		midY := (fromY + toY) * 0.5
+		var pX, pY float32
+		if dist > 0 {
+			pX = -dy / dist
+			pY = dx / dist
+		}
+		sign := float32(1)
+		if rand.Intn(2) == 0 {
+			sign = -1
+		}
+		offset := sign * dist * (0.5 + rand.Float32()*1.0)
+		ctrlX = midX + pX*offset
+		ctrlY = midY + pY*offset
+	}
+	if pathType == 2 { // logarithmic spiral
+		turns := float32(0.5 + rand.Float32()*1.0) // 0.5–1.5 turns
+		if rand.Intn(2) == 0 {
+			turns = -turns
+		}
+		spiralTurns = turns
+	}
+	return
 }
 
 // victimAnimPos returns the pixel centre (cx, cy) for a victim MoveAnim at

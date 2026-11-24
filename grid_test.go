@@ -297,70 +297,6 @@ func TestEightNeighborsCentre(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// connectionVictims
-// ---------------------------------------------------------------------------
-
-// makeConnectionGrid builds a cols×rows grid of zero-Health cells. Callers set
-// specific cells' Creature and Health after calling this helper.
-func makeConnectionGrid(cols, rows int) [][]Cell {
-	cells := make([][]Cell, cols)
-	for c := range cells {
-		cells[c] = make([]Cell, rows)
-	}
-	return cells
-}
-
-// TestConnectionVictimsNilCreatureTarget verifies that nil is returned when
-// the target cell has no Creature.
-func TestConnectionVictimsNilCreatureTarget(t *testing.T) {
-	cells := makeConnectionGrid(3, 3)
-	// cells[1][1] has Creature==nil by default.
-	cells[2][2] = Cell{Organism: &organismPalette[0], Health: 1.0}
-
-	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
-	if len(got) != 0 {
-		t.Errorf("want empty result for nil-Creature target, got %v", got)
-	}
-}
-
-// TestConnectionVictimsSameTypeAliveNeighbour verifies that an alive neighbour
-// of the SAME creature type (pointer identity) as the target is returned as a
-// victim even if it is not in target.Connections.
-func TestConnectionVictimsSameTypeAliveNeighbour(t *testing.T) {
-	// Find a palette creature that is NOT connected to itself (all are, by
-	// construction — we just need any creature and confirm same-pointer match).
-	// Use organismPalette[0]. Verify it is not in its own Connections (no self-link).
-	target := &organismPalette[0]
-	cells := makeConnectionGrid(3, 3)
-	cells[1][1] = Cell{Organism: target, Health: 1.0}
-	// Place the same *Organism pointer at neighbour (2,1). This is same-type but
-	// must NOT appear in target.Connections (no self-link invariant guarantees this).
-	cells[2][1] = Cell{Organism: target, Health: 1.0}
-
-	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
-	if len(got) != 1 {
-		t.Fatalf("want 1 victim (same-type alive), got %d: %v", len(got), got)
-	}
-	if got[0] != [2]int{2, 1} {
-		t.Errorf("want {2,1}, got %v", got[0])
-	}
-}
-
-// TestConnectionVictimsSameTypeDeadNeighbour verifies that a dead neighbour of
-// the same creature type is NOT returned as a victim.
-func TestConnectionVictimsSameTypeDeadNeighbour(t *testing.T) {
-	target := &organismPalette[0]
-	cells := makeConnectionGrid(3, 3)
-	cells[1][1] = Cell{Organism: target, Health: 1.0}
-	cells[2][1] = Cell{Organism: target, Health: 0.0} // dead same-type
-
-	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
-	if len(got) != 0 {
-		t.Errorf("want no victims (dead same-type neighbour), got %d: %v", len(got), got)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // gravityMoves
 // ---------------------------------------------------------------------------
 
@@ -438,124 +374,6 @@ func TestGravityMovesAllHoles(t *testing.T) {
 	got := gravityMoves(3, []int{0, 1, 2})
 	if len(got) != 0 {
 		t.Errorf("gravityMoves(3, [0,1,2]) = %v, want empty slice", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// scoreForKill
-// ---------------------------------------------------------------------------
-
-// TestScoreForKill verifies the pure scoring function across the full
-// multi-victim matrix.
-//
-// Formula:
-//
-//	N   = len(victimColors)
-//	base       = 5
-//	additional = max(0, N-1) * 20
-//	sameColour = 30 * N  if N>=2 and all victims share the exact same color.RGBA, else 0
-//	targetColour = 40 * M  where M = count of victims whose color == targetColor
-//	total = base + additional + sameColour + targetColour
-func TestScoreForKill(t *testing.T) {
-	red := color.RGBA{R: 200, G: 0, B: 0, A: 255}
-	blue := color.RGBA{R: 0, G: 0, B: 200, A: 255}
-	green := color.RGBA{R: 0, G: 200, B: 0, A: 255}
-	target := red
-
-	cases := []struct {
-		name         string
-		victimColors []color.RGBA
-		targetColor  color.RGBA
-		want         int
-	}{
-		{
-			// N=0: base=5, additional=0, sameColour=0, targetColour=0 → 5
-			name:         "N=0 no victims",
-			victimColors: []color.RGBA{},
-			targetColor:  target,
-			want:         5,
-		},
-		{
-			// N=1 victim != target: base=5, additional=0, sameColour=0, targetColour=0 → 5
-			name:         "N=1 victim colour != target",
-			victimColors: []color.RGBA{blue},
-			targetColor:  target,
-			want:         5,
-		},
-		{
-			// N=1 victim == target: base=5, additional=0, sameColour=0, targetColour=40 → 45
-			name:         "N=1 victim colour == target",
-			victimColors: []color.RGBA{red},
-			targetColor:  target,
-			want:         45,
-		},
-		{
-			// N=2 distinct colours, neither == target: base=5, additional=20, sameColour=0, targetColour=0 → 25
-			name:         "N=2 distinct colours neither == target",
-			victimColors: []color.RGBA{blue, green},
-			targetColor:  target,
-			want:         25,
-		},
-		{
-			// N=3 distinct colours, none == target: base=5, additional=40, sameColour=0, targetColour=0 → 45
-			name:         "N=3 distinct colours none == target",
-			victimColors: []color.RGBA{blue, green, color.RGBA{R: 100, G: 100, B: 100, A: 255}},
-			targetColor:  target,
-			want:         45,
-		},
-		{
-			// N=2 both same colour != target: base=5, additional=20, sameColour=60, targetColour=0 → 85
-			name:         "N=2 both same colour != target",
-			victimColors: []color.RGBA{blue, blue},
-			targetColor:  target,
-			want:         85,
-		},
-		{
-			// N=3 all same colour != target: base=5, additional=40, sameColour=90, targetColour=0 → 135
-			name:         "N=3 all same colour != target",
-			victimColors: []color.RGBA{blue, blue, blue},
-			targetColor:  target,
-			want:         135,
-		},
-		{
-			// N=3 all same colour AND == target: base=5, additional=40, sameColour=90, targetColour=120 → 255
-			name:         "N=3 all same colour and == target (worked example)",
-			victimColors: []color.RGBA{red, red, red},
-			targetColor:  target,
-			want:         255,
-		},
-		{
-			// N=2 same colour, both == target: base=5, additional=20, sameColour=60, targetColour=80 → 165
-			name:         "N=2 same colour both == target",
-			victimColors: []color.RGBA{red, red},
-			targetColor:  target,
-			want:         165,
-		},
-		{
-			// N=3 mixed: two == target, one different, not all-same: base=5, additional=40, sameColour=0, targetColour=80 → 125
-			name:         "N=3 mixed two == target one different not all-same",
-			victimColors: []color.RGBA{red, red, blue},
-			targetColor:  target,
-			want:         125,
-		},
-		{
-			// N=2 distinct, exactly one == target: base=5, additional=20, sameColour=0, targetColour=40 → 65
-			name:         "N=2 distinct exactly one == target",
-			victimColors: []color.RGBA{red, blue},
-			targetColor:  target,
-			want:         65,
-		},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			got := scoreForKill(tc.victimColors, tc.targetColor)
-			if got != tc.want {
-				t.Errorf("scoreForKill(%v, %v) = %d, want %d",
-					tc.victimColors, tc.targetColor, got, tc.want)
-			}
-		})
 	}
 }
 
@@ -968,62 +786,6 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// shuffleCount
-// ---------------------------------------------------------------------------
-
-// TestShuffleCount verifies the pure helper that maps (power, aliveCount) to the
-// number of neighbours to shuffle.
-//
-// Rules:
-//   - Power == 2            → 0 for any aliveCount
-//   - aliveCount == 0       → 0 for any power
-//   - otherwise             → min(power, aliveCount)
-func TestShuffleCount(t *testing.T) {
-	cases := []struct {
-		name       string
-		power      int
-		aliveCount int
-		want       int
-	}{
-		// Power-2 cases: always 0 regardless of neighbours.
-		{name: "power2 alive0", power: 2, aliveCount: 0, want: 0},
-		{name: "power2 alive1", power: 2, aliveCount: 1, want: 0},
-		{name: "power2 alive8", power: 2, aliveCount: 8, want: 0},
-
-		// Zero alive neighbours: always 0 regardless of power.
-		{name: "power3 alive0", power: 3, aliveCount: 0, want: 0},
-		{name: "power5 alive0", power: 5, aliveCount: 0, want: 0},
-		{name: "power8 alive0", power: 8, aliveCount: 0, want: 0},
-
-		// Power-3: min(3, alive).
-		{name: "power3 alive1", power: 3, aliveCount: 1, want: 1},
-		{name: "power3 alive2", power: 3, aliveCount: 2, want: 2},
-		{name: "power3 alive3", power: 3, aliveCount: 3, want: 3},
-		{name: "power3 alive8", power: 3, aliveCount: 8, want: 3},
-
-		// Power-5: min(5, alive).
-		{name: "power5 alive3", power: 5, aliveCount: 3, want: 3},
-		{name: "power5 alive5", power: 5, aliveCount: 5, want: 5},
-		{name: "power5 alive8", power: 5, aliveCount: 8, want: 5},
-
-		// Power-8: min(8, alive).
-		{name: "power8 alive4", power: 8, aliveCount: 4, want: 4},
-		{name: "power8 alive7", power: 8, aliveCount: 7, want: 7},
-		{name: "power8 alive8", power: 8, aliveCount: 8, want: 8},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			got := shuffleCount(tc.power, tc.aliveCount)
-			if got != tc.want {
-				t.Errorf("shuffleCount(power=%d, alive=%d) = %d, want %d",
-					tc.power, tc.aliveCount, got, tc.want)
-			}
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
 // sRGBToOKLab — unit tests
 // ---------------------------------------------------------------------------
 
@@ -1058,98 +820,6 @@ func TestSRGBToOKLabRedGreenDistance(t *testing.T) {
 	dRO := dist(red, orange)
 	if dRG <= dRO {
 		t.Errorf("expected dist(red,green)=%f > dist(red,orange)=%f", dRG, dRO)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// commitCellAt — health decrement and power-2 instant-death rule
-// ---------------------------------------------------------------------------
-
-// TestNextHealthAfterHit exercises nextHealthAfterHit, the pure function that
-// encapsulates the cell-death health-decrement rule extracted from commitCellAt.
-func TestNextHealthAfterHit(t *testing.T) {
-	t.Run("power2 instant death", func(t *testing.T) {
-		cases := []float32{1.0, 0.75, 0.5625, 0.001}
-		for _, h := range cases {
-			if got := nextHealthAfterHit(2, h); got != 0 {
-				t.Errorf("nextHealthAfterHit(2, %v) = %v, want 0 (instant death)", h, got)
-			}
-		}
-	})
-
-	t.Run("power3 hit sequence", func(t *testing.T) {
-		// Hit 1: 1.0 * 0.75 = 0.75 > healthMin(0.562) → alive
-		h1 := nextHealthAfterHit(3, 1.0)
-		want1 := float32(1.0) * healthDecrementKeep
-		if h1 != want1 {
-			t.Errorf("hit 1: got %v, want %v", h1, want1)
-		}
-		if h1 <= 0 {
-			t.Errorf("hit 1: cell should survive, got health %v", h1)
-		}
-
-		// Hit 2: 0.75 * 0.75 = 0.5625 > healthMin(0.562) → alive
-		h2 := nextHealthAfterHit(3, h1)
-		want2 := want1 * healthDecrementKeep
-		if h2 != want2 {
-			t.Errorf("hit 2: got %v, want %v", h2, want2)
-		}
-		if h2 <= 0 {
-			t.Errorf("hit 2: cell should survive, got health %v", h2)
-		}
-
-		// Hit 3: 0.5625 * 0.75 = 0.421875 <= healthMin(0.562) → dead
-		h3 := nextHealthAfterHit(3, h2)
-		if h3 != 0 {
-			t.Errorf("hit 3: got %v, want 0 (should die at third hit)", h3)
-		}
-	})
-}
-
-// TestPower2CellDiesOnFirstHit verifies that a power-2 cell is killed by a
-// single hit via nextHealthAfterHit.
-func TestPower2CellDiesOnFirstHit(t *testing.T) {
-	if got := nextHealthAfterHit(2, 1.0); got != 0 {
-		t.Errorf("nextHealthAfterHit(2, 1.0) = %v, want 0 (instant death)", got)
-	}
-}
-
-// TestHigherPowerCellSurvivesFirstHit verifies that a power-3 cell is NOT
-// killed by a single hit.  After one application of healthDecrementKeep the
-// health is 0.75 — above both healthMin (0.562) and healthEpsilon (0.001),
-// so the cell remains alive.  A second hit brings health to 0.5625, which is
-// still above healthMin (0.562) by 0.0005, so the cell is still alive.
-// Only from three hits onward does the floor trigger and the cell die.
-//
-// Concretely this test asserts:
-//   - after hit 1: Health == 1.0 * 0.75 == 0.75 (> healthMin → alive)
-//   - after hit 2: Health == 0.75 * 0.75 == 0.5625 (> healthMin → alive)
-//   - after hit 3: Health would be 0.5625 * 0.75 == 0.421875; <= healthMin → dead
-func TestHigherPowerCellSurvivesFirstHit(t *testing.T) {
-	// Hit 1: must survive.
-	h1 := nextHealthAfterHit(3, 1.0)
-	if h1 <= 0 {
-		t.Errorf("power-3 cell after hit 1: Health = %v, want > 0 (cell should survive)", h1)
-	}
-	wantAfterHit1 := float32(1.0) * healthDecrementKeep
-	if h1 != wantAfterHit1 {
-		t.Errorf("power-3 cell after hit 1: Health = %v, want %v", h1, wantAfterHit1)
-	}
-
-	// Hit 2: must still survive.
-	h2 := nextHealthAfterHit(3, h1)
-	if h2 <= 0 {
-		t.Errorf("power-3 cell after hit 2: Health = %v, want > 0 (cell should survive)", h2)
-	}
-	wantAfterHit2 := wantAfterHit1 * healthDecrementKeep
-	if h2 != wantAfterHit2 {
-		t.Errorf("power-3 cell after hit 2: Health = %v, want %v", h2, wantAfterHit2)
-	}
-
-	// Hit 3: health drops to 0.421875 which is <= healthMin (0.562), so cell dies.
-	h3 := nextHealthAfterHit(3, h2)
-	if h3 != 0 {
-		t.Errorf("power-3 cell after hit 3: Health = %v, want 0 (should die at third hit)", h3)
 	}
 }
 
@@ -1245,8 +915,8 @@ func TestFrameDimsNilFrame(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // makeHoverGame builds a minimal Game with a cols×rows grid for updateHover tests.
-// All cells are set alive (Health=1.0) with a palette creature so connectionVictims
-// can find matches.  Callers may set specific cells dead or nil afterwards.
+// All cells are set alive (Health=1.0) with a palette creature.
+// Callers may set specific cells dead or nil afterwards.
 func makeHoverGame(cols, rows int) *Game {
 	grid := NewGrid(cols, rows)
 	// Assign creatures and set health so cells are alive.
@@ -1302,5 +972,263 @@ func TestUpdateHoverOutOfBoundsLeavesHoverUnchanged(t *testing.T) {
 	g.updateHover(0, 3)
 	if g.hoverCol != 1 || g.hoverRow != 1 {
 		t.Errorf("updateHover(0,3) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// scoreForCluster
+// ---------------------------------------------------------------------------
+
+// TestScoreForCluster verifies the n*n scoring formula.
+func TestScoreForCluster(t *testing.T) {
+	cases := []struct {
+		n    int
+		want int
+	}{
+		{1, 1},
+		{5, 25},
+		{10, 100},
+	}
+	for _, tc := range cases {
+		got := scoreForCluster(tc.n)
+		if got != tc.want {
+			t.Errorf("scoreForCluster(%d) = %d, want %d", tc.n, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// floodMatchCluster helpers
+// ---------------------------------------------------------------------------
+
+// makeTestCells builds a cols×rows Cells slice filled with nil organisms (all dead/empty).
+func makeTestCells(cols, rows int) [][]Cell {
+	cells := make([][]Cell, cols)
+	for c := 0; c < cols; c++ {
+		cells[c] = make([]Cell, rows)
+	}
+	return cells
+}
+
+// placeOrganism sets cells[col][row] to an alive cell with the given organism pointer.
+func placeOrganism(cells [][]Cell, col, row int, o *Organism) {
+	cells[col][row] = Cell{Organism: o, Health: 1.0}
+}
+
+// ---------------------------------------------------------------------------
+// floodMatchCluster
+// ---------------------------------------------------------------------------
+
+// TestFloodMatchClusterLoneAnimal verifies that a single animal with no matching
+// neighbours returns only the seed.
+func TestFloodMatchClusterLoneAnimal(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 0, IsAnimal: true}
+	other := &Organism{Name: "B", PairID: 1, IsAnimal: true}
+
+	cells := makeTestCells(3, 3)
+	placeOrganism(cells, 1, 1, animal)
+	placeOrganism(cells, 0, 1, other)
+	placeOrganism(cells, 2, 1, other)
+	placeOrganism(cells, 1, 0, other)
+	placeOrganism(cells, 1, 2, other)
+
+	got := floodMatchCluster(cells, 1, 1, 3, 3)
+	if len(got) != 1 || got[0] != [2]int{1, 1} {
+		t.Errorf("floodMatchCluster lone animal = %v, want [{1 1}]", got)
+	}
+}
+
+// TestFloodMatchClusterChainOfAnimals verifies that a chain of 3 same-pointer
+// animals (all orthogonally adjacent) are all included via flood spread.
+func TestFloodMatchClusterChainOfAnimals(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 0, IsAnimal: true}
+
+	// Layout (3×1): [animal][animal][animal]
+	cells := makeTestCells(3, 1)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 0, animal)
+	placeOrganism(cells, 2, 0, animal)
+
+	got := floodMatchCluster(cells, 0, 0, 3, 1)
+	if len(got) != 3 {
+		t.Fatalf("floodMatchCluster chain of 3 = %v (len %d), want 3 results", got, len(got))
+	}
+	coords := map[[2]int]bool{}
+	for _, c := range got {
+		coords[c] = true
+	}
+	for _, want := range [][2]int{{0, 0}, {1, 0}, {2, 0}} {
+		if !coords[want] {
+			t.Errorf("floodMatchCluster chain of 3: missing %v in %v", want, got)
+		}
+	}
+}
+
+// TestFloodMatchClusterWithPairedFood verifies that an animal with an
+// orthogonally adjacent paired food includes both.
+func TestFloodMatchClusterWithPairedFood(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 2, IsAnimal: true}
+	food := &Organism{Name: "F", PairID: 2, IsAnimal: false}
+
+	cells := makeTestCells(2, 1)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 0, food)
+
+	got := floodMatchCluster(cells, 0, 0, 2, 1)
+	if len(got) != 2 {
+		t.Fatalf("floodMatchCluster animal+food = %v (len %d), want 2", got, len(got))
+	}
+	coords := map[[2]int]bool{}
+	for _, c := range got {
+		coords[c] = true
+	}
+	if !coords[[2]int{0, 0}] || !coords[[2]int{1, 0}] {
+		t.Errorf("floodMatchCluster animal+food: got %v, want both {0,0} and {1,0}", got)
+	}
+}
+
+// TestFloodMatchClusterNonPairedFoodExcluded verifies that adjacent food with a
+// different PairID is not included.
+func TestFloodMatchClusterNonPairedFoodExcluded(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 2, IsAnimal: true}
+	wrongFood := &Organism{Name: "WF", PairID: 3, IsAnimal: false}
+
+	cells := makeTestCells(2, 1)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 0, wrongFood)
+
+	got := floodMatchCluster(cells, 0, 0, 2, 1)
+	if len(got) != 1 || got[0] != [2]int{0, 0} {
+		t.Errorf("floodMatchCluster non-paired food = %v, want only [{0 0}]", got)
+	}
+}
+
+// TestFloodMatchClusterFoodDoesNotSpread verifies that food is a leaf: a food
+// cell between two separated animals is included once but does not bridge them.
+//
+// Layout (3×1): [animalA][food(pairID=A)][animalA]
+// The food is adjacent to both animals but food does not enqueue, so only the
+// seed animal and the food it touches are included — the far animal is not reachable.
+func TestFloodMatchClusterFoodDoesNotSpread(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 5, IsAnimal: true}
+	food := &Organism{Name: "F", PairID: 5, IsAnimal: false}
+
+	cells := makeTestCells(3, 1)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 0, food)
+	placeOrganism(cells, 2, 0, animal)
+
+	got := floodMatchCluster(cells, 0, 0, 3, 1)
+	// Seed at (0,0) finds food at (1,0) → included but not enqueued.
+	// (2,0) is never reached from (1,0) because food is not enqueued.
+	if len(got) != 2 {
+		t.Fatalf("floodMatchCluster food-no-spread = %v (len %d), want 2 (seed + food only)", got, len(got))
+	}
+	coords := map[[2]int]bool{}
+	for _, c := range got {
+		coords[c] = true
+	}
+	if !coords[[2]int{0, 0}] || !coords[[2]int{1, 0}] {
+		t.Errorf("floodMatchCluster food-no-spread: got %v, want {0,0} and {1,0}", got)
+	}
+	if coords[[2]int{2, 0}] {
+		t.Errorf("floodMatchCluster food-no-spread: far animal {2,0} should not be reachable, got %v", got)
+	}
+}
+
+// TestFloodMatchClusterDiagonalIncluded verifies that a diagonally adjacent
+// same-animal cell IS included (8-neighbour flood).
+func TestFloodMatchClusterDiagonalIncluded(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 7, IsAnimal: true}
+
+	// Layout (2×2): [animal][empty]
+	//               [empty][animal]
+	// Seed at (0,0) with diagonal same-animal at (1,1).
+	cells := makeTestCells(2, 2)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 1, animal)
+
+	got := floodMatchCluster(cells, 0, 0, 2, 2)
+	if len(got) != 2 {
+		t.Fatalf("floodMatchCluster diagonal included = %v (len %d), want 2 results", got, len(got))
+	}
+	coords := map[[2]int]bool{}
+	for _, c := range got {
+		coords[c] = true
+	}
+	if !coords[[2]int{0, 0}] || !coords[[2]int{1, 1}] {
+		t.Errorf("floodMatchCluster diagonal included: got %v, want both {0,0} and {1,1}", got)
+	}
+}
+
+// TestFloodMatchClusterDiagonalFoodIncluded verifies that a diagonally adjacent
+// paired food cell IS included as a leaf (8-neighbour).
+func TestFloodMatchClusterDiagonalFoodIncluded(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 3, IsAnimal: true}
+	food := &Organism{Name: "F", PairID: 3, IsAnimal: false}
+
+	// Layout (2×2): [animal][empty]
+	//               [empty][food]
+	// Seed at (0,0) with diagonal food at (1,1).
+	cells := makeTestCells(2, 2)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 1, food)
+
+	got := floodMatchCluster(cells, 0, 0, 2, 2)
+	if len(got) != 2 {
+		t.Fatalf("floodMatchCluster diagonal food included = %v (len %d), want 2 results", got, len(got))
+	}
+	coords := map[[2]int]bool{}
+	for _, c := range got {
+		coords[c] = true
+	}
+	if !coords[[2]int{0, 0}] || !coords[[2]int{1, 1}] {
+		t.Errorf("floodMatchCluster diagonal food included: got %v, want both {0,0} and {1,1}", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// clusterHasFood
+// ---------------------------------------------------------------------------
+
+// TestClusterHasFoodWithFood verifies that a cluster containing a food cell returns true.
+func TestClusterHasFoodWithFood(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 1, IsAnimal: true}
+	food := &Organism{Name: "F", PairID: 1, IsAnimal: false}
+
+	cells := makeTestCells(2, 1)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 0, food)
+
+	coords := [][2]int{{0, 0}, {1, 0}}
+	if !clusterHasFood(cells, coords) {
+		t.Error("clusterHasFood with food cell = false, want true")
+	}
+}
+
+// TestClusterHasFoodAnimalsOnly verifies that an animals-only cluster returns false.
+func TestClusterHasFoodAnimalsOnly(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 1, IsAnimal: true}
+
+	cells := makeTestCells(2, 1)
+	placeOrganism(cells, 0, 0, animal)
+	placeOrganism(cells, 1, 0, animal)
+
+	coords := [][2]int{{0, 0}, {1, 0}}
+	if clusterHasFood(cells, coords) {
+		t.Error("clusterHasFood animals-only = true, want false")
+	}
+}
+
+// TestClusterHasFoodSingleAnimal verifies that a lone animal (seed only) returns false.
+func TestClusterHasFoodSingleAnimal(t *testing.T) {
+	animal := &Organism{Name: "A", PairID: 1, IsAnimal: true}
+
+	cells := makeTestCells(1, 1)
+	placeOrganism(cells, 0, 0, animal)
+
+	coords := [][2]int{{0, 0}}
+	if clusterHasFood(cells, coords) {
+		t.Error("clusterHasFood single animal = true, want false")
 	}
 }

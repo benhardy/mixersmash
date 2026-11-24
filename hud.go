@@ -195,7 +195,7 @@ func (h *hud) buildTextLines(score, hoverCol, hoverRow, maxChars int, grid *Grid
 				name = strings.ToUpper(name[:1]) + name[1:]
 			}
 			lines = append(lines, "") // blank spacer
-			lines = append(lines, name+" - "+strconv.Itoa(cell.Organism.Power))
+			lines = append(lines, name)
 		}
 	}
 	return lines

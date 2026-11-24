@@ -95,22 +95,6 @@ func cellFromPixel(px, py, cellSize int) (int, int) {
 	return px / cellSize, py / cellSize
 }
 
-// shuffleCount returns how many alive neighbours to include in a shuffle for a
-// clicked cell with the given Power and aliveCount alive 8-neighbours.
-//
-// Rules (Power values in play are 2, 3, 5, 8):
-//   - Power == 2 → 0 (no shuffle)
-//   - otherwise  → min(Power, aliveCount)
-func shuffleCount(power, aliveCount int) int {
-	if power == 2 {
-		return 0
-	}
-	if aliveCount < power {
-		return aliveCount
-	}
-	return power
-}
-
 // eightNeighbors appends all in-bounds (col+dx, row+dy) for dx,dy in
 // {-1,0,1}×{-1,0,1} excluding (0,0) into buf (reset to [:0] first) and
 // returns the updated slice. The caller owns buf; pass a pre-allocated slice
@@ -130,86 +114,6 @@ func eightNeighbors(buf [][2]int, col, row, cols, rows int) [][2]int {
 		}
 	}
 	return buf
-}
-
-// connectionVictims appends into buf all 8-neighbours of (col,row) with
-// Health > 0 whose Organism pointer either equals the target's own Organism
-// (same type, pointer identity) or appears in cells[col][row].Organism.Connections.
-// scratch is used internally for the eightNeighbors call and must not alias buf.
-// buf is reset to [:0] before use. Returns (updatedBuf, updatedScratch).
-// Returns (buf[:0], scratch) unchanged if the target cell has no Organism.
-func connectionVictims(buf, scratch [][2]int, cells [][]Cell, col, row, cols, rows int) ([][2]int, [][2]int) {
-	buf = buf[:0]
-	if cells[col][row].Organism == nil {
-		return buf, scratch
-	}
-	target := cells[col][row].Organism
-	scratch = eightNeighbors(scratch, col, row, cols, rows)
-	for _, n := range scratch {
-		nc, nr := n[0], n[1]
-		if cells[nc][nr].Health <= 0 {
-			continue
-		}
-		if cells[nc][nr].Organism == nil {
-			continue
-		}
-		neighbour := cells[nc][nr].Organism
-		// Same type (pointer equality) is always a victim.
-		if neighbour == target {
-			buf = append(buf, [2]int{nc, nr})
-			continue
-		}
-		// Connected type (membership in Connections) is also a victim.
-		for _, conn := range target.Connections {
-			if conn == neighbour {
-				buf = append(buf, [2]int{nc, nr})
-				break
-			}
-		}
-	}
-	return buf, scratch
-}
-
-// scoreForKill returns the points earned for a single kill.
-// victimColors holds the colours of all victims absorbed; targetColor is the
-// colour of the target cell that died.
-//
-// Formula:
-//
-//	N            = len(victimColors)
-//	base         = 5
-//	additional   = max(0, N-1) * 20
-//	sameColour   = 30*N  if N>=2 and all victim colours are the exact same color.RGBA, else 0
-//	targetColour = 40 * M  where M = count of victims whose colour == targetColor
-//	total        = base + additional + sameColour + targetColour
-func scoreForKill(victimColors []color.RGBA, targetColor color.RGBA) int {
-	n := len(victimColors)
-	base := 5
-	additional := 0
-	if n > 1 {
-		additional = (n - 1) * 20
-	}
-	sameColour := 0
-	if n >= 2 {
-		allSame := true
-		for i := 1; i < n; i++ {
-			if victimColors[i] != victimColors[0] {
-				allSame = false
-				break
-			}
-		}
-		if allSame {
-			sameColour = 30 * n
-		}
-	}
-	m := 0
-	for _, c := range victimColors {
-		if c == targetColor {
-			m++
-		}
-	}
-	targetColour := 40 * m
-	return base + additional + sameColour + targetColour
 }
 
 // gravityMoves returns the [oldRow, newRow] mapping for cells in a column of numRows
@@ -316,6 +220,77 @@ func applyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 	}
 
 	return result
+}
+
+// floodMatchCluster returns all grid coordinates that belong to the flood-match
+// cluster seeded at (col, row). The seed cell must hold an animal Organism.
+//
+// Rules (BFS over 8-neighbours, pure — no mutation):
+//   - Same animal pointer as the seed: included and enqueued (flood spreads).
+//   - Different organism whose PairID equals the seed's PairID and IsAnimal==false
+//     (the paired food): included but NOT enqueued (food is a leaf, does not spread).
+//   - Everything else: ignored.
+//
+// Returns a [][2]int of (col, row) pairs including the seed. A lone animal with no
+// matching neighbours returns a single-element slice.
+func floodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
+	seed := cells[col][row].Organism
+	if seed == nil || !seed.IsAnimal {
+		return nil
+	}
+
+	var visited [gridCols][gridRows]bool
+	visited[col][row] = true
+
+	result := [][2]int{{col, row}}
+	queue := [][2]int{{col, row}}
+
+	var nbuf [][2]int
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		nbuf = eightNeighbors(nbuf, cur[0], cur[1], cols, rows)
+		for _, n := range nbuf {
+			nc, nr := n[0], n[1]
+			if visited[nc][nr] {
+				continue
+			}
+			o := cells[nc][nr].Organism
+			if o == nil {
+				continue
+			}
+			if o == seed {
+				// Same animal pointer: add and enqueue.
+				visited[nc][nr] = true
+				result = append(result, [2]int{nc, nr})
+				queue = append(queue, [2]int{nc, nr})
+			} else if o.PairID == seed.PairID && !o.IsAnimal {
+				// Paired food: add but do NOT enqueue.
+				visited[nc][nr] = true
+				result = append(result, [2]int{nc, nr})
+			}
+		}
+	}
+	return result
+}
+
+// clusterHasFood reports whether any cell in coords is a food cell
+// (Organism != nil and IsAnimal == false). Used by commitCellAt to gate the
+// no-food no-op rule: a cluster with no paired food must not clear.
+func clusterHasFood(cells [][]Cell, coords [][2]int) bool {
+	for _, coord := range coords {
+		o := cells[coord[0]][coord[1]].Organism
+		if o != nil && !o.IsAnimal {
+			return true
+		}
+	}
+	return false
+}
+
+// scoreForCluster returns the score for clearing a cluster of n cells.
+// Score is super-linear: n*n.
+func scoreForCluster(n int) int {
+	return n * n
 }
 
 // elapsedFraction returns how far through a phase we are as a 0→1 float32,

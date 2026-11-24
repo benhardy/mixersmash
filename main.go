@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"log"
 	"math"
-	"math/rand"
 	"runtime"
 	"strconv"
 	"time"
@@ -62,25 +61,6 @@ const (
 	showPerfDebug = false
 )
 
-// nextHealthAfterHit returns a cell's health after one commit hit, given the
-// creature's power. Power-2 cells die instantly (return 0 regardless of
-// starting health). For all other power values the health is multiplied by
-// healthDecrementKeep; if the result falls at or below healthMin or below
-// healthEpsilon, 0 is returned instead.
-func nextHealthAfterHit(power int, health float32) float32 {
-	if power == 2 {
-		return 0
-	}
-	health *= healthDecrementKeep
-	if health <= healthMin {
-		return 0
-	}
-	if health < healthEpsilon {
-		return 0
-	}
-	return health
-}
-
 // compositeSpriteRefSize is the logical fallback side length used only before
 // the first LayoutF call sets g.spriteRefSize.  At runtime, spriteRefSize is
 // derived from deviceCellSize*2 (capped at 512) and updated on scale changes.
@@ -102,9 +82,8 @@ type Game struct {
 	moveAnims    []MoveAnim    // used for both shuffle and drop phases
 	glowShader   *ebiten.Shader
 	gelShader    *ebiten.Shader
-	cellCount    int        // number of live cells currently in the grid
-	score        int        // cumulative score
-	targetColor  color.RGBA // colour of the most recently killed target cell
+	cellCount    int // number of live cells currently in the grid
+	score        int // cumulative score
 
 	// hover hint fields
 	hoverCol, hoverRow int      // cell under cursor (-1 = none)
@@ -120,13 +99,6 @@ type Game struct {
 	touchIDsBuf     []ebiten.TouchID // reused for ebiten.AppendTouchIDs
 	justPressedBuf  []ebiten.TouchID // reused for inpututil.AppendJustPressedTouchIDs
 	justReleasedBuf []ebiten.TouchID // reused for inpututil.AppendJustReleasedTouchIDs
-
-	// per-frame reuse buffers for neighbour coordinate slices (avoids per-frame allocation)
-	hoverNeighborsBuf  [][2]int // scratch for eightNeighbors inside connectionVictims (hover path)
-	hoverVictimsBuf    [][2]int // result buffer for connectionVictims (hover path)
-	survivalNbrsBuf    [][2]int // scratch for eightNeighbors in handleTargetSurvival
-	deathVictimScratch [][2]int // scratch for eightNeighbors inside connectionVictims (death path)
-	deathVictimsBuf    [][2]int // result buffer for connectionVictims (death path)
 
 	// victim movement animation fields (one entry per simultaneous victim)
 	victimCount int
@@ -198,25 +170,20 @@ type Game struct {
 // calling this.
 func newGameState(grid *Grid) *Game {
 	return &Game{
-		grid:               grid,
-		currentState:       stateWaiting,
-		actionCol:          -1,
-		actionRow:          -1,
-		cellCount:          grid.Cols * grid.Rows,
-		hoverCol:           -1,
-		hoverRow:           -1,
-		victimHints:        nil,
-		victimAnims:        make([]MoveAnim, 9), // max 9 simultaneous victims; index-assigned via victimCount
-		victimCount:        0,
-		targetAnimating:    false,
-		touchIDsBuf:        make([]ebiten.TouchID, 0, 10),
-		justPressedBuf:     make([]ebiten.TouchID, 0, 10),
-		justReleasedBuf:    make([]ebiten.TouchID, 0, 10),
-		hoverNeighborsBuf:  make([][2]int, 0, 8),
-		hoverVictimsBuf:    make([][2]int, 0, 8),
-		survivalNbrsBuf:    make([][2]int, 0, 8),
-		deathVictimScratch: make([][2]int, 0, 8),
-		deathVictimsBuf:    make([][2]int, 0, 8),
+		grid:            grid,
+		currentState:    stateWaiting,
+		actionCol:       -1,
+		actionRow:       -1,
+		cellCount:       grid.Cols * grid.Rows,
+		hoverCol:        -1,
+		hoverRow:        -1,
+		victimHints:     nil,
+		victimAnims:     make([]MoveAnim, gridCols*gridRows), // flood can clear up to Cols*Rows cells
+		victimCount:     0,
+		targetAnimating: false,
+		touchIDsBuf:     make([]ebiten.TouchID, 0, 10),
+		justPressedBuf:  make([]ebiten.TouchID, 0, 10),
+		justReleasedBuf: make([]ebiten.TouchID, 0, 10),
 	}
 }
 
@@ -626,27 +593,89 @@ func (g *Game) updateColumnCollapsing() error {
 	return nil
 }
 
-// commitCellAt applies one hit to the cell at (col, row): decrements health,
-// then delegates to handleTargetDeath or handleTargetSurvival as appropriate.
-// It is a no-op (returns nil) when the cell is out-of-bounds or already dead.
+// commitCellAt clears the flood-match cluster rooted at an animal cell through
+// the victim-shrink→drop pipeline. Clicking a non-animal, empty, or dead cell
+// is a no-op. Out-of-bounds clicks are ignored.
 func (g *Game) commitCellAt(col, row int) error {
 	if col < 0 || col >= g.grid.Cols || row < 0 || row >= g.grid.Rows {
 		return nil
 	}
 	cell := &g.grid.Cells[col][row]
+	if cell.Organism == nil || !cell.Organism.IsAnimal {
+		return nil
+	}
 	if cell.Health <= 0 {
 		return nil
 	}
-	oldHealth := cell.Health
-	cell.Health = nextHealthAfterHit(cell.Organism.Power, cell.Health)
+
+	coords := floodMatchCluster(g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
+
+	// No-op if the cluster contains no food: a lone animal (or animals-only
+	// cluster with no paired food) must not clear.
+	if !clusterHasFood(g.grid.Cells, coords) {
+		return nil
+	}
+
 	g.actionCol = col
 	g.actionRow = row
+	g.victimCount = 0
 
-	if cell.Health <= 0 {
-		g.handleTargetDeath(col, row, oldHealth)
-	} else {
-		g.handleTargetSurvival(col, row, cell, oldHealth)
+	dcs := g.deviceCellSize
+	if dcs <= 0 {
+		dcs = cellSize
 	}
+
+	seedCenterX, seedCenterY := deviceCellCenter(col, row, dcs)
+
+	for _, coord := range coords {
+		c, r := coord[0], coord[1]
+		organism := g.grid.Cells[c][r].Organism
+		oldHealth := g.grid.Cells[c][r].Health
+		g.grid.Cells[c][r].Health = 0
+		g.drawCell(c, r, 1.0)
+		g.cellCount--
+
+		fromX, fromY := deviceCellCenter(c, r, dcs)
+
+		var v MoveAnim
+		if c == col && r == row {
+			// Seed cell: shrinks in place (stationary).
+			v = MoveAnim{
+				Col:      c,
+				Row:      r,
+				Cell:     Cell{Organism: organism, Health: oldHealth},
+				FromX:    fromX,
+				FromY:    fromY,
+				ToX:      fromX,
+				ToY:      fromY,
+				PathType: 0,
+			}
+		} else {
+			// Non-seed: animate toward the seed using spiral/curved path.
+			pt, cx, cy, st := victimPathParams(fromX, fromY, seedCenterX, seedCenterY)
+			// Clear victim's canvas position (it is now an overlay animation).
+			x0, y0 := c*dcs, r*dcs
+			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
+			v = MoveAnim{
+				Col:         c,
+				Row:         r,
+				Cell:        Cell{Organism: organism, Health: oldHealth},
+				FromX:       fromX,
+				FromY:       fromY,
+				ToX:         seedCenterX,
+				ToY:         seedCenterY,
+				PathType:    pt,
+				CtrlX:       cx,
+				CtrlY:       cy,
+				SpiralTurns: st,
+			}
+		}
+		g.victimAnims[g.victimCount] = v
+		g.victimCount++
+	}
+
+	g.animStart = time.Now()
+	g.currentState = stateVictimMoving
 	return nil
 }
 
@@ -686,17 +715,26 @@ func (g *Game) frameDims() (frameW, frameH float64, hudDevW int) {
 	return
 }
 
-// updateHover applies the alive-cell guard for grid cell (hc, hr): if the cell
-// is in bounds and has Health > 0 it sets g.hoverCol/g.hoverRow and recomputes
-// g.victimHints via connectionVictims, reusing the per-frame hover buffers.
-// If the cell is out of bounds or dead the hover state is left unchanged,
-// matching the original inline behaviour in both the touch and mouse paths.
+// updateHover sets g.hoverCol/g.hoverRow when (hc, hr) is in-bounds and alive.
+// For animal cells, victimHints is populated with the flood-match cluster coords
+// (the cells that would clear on click) so the hover preview highlights the match.
+// For non-animal or empty cells, victimHints is cleared.
+// If the cell is out of bounds or dead the hover state is left unchanged.
 func (g *Game) updateHover(hc, hr int) {
 	if hc >= 0 && hc < g.grid.Cols && hr >= 0 && hr < g.grid.Rows {
-		if g.grid.Cells[hc][hr].Health > 0 {
+		cell := g.grid.Cells[hc][hr]
+		if cell.Health > 0 {
 			g.hoverCol, g.hoverRow = hc, hr
-			g.hoverVictimsBuf, g.hoverNeighborsBuf = connectionVictims(g.hoverVictimsBuf, g.hoverNeighborsBuf, g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
-			g.victimHints = g.hoverVictimsBuf
+			if cell.Organism != nil && cell.Organism.IsAnimal {
+				cluster := floodMatchCluster(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
+				if clusterHasFood(g.grid.Cells, cluster) {
+					g.victimHints = cluster
+				} else {
+					g.victimHints = g.victimHints[:0]
+				}
+			} else {
+				g.victimHints = g.victimHints[:0]
+			}
 		}
 	}
 }
@@ -780,246 +818,20 @@ func (g *Game) updateWaiting() error {
 	return nil
 }
 
-// victimPathParams computes the path parameters for a single victim moving from
-// (fromX,fromY) to (toX,toY) and returns PathType, CtrlX, CtrlY, and
-// SpiralTurns for use in a MoveAnim victim entry.
-func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrlY, spiralTurns float32) {
-	pathType = rand.Intn(3)
-	dx := toX - fromX
-	dy := toY - fromY
-	dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-	if pathType == 1 { // Bezier arc: control point perpendicular to the line
-		midX := (fromX + toX) * 0.5
-		midY := (fromY + toY) * 0.5
-		var pX, pY float32
-		if dist > 0 {
-			pX = -dy / dist
-			pY = dx / dist
-		}
-		sign := float32(1)
-		if rand.Intn(2) == 0 {
-			sign = -1
-		}
-		offset := sign * dist * (0.5 + rand.Float32()*1.0)
-		ctrlX = midX + pX*offset
-		ctrlY = midY + pY*offset
-	}
-	if pathType == 2 { // logarithmic spiral
-		turns := float32(0.5 + rand.Float32()*1.0) // 0.5–1.5 turns
-		if rand.Intn(2) == 0 {
-			turns = -turns
-		}
-		spiralTurns = turns
-	}
-	return
-}
-
-// handleTargetDeath handles the death path after a cell's health has been
-// drained to zero: redraws the dead cell, selects all tied-closest victims to
-// animate into it (transitioning to stateVictimMoving), or falls straight to
-// stateDropping when no victim exists.
-func (g *Game) handleTargetDeath(col int, row int, oldHealth float32) {
-	// Capture target colour and creature before the cell is cleared.
-	targetCell := g.grid.Cells[col][row]
-	g.targetColor = targetCell.Color()
-	// Redraw immediately so cell disappears from the canvas.
-	g.drawCell(col, row, 1.0)
-	g.cellCount-- // decrement for the clicked cell
-	g.deathVictimsBuf, g.deathVictimScratch = connectionVictims(g.deathVictimsBuf, g.deathVictimScratch, g.grid.Cells, col, row, g.grid.Cols, g.grid.Rows)
-	victimCoords := g.deathVictimsBuf
-
-	dcs := g.deviceCellSize
-	centerX, centerY := deviceCellCenter(col, row, dcs)
-
-	// Stationary victim entry for the clicked cell: shrinks in place over
-	// victimDuration so it matches the dying-neighbour animation.  Health=oldHealth
-	// gives it previous radius; (1-t) in drawMoveAnims shrinks it to zero.
-	targetVictim := MoveAnim{
-		Col:      col,
-		Row:      row,
-		Cell:     Cell{Organism: targetCell.Organism, Health: oldHealth},
-		FromX:    centerX,
-		FromY:    centerY,
-		ToX:      centerX,
-		ToY:      centerY,
-		PathType: 0, // straight line (stationary: From==To)
-	}
-
-	g.victimCount = 0
-	// Always add the clicked cell as the first victim so its colour is included
-	// in victimColors and it animates via the stateVictimMoving path.
-	g.victimAnims[g.victimCount] = targetVictim
-	g.victimCount++
-
-	if len(victimCoords) > 0 {
-		toX, toY := centerX, centerY
-		for _, vc := range victimCoords {
-			ncol, nrow := vc[0], vc[1]
-			fromX, fromY := deviceCellCenter(ncol, nrow, dcs)
-			pt, cx, cy, st := victimPathParams(fromX, fromY, toX, toY)
-			v := MoveAnim{
-				Col:         ncol,
-				Row:         nrow,
-				Cell:        g.grid.Cells[ncol][nrow], // snapshot
-				FromX:       fromX,
-				FromY:       fromY,
-				ToX:         toX,
-				ToY:         toY,
-				PathType:    pt,
-				CtrlX:       cx,
-				CtrlY:       cy,
-				SpiralTurns: st,
-			}
-			g.victimAnims[g.victimCount] = v
-			g.victimCount++
-			// Clear victim's canvas position (it is now an overlay animation).
-			x0, y0 := ncol*dcs, nrow*dcs
-			g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
-		}
-	}
-	// Route through stateVictimMoving in all cases (including no-neighbours):
-	// scoring and drop happen in updateVictimMoving once the animation completes.
-	g.animStart = time.Now()
-	g.currentState = stateVictimMoving
-}
-
-// handleTargetSurvival handles the survival path after a cell has been damaged
-// but not killed: shuffles a power-gated subset of alive neighbours and sets up
-// the bounce animation, transitioning to stateShuffling.
-func (g *Game) handleTargetSurvival(col, row int, cell *Cell, oldHealth float32) {
-	// SURVIVAL PATH — shuffle alive neighbours, then set up bounce animation.
-	g.survivalNbrsBuf = eightNeighbors(g.survivalNbrsBuf, col, row, g.grid.Cols, g.grid.Rows)
-	neighbors := g.survivalNbrsBuf
-	// Only shuffle alive cells — empty slots stay put.
-	var aliveNbrsArr [8][2]int
-	aliveNbrsCount := 0
-	for _, n := range neighbors {
-		if g.grid.Cells[n[0]][n[1]].Health > 0 {
-			aliveNbrsArr[aliveNbrsCount] = n
-			aliveNbrsCount++
-		}
-	}
-	// Determine how many neighbours to shuffle based on the clicked cell's Power.
-	var power int
-	if cell.Organism != nil {
-		power = cell.Organism.Power
-	}
-	count := shuffleCount(power, aliveNbrsCount)
-
-	// Select count neighbours at random from aliveNeighbors.
-	// When count == 0 aliveNeighbors becomes empty; the animation still runs
-	// (clicked cell bounces and settles) with no neighbour moves, identical to
-	// the original behaviour when there were 0 alive neighbours.
-	var aliveNeighbors [][2]int
-	if count > 0 {
-		perm := rand.Perm(aliveNbrsCount)
-		var shuffleNbrsArr [8][2]int
-		for i := 0; i < count; i++ {
-			shuffleNbrsArr[i] = aliveNbrsArr[perm[i]]
-		}
-		aliveNeighbors = shuffleNbrsArr[:count]
-	} else {
-		aliveNeighbors = aliveNbrsArr[:0]
-	}
-
-	// Set up bounce animation — always runs regardless of shuffle count.
-	dcs := g.deviceCellSize
-	maxR := float32(dcs/2 - 2)
-	x0, y0 := col*dcs, row*dcs
-	g.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
-	g.targetAnimating = true
-	g.targetAnimStart = time.Now()
-	g.targetAnimStartR = maxR * oldHealth
-	g.targetAnimPeakR = maxR * oldHealth * 1.1
-	g.targetAnimEndR = maxR * cell.Health
-	g.targetAnimOrganism = g.grid.Cells[col][row].Organism
-	perm := rand.Perm(len(aliveNeighbors))
-
-	// Collect neighbour cells before rearranging.
-	type neighborCell struct {
-		col, row int
-		cell     Cell
-	}
-	var origArr [8]neighborCell
-	for i, n := range aliveNeighbors {
-		origArr[i] = neighborCell{n[0], n[1], g.grid.Cells[n[0]][n[1]]}
-	}
-	orig := origArr[:len(aliveNeighbors)]
-
-	// Build MoveAnims: aliveNeighbor i moves to position perm[i].
-	anims := make([]MoveAnim, len(aliveNeighbors))
-	for i := range aliveNeighbors {
-		src := orig[i]
-		dst := aliveNeighbors[perm[i]]
-		fx, fy := deviceCellCenter(src.col, src.row, dcs)
-		tx, ty := deviceCellCenter(dst[0], dst[1], dcs)
-		dx := tx - fx
-		dy := ty - fy
-		dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-		var ctrlX, ctrlY float32
-		if dist > 0 {
-			pX := -dy / dist
-			pY := dx / dist
-			sign := float32(1)
-			if rand.Intn(2) == 0 {
-				sign = -1
-			}
-			offset := sign * dist * (0.3 + rand.Float32()*0.7)
-			ctrlX = (fx+tx)*0.5 + pX*offset
-			ctrlY = (fy+ty)*0.5 + pY*offset
-		} else {
-			ctrlX = fx
-			ctrlY = fy
-		}
-		anims[i] = MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
-	}
-
-	// Clear source positions on canvas.
-	for _, n := range aliveNeighbors {
-		g.canvas.SubImage(image.Rect(n[0]*dcs, n[1]*dcs, (n[0]+1)*dcs, (n[1]+1)*dcs)).(*ebiten.Image).Clear()
-	}
-
-	// Write cells to their permuted destinations in the grid.
-	for i := range aliveNeighbors {
-		dst := aliveNeighbors[perm[i]]
-		g.grid.Cells[dst[0]][dst[1]] = orig[i].cell
-	}
-
-	g.moveAnims = anims
-	g.currentState = stateShuffling
-	g.animStart = time.Now()
-}
-
 // updateVictimMoving advances the victim movement animation and transitions to
 // stateDropping (or stateWaiting) when the animation completes.
 func (g *Game) updateVictimMoving() error {
 	t := elapsedFraction(g.animStart, time.Now(), victimDuration)
 	if t >= 1.0 {
-		// All victims arrived — score the kill, kill them, and trigger drop.
-		// g.victims includes the stationary clicked-cell entry (index 0) whose
-		// colour feeds into victimColors for the same-colour bonus.
-		var victimColorsArr [9]color.RGBA
-		for i := 0; i < g.victimCount; i++ {
-			victimColorsArr[i] = g.victimAnims[i].Cell.Color()
-		}
-		g.score += scoreForKill(victimColorsArr[:g.victimCount], g.targetColor)
+		// Animation complete — score the clear and trigger drop.
+		// All victim cells already have Health=0 (set in commitCellAt).
+		g.score += scoreForCluster(g.victimCount)
 		var colSeen [gridCols]bool
 		colSeen[g.actionCol] = true
-		neighbourKills := 0
 		for i := 0; i < g.victimCount; i++ {
 			v := g.victimAnims[i]
-			// The clicked cell (actionCol/actionRow) is already dead and its
-			// cellCount decrement already happened in handleTargetDeath; skip it
-			// to avoid a double-decrement.
-			if v.Col == g.actionCol && v.Row == g.actionRow {
-				colSeen[v.Col] = true
-				continue
-			}
-			g.grid.Cells[v.Col][v.Row].Health = 0
 			colSeen[v.Col] = true
-			neighbourKills++
 		}
-		g.cellCount -= neighbourKills
 		var affectedColsArr [gridCols]int
 		affectedColsCount := 0
 		for c := 0; c < gridCols; c++ {
@@ -1039,25 +851,6 @@ func (g *Game) updateVictimMoving() error {
 		} else {
 			g.settleAfterRemoval()
 		}
-	}
-	return nil
-}
-
-// updateShuffling waits for the shuffle animation to complete, then commits
-// final cell positions and returns to stateWaiting.
-func (g *Game) updateShuffling() error {
-	elapsed := elapsedFraction(g.animStart, time.Now(), shuffleDuration)
-	if elapsed >= 1.0 {
-		dcs := g.deviceCellSize
-		for _, anim := range g.moveAnims {
-			col := int(anim.ToX) / dcs
-			row := int(anim.ToY) / dcs
-			if col >= 0 && col < g.grid.Cols && row >= 0 && row < g.grid.Rows {
-				g.drawCell(col, row, 1.0)
-			}
-		}
-		g.moveAnims = nil
-		g.enterWaiting()
 	}
 	return nil
 }
@@ -1111,8 +904,6 @@ func (g *Game) Update() error {
 		return g.updateWaiting()
 	case stateVictimMoving:
 		return g.updateVictimMoving()
-	case stateShuffling:
-		return g.updateShuffling()
 	case stateDropping:
 		return g.updateDropping()
 	case stateColumnCollapsing:
@@ -1151,8 +942,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	frameW := g.frame.Bounds().Dx()
 	hudDevW := g.hudDevW
 
-	g.drawVictimLine(g.frame, hudDevW)
 	g.drawCanvas(g.frame, hudDevW)
+	g.drawVictimLine(g.frame, hudDevW)
 	g.drawTargetBounce(g.frame, hudDevW)
 	g.drawMoveAnims(g.frame, hudDevW)
 

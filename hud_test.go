@@ -143,17 +143,17 @@ func TestBuildTextLines(t *testing.T) {
 		}
 	})
 
-	t.Run("hover alive cell adds name and power", func(t *testing.T) {
+	t.Run("hover alive cell adds name", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		creature := &Organism{Name: "cat", Power: 5}
+		creature := &Organism{Name: "cat"}
 		grid.Cells[2][3] = Cell{Organism: creature, Health: 1.0}
 
 		lines := h.buildTextLines(0, 2, 3, maxChars, grid)
 
 		found := false
 		for _, l := range lines {
-			if l == "Cat - 5" {
+			if l == "Cat" {
 				found = true
 				break
 			}
@@ -180,12 +180,12 @@ func TestBuildTextLines(t *testing.T) {
 	t.Run("hover dead cell omits creature line", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		creature := &Organism{Name: "wolf", Power: 5}
+		creature := &Organism{Name: "wolf"}
 		grid.Cells[1][1] = Cell{Organism: creature, Health: 0} // dead
 
 		lines := h.buildTextLines(0, 1, 1, maxChars, grid)
 		for _, l := range lines {
-			if l == "Wolf - 5" {
+			if l == "Wolf" {
 				t.Errorf("dead-cell creature line present; got %v", lines)
 			}
 		}
