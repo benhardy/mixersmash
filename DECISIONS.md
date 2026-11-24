@@ -383,3 +383,10 @@ Alternative considered: keep Power as a difficulty multiplier (larger-Power anim
 Each animal/food pair shares one hue. The visual effect is that scanning the board for a matching cluster is a colour-grouping task as well as a spatial one. Glyphs are placeholder emoji pending an SVG sprite overhaul; several are inaccurate stand-ins for animals that lack a standard Unicode glyph.
 
 ---
+
+## Architecture
+
+**Game struct separation of concerns (Plan A: sub-structs)**
+The `Game` struct had grown to ~60 flat fields in a 1485-line `main.go`, mixing board/model state, animation/state-machine state, device/presentation state, input state, and perf-debug counters. Grouped the fields into named sub-structs on `Game` — `boardState` (grid, cellCount, score), `animState` (phase, timing, action cell, move/victim/target anims), `inputState` (hover + pointer/touch), `viewState` (canvas/frame, scales, screen dims, portrait), and `perfCounters` — plus a distinct typed `gameState` enum for the dispatch switch. Render resources (shaders, glyph font, hud cache) stay on `Game` as they are not state.
+
+Chose Plan A (data regrouping, package `main` unchanged) over two alternatives: Plan B (extract `internal/board` + `internal/anim` packages for compiler-enforced boundaries) and Plan C (replace the int-switch state machine with per-phase state objects + World/Animator/Presenter ownership). A and B/C are not mutually exclusive — A is a prerequisite subset. B and C were deferred: they carry much higher churn and B edges against the project's flat-layout convention; the intent is to reassess them once the seams Plan A exposes prove whether enforced boundaries or a behavioural restructure are worth it. Methods were left on `*Game` and `main.go` was not split into per-concern files (deferred as cosmetic).

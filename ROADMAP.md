@@ -18,3 +18,14 @@ Trigger: user plans this next. Pick up when SVG source art is available. Scope i
 
 ### Defer the sprite-cache clear to the next settle
 `LayoutF`'s `needRealloc` branch (device.go ~115-134) clears every `Creature.Sprite` (nil) IMMEDIATELY on a scale change. This contradicts the codified lesson "do not invalidate the per-creature sprite cache mid-animation -> rebake storm." It is latent in fullscreen (dims are stable, so it does not fire during steady play), but a viewport change landing mid-animation would rebake all sprites in-flight and spike. Harden by deferring the clear to the next settle (`stateWaiting`/`enterWaiting`) instead of doing it in `LayoutF`. Low-risk; do it next time this area is touched.
+
+## Architecture
+
+### Game struct refactor — Plan B / Plan C (deferred from Plan A)
+Plan A grouped `Game`'s fields into `boardState`/`animState`/`inputState`/`viewState`/`perfCounters` sub-structs (see DECISIONS.md → Architecture). Two further steps were considered and deferred:
+- **Plan B — enforced boundaries**: extract the already-ebiten-free model (`grid.go`) to `internal/board` and the animation core (`anim.go`, path math, the `gameState` enum) to `internal/anim`, so the compiler forbids them importing ebiten or reaching into `Game`. Payoff: real isolation + unit-testability without a graphics context.
+- **Plan C — behavioural restructure**: replace the `int`-switch state machine in `Update` with a `gameState`-interface per phase (waiting/shuffling/dropping/victimMoving/columnCollapsing) and split ownership into World/Animator/Presenter. Payoff: dissolves the `update*` methods that interleave input/model/anim.
+
+Also deferred as cosmetic: splitting `main.go` (still ~1485 lines) into per-concern files (render.go/statemachine.go/input.go), and moving methods off `*Game` onto the sub-structs.
+
+Trigger: pick up B if the model/anim layers need testing in isolation or a second consumer appears; pick up C if a new state-machine phase must be added or the `update*` interleaving causes a bug. Both are higher-churn than A; B edges against the flat-layout convention in CLAUDE.md.
