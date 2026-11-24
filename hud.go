@@ -62,7 +62,7 @@ func hudWrapText(txt string, maxChars int) []string {
 // one DrawImage — no per-frame text render, no per-frame allocation.
 func (h *hud) draw(frame *ebiten.Image, hudDevW int, score int, hoverCol, hoverRow int, grid *Grid) {
 	frameH := frame.Bounds().Dy()
-	themeName := activeTheme.name()
+	const themeName = "MixerSmash"
 
 	// Dirty check: re-render the cache if anything changed.
 	needRender := h.needsRedraw(hudDevW, frameH, score, hoverCol, hoverRow, themeName)
@@ -177,13 +177,13 @@ func (h *hud) needsRedraw(hudDevW, frameH, score, hoverCol, hoverRow int, themeN
 }
 
 // buildTextLines returns the ordered list of HUD text strings: the fixed
-// "Level 1" header, theme instructions (wrapped to maxChars), score line, and
+// "Level 1" header, the game instructions (wrapped to maxChars), score line, and
 // an optional blank spacer + "Name - Power" line when the hovered cell is
 // alive.  Pure; no ebiten calls.
 func (h *hud) buildTextLines(score, hoverCol, hoverRow, maxChars int, grid *Grid) []string {
 	var lines []string
 	lines = append(lines, "Level 1")
-	lines = append(lines, hudWrapText(activeTheme.instructions(), maxChars)...)
+	lines = append(lines, hudWrapText("Match animals with their food", maxChars)...)
 	lines = append(lines, "Score: "+strconv.Itoa(score))
 
 	if hoverCol >= 0 && hoverRow >= 0 &&

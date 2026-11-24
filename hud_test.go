@@ -118,11 +118,6 @@ func TestBuildTextLines(t *testing.T) {
 
 	const maxChars = 40
 
-	// Use a stable theme so instructions() is deterministic.
-	// colourTheme is the default and always available.
-	setActiveTheme(colourTheme{})
-	defer setActiveTheme(colourTheme{})
-
 	t.Run("score line is present", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)

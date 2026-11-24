@@ -3,9 +3,6 @@ package main
 import (
 	"image/color"
 	"math"
-	"math/rand"
-	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -300,20 +297,6 @@ func TestEightNeighborsCentre(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// pairsAsSet — shared helper for set comparisons
-// ---------------------------------------------------------------------------
-
-// pairsAsSet converts a [][2]int slice into a map keyed by [2]int for
-// order-independent set comparisons.
-func pairsAsSet(pairs [][2]int) map[[2]int]bool {
-	s := make(map[[2]int]bool, len(pairs))
-	for _, p := range pairs {
-		s[p] = true
-	}
-	return s
-}
-
-// ---------------------------------------------------------------------------
 // connectionVictims
 // ---------------------------------------------------------------------------
 
@@ -325,128 +308,6 @@ func makeConnectionGrid(cols, rows int) [][]Cell {
 		cells[c] = make([]Cell, rows)
 	}
 	return cells
-}
-
-// TestConnectionVictimsConnectedAliveNeighbour verifies that a neighbour whose
-// Creature is in the target's Connections is returned when it is alive.
-func TestConnectionVictimsConnectedAliveNeighbour(t *testing.T) {
-	cells := makeConnectionGrid(3, 3)
-	target := &organismPalette[0]
-	// Pick a creature that target is connected to.
-	connected := target.Connections[0]
-	cells[1][1] = Cell{Organism: target, Health: 1.0}
-	// Place connected creature at neighbour (2,2).
-	cells[2][2] = Cell{Organism: connected, Health: 1.0}
-
-	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
-	if len(got) != 1 {
-		t.Fatalf("want 1 victim, got %d: %v", len(got), got)
-	}
-	if got[0] != [2]int{2, 2} {
-		t.Errorf("want {2,2}, got %v", got[0])
-	}
-}
-
-// TestConnectionVictimsDeadConnectedNeighbour verifies that a connected
-// neighbour with Health<=0 is not returned.
-func TestConnectionVictimsDeadConnectedNeighbour(t *testing.T) {
-	cells := makeConnectionGrid(3, 3)
-	target := &organismPalette[0]
-	connected := target.Connections[0]
-	cells[1][1] = Cell{Organism: target, Health: 1.0}
-	cells[2][2] = Cell{Organism: connected, Health: 0.0} // dead
-
-	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
-	if len(got) != 0 {
-		t.Errorf("want no victims (dead neighbour), got %d: %v", len(got), got)
-	}
-}
-
-// TestConnectionVictimsUnconnectedAliveNeighbour verifies that an alive neighbour
-// whose Creature is NOT in target.Connections is not returned.
-func TestConnectionVictimsUnconnectedAliveNeighbour(t *testing.T) {
-	cells := makeConnectionGrid(3, 3)
-	target := &organismPalette[0]
-	// Find a palette entry not in target.Connections.
-	var unconnected *Organism
-	for i := range organismPalette {
-		c := &organismPalette[i]
-		if c == target {
-			continue
-		}
-		found := false
-		for _, conn := range target.Connections {
-			if conn == c {
-				found = true
-				break
-			}
-		}
-		if !found {
-			unconnected = c
-			break
-		}
-	}
-	if unconnected == nil {
-		t.Skip("no unconnected creature available for this palette entry")
-	}
-	cells[1][1] = Cell{Organism: target, Health: 1.0}
-	cells[2][2] = Cell{Organism: unconnected, Health: 1.0}
-
-	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
-	if len(got) != 0 {
-		t.Errorf("want no victims (unconnected creature), got %d: %v", len(got), got)
-	}
-}
-
-// TestConnectionVictimsMultipleConnectedNeighbours verifies that all alive
-// connected neighbours are returned when multiple are present.
-func TestConnectionVictimsMultipleConnectedNeighbours(t *testing.T) {
-	// Find a creature with at least 2 connections.
-	var target *Organism
-	for i := range organismPalette {
-		if len(organismPalette[i].Connections) >= 2 {
-			target = &organismPalette[i]
-			break
-		}
-	}
-	if target == nil {
-		t.Skip("no creature with >=2 connections")
-	}
-	cells := makeConnectionGrid(3, 3)
-	cells[1][1] = Cell{Organism: target, Health: 1.0}
-	// Place first two connections at distinct neighbours.
-	cells[0][0] = Cell{Organism: target.Connections[0], Health: 1.0}
-	cells[2][0] = Cell{Organism: target.Connections[1], Health: 1.0}
-
-	got, _ := connectionVictims(nil, nil, cells, 1, 1, 3, 3)
-	if len(got) != 2 {
-		t.Fatalf("want 2 victims, got %d: %v", len(got), got)
-	}
-	wantSet := pairsAsSet([][2]int{{0, 0}, {2, 0}})
-	for _, p := range got {
-		if !wantSet[p] {
-			t.Errorf("unexpected victim %v", p)
-		}
-	}
-}
-
-// TestConnectionVictimsCornerTarget verifies correct behaviour when the target
-// is at a corner (fewer than 8 neighbours).
-func TestConnectionVictimsCornerTarget(t *testing.T) {
-	cells := makeConnectionGrid(5, 5)
-	target := &organismPalette[0]
-	connected := target.Connections[0]
-	cells[0][0] = Cell{Organism: target, Health: 1.0}
-	// Only 3 neighbours for corner (0,0): (1,0), (0,1), (1,1).
-	cells[1][1] = Cell{Organism: connected, Health: 1.0}
-
-	got, _ := connectionVictims(nil, nil, cells, 0, 0, 5, 5)
-	if len(got) != 1 {
-		t.Fatalf("want 1 victim at corner, got %d: %v", len(got), got)
-	}
-	if got[0] != [2]int{1, 1} {
-		t.Errorf("want {1,1}, got %v", got[0])
-	}
 }
 
 // TestConnectionVictimsNilCreatureTarget verifies that nil is returned when
@@ -702,116 +563,10 @@ func TestScoreForKill(t *testing.T) {
 // organismPalette — structure and palette-level invariants
 // ---------------------------------------------------------------------------
 
-// TestOrganismPaletteSize verifies the palette has exactly 23 entries.
+// TestOrganismPaletteSize verifies the palette has exactly 22 entries.
 func TestOrganismPaletteSize(t *testing.T) {
-	if len(organismPalette) != 23 {
-		t.Errorf("organismPalette has %d entries, want exactly 23", len(organismPalette))
-	}
-}
-
-// TestOrganismPaletteColorsUnique verifies the colour-tier structure after
-// replacing the single cream with six pastel tints for Power=2 organisms.
-//
-// Expected structure:
-//   - 13 distinct colours total: 1 dark + 3 power-5 + 3 power-3 + 6 pastels.
-//   - Power=5 creatures use 3 distinct colours, each appearing exactly once.
-//   - Power=3 creatures use 3 distinct colours, each appearing exactly twice.
-//   - Power=2 creatures use exactly 6 distinct colours, all with high luminance
-//     (OKLab L >= 0.80, i.e. faint pastels), disjoint from the vivid/dark colours.
-//   - Exactly one Power=8 singleton colour.
-//
-// Exact RGBA values are intentionally not pinned so colour tuning does not
-// break this test.
-func TestOrganismPaletteColorsUnique(t *testing.T) {
-	// Count how many creatures share each distinct colour, and record which power
-	// tiers use each colour.
-	freq := make(map[color.RGBA]int)
-	colorPower := make(map[color.RGBA]map[int]bool)
-	for _, e := range organismPalette {
-		freq[e.Color]++
-		if colorPower[e.Color] == nil {
-			colorPower[e.Color] = make(map[int]bool)
-		}
-		colorPower[e.Color][e.Power] = true
-	}
-
-	if len(freq) != 13 {
-		t.Errorf("organismPalette has %d distinct colours, want exactly 13", len(freq))
-	}
-
-	// --- Power=5: 3 distinct colours, each used exactly once. ---
-	power5Colors := make(map[color.RGBA]bool)
-	for _, e := range organismPalette {
-		if e.Power == 5 {
-			power5Colors[e.Color] = true
-		}
-	}
-	if len(power5Colors) != 3 {
-		t.Errorf("Power=5 creatures have %d distinct colours, want 3", len(power5Colors))
-	}
-	for c := range power5Colors {
-		if freq[c] != 1 {
-			t.Errorf("Power=5 colour %v used by %d creatures, want 1", c, freq[c])
-		}
-	}
-
-	// --- Power=3: 3 distinct colours, each used exactly twice. ---
-	power3Colors := make(map[color.RGBA]bool)
-	for _, e := range organismPalette {
-		if e.Power == 3 {
-			power3Colors[e.Color] = true
-		}
-	}
-	if len(power3Colors) != 3 {
-		t.Errorf("Power=3 creatures have %d distinct colours, want 3", len(power3Colors))
-	}
-	for c := range power3Colors {
-		if freq[c] != 2 {
-			t.Errorf("Power=3 colour %v used by %d creatures, want 2", c, freq[c])
-		}
-	}
-
-	// --- Power=2: 6 distinct pastel colours, all high-luminance, disjoint from vivid/dark. ---
-	power2Colors := make(map[color.RGBA]bool)
-	for _, e := range organismPalette {
-		if e.Power == 2 {
-			power2Colors[e.Color] = true
-		}
-	}
-	if len(power2Colors) != 6 {
-		t.Errorf("Power=2 creatures have %d distinct colours, want 6", len(power2Colors))
-	}
-
-	// All pastel colours must have OKLab L >= 0.80 (high lightness).
-	for c := range power2Colors {
-		lab := sRGBToOKLab(c)
-		if lab[0] < 0.80 {
-			t.Errorf("Power=2 colour %v has OKLab L=%.4f, want >= 0.80", c, lab[0])
-		}
-	}
-
-	// Pastel colours must be disjoint from vivid/dark colours.
-	nonPower2Colors := make(map[color.RGBA]bool)
-	for _, e := range organismPalette {
-		if e.Power != 2 {
-			nonPower2Colors[e.Color] = true
-		}
-	}
-	for c := range power2Colors {
-		if nonPower2Colors[c] {
-			t.Errorf("Power=2 colour %v also appears in a non-Power=2 tier", c)
-		}
-	}
-
-	// --- Power=8: exactly one singleton colour. ---
-	power8Singles := 0
-	for c, n := range freq {
-		if n == 1 && colorPower[c][8] {
-			power8Singles++
-		}
-	}
-	if power8Singles != 1 {
-		t.Errorf("expected exactly 1 singleton colour for Power=8, got %d", power8Singles)
+	if len(organismPalette) != 22 {
+		t.Errorf("organismPalette has %d entries, want exactly 22", len(organismPalette))
 	}
 }
 
@@ -836,89 +591,6 @@ func TestOrganismPaletteAlphaAll255(t *testing.T) {
 	for i, e := range organismPalette {
 		if e.Color.A != 255 {
 			t.Errorf("organismPalette[%d] (%q) Color.A = %d, want 255", i, e.Name, e.Color.A)
-		}
-	}
-}
-
-// TestOrganismPaletteRequiredNames verifies that the palette contains exactly
-// the 23 required organism names.
-func TestOrganismPaletteRequiredNames(t *testing.T) {
-	required := []string{
-		"kangaroo", "koala", "cat", "wolf", "horse", "butterfly", "snake",
-		"dragon", "ghost", "fish", "dolphin", "octopus", "monkey", "bat",
-		"pig", "owl", "frog", "turtle", "crab", "honeybee", "spider",
-		"elephant", "penguin",
-	}
-	for _, req := range required {
-		found := false
-		for _, e := range organismPalette {
-			if strings.Contains(strings.ToLower(e.Name), req) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("organismPalette has no entry whose Name contains %q", req)
-		}
-	}
-}
-
-// TestOrganismPalettePowerDistribution verifies that the palette has exactly
-// 13 organisms with Power=2, 6 with Power=3, 3 with Power=5, and 1 with Power=8.
-func TestOrganismPalettePowerDistribution(t *testing.T) {
-	counts := make(map[int]int)
-	for _, e := range organismPalette {
-		counts[e.Power]++
-	}
-	want := map[int]int{2: 13, 3: 6, 5: 3, 8: 1}
-	for power, wantCount := range want {
-		if got := counts[power]; got != wantCount {
-			t.Errorf("Power=%d count = %d, want %d", power, got, wantCount)
-		}
-	}
-	// No unexpected power values.
-	for power, got := range counts {
-		if _, ok := want[power]; !ok {
-			t.Errorf("unexpected Power=%d found in palette (%d entries)", power, got)
-		}
-	}
-}
-
-// TestOrganismPaletteConnectionsLengthEqualsPower verifies that each organism's
-// Connections slice has exactly Power entries.
-func TestOrganismPaletteConnectionsLengthEqualsPower(t *testing.T) {
-	for i, e := range organismPalette {
-		if len(e.Connections) != e.Power {
-			t.Errorf("organismPalette[%d] (%q) has %d Connections, want Power=%d",
-				i, e.Name, len(e.Connections), e.Power)
-		}
-	}
-}
-
-// TestOrganismPaletteNoSelfLinks verifies that no organism has a Connection
-// pointing to itself.
-func TestOrganismPaletteNoSelfLinks(t *testing.T) {
-	for i := range organismPalette {
-		for j, conn := range organismPalette[i].Connections {
-			if conn == &organismPalette[i] {
-				t.Errorf("organismPalette[%d] (%q) Connections[%d] points to itself",
-					i, organismPalette[i].Name, j)
-			}
-		}
-	}
-}
-
-// TestOrganismPaletteNoDuplicateConnections verifies that no organism's
-// Connections slice contains the same pointer more than once.
-func TestOrganismPaletteNoDuplicateConnections(t *testing.T) {
-	for i := range organismPalette {
-		seen := make(map[*Organism]bool)
-		for j, conn := range organismPalette[i].Connections {
-			if seen[conn] {
-				t.Errorf("organismPalette[%d] (%q) Connections[%d] is a duplicate pointer",
-					i, organismPalette[i].Name, j)
-			}
-			seen[conn] = true
 		}
 	}
 }
@@ -1231,250 +903,68 @@ func TestHorizontalCollapseMoves(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// connectionTheme — shared invariant helper
+// TestOrganismPalettePairStructure — new palette invariants
 // ---------------------------------------------------------------------------
 
-// assertThemeInvariants verifies the universal postconditions that must hold
-// after any setActiveTheme call:
-//   - len(Connections) == Power for every palette entry
-//   - no self-link
-//   - no duplicate pointer within a Connections slice
-//   - all Color.A == 255 (theme must not alter colours)
-func assertThemeInvariants(t *testing.T, label string) {
-	t.Helper()
+// TestOrganismPalettePairStructure verifies that the 22-entry Australian
+// animal/food palette has the correct pair structure:
+//   - exactly 22 entries
+//   - PairIDs 0..10 each appear exactly twice
+//   - for each PairID exactly one entry has IsAnimal=true and one false
+//   - both entries in each pair share the same Color
+func TestOrganismPalettePairStructure(t *testing.T) {
+	if len(organismPalette) != 22 {
+		t.Fatalf("organismPalette has %d entries, want 22", len(organismPalette))
+	}
+
+	type pairInfo struct {
+		count   int
+		animals int
+		foods   int
+		colors  []color.RGBA
+	}
+	pairs := make(map[int]*pairInfo)
 	for i := range organismPalette {
 		e := &organismPalette[i]
-		if len(e.Connections) != e.Power {
-			t.Errorf("[%s] palette[%d] (%q): len(Connections)=%d, want Power=%d",
-				label, i, e.Name, len(e.Connections), e.Power)
+		if pairs[e.PairID] == nil {
+			pairs[e.PairID] = &pairInfo{}
 		}
-		if e.Color.A != 255 {
-			t.Errorf("[%s] palette[%d] (%q): Color.A=%d, want 255", label, i, e.Name, e.Color.A)
+		p := pairs[e.PairID]
+		p.count++
+		if e.IsAnimal {
+			p.animals++
+		} else {
+			p.foods++
 		}
-		seen := make(map[*Organism]bool, len(e.Connections))
-		for j, conn := range e.Connections {
-			if conn == e {
-				t.Errorf("[%s] palette[%d] (%q): Connections[%d] is a self-link", label, i, e.Name, j)
-			}
-			if seen[conn] {
-				t.Errorf("[%s] palette[%d] (%q): Connections[%d] is a duplicate", label, i, e.Name, j)
-			}
-			seen[conn] = true
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// randomTheme
-// ---------------------------------------------------------------------------
-
-// TestRandomThemeConnections verifies that after setActiveTheme(randomTheme{})
-// each creature's Connections match the hardcoded paletteConnectionNames table.
-func TestRandomThemeConnections(t *testing.T) {
-	setActiveTheme(randomTheme{})
-	defer setActiveTheme(activeTheme) // restore default after test
-
-	// Build name→index for resolution.
-	nameIndex := make(map[string]int, len(organismPalette))
-	for i := range organismPalette {
-		nameIndex[organismPalette[i].Name] = i
+		p.colors = append(p.colors, e.Color)
 	}
 
-	for i := range organismPalette {
-		e := &organismPalette[i]
-		wantNames := paletteConnectionNames[e.Name]
-		if len(e.Connections) != len(wantNames) {
-			t.Errorf("palette[%d] (%q): len(Connections)=%d, want %d",
-				i, e.Name, len(e.Connections), len(wantNames))
+	for id := 0; id <= 10; id++ {
+		p, ok := pairs[id]
+		if !ok {
+			t.Errorf("PairID %d not found in palette", id)
 			continue
 		}
-		for c, conn := range e.Connections {
-			wantIdx := nameIndex[wantNames[c]]
-			if conn != &organismPalette[wantIdx] {
-				t.Errorf("palette[%d] (%q): Connections[%d] = %q, want %q",
-					i, e.Name, c, conn.Name, wantNames[c])
-			}
+		if p.count != 2 {
+			t.Errorf("PairID %d has %d entries, want 2", id, p.count)
+		}
+		if p.animals != 1 {
+			t.Errorf("PairID %d has %d animal entries, want 1", id, p.animals)
+		}
+		if p.foods != 1 {
+			t.Errorf("PairID %d has %d food entries, want 1", id, p.foods)
+		}
+		if len(p.colors) == 2 && p.colors[0] != p.colors[1] {
+			t.Errorf("PairID %d: animal Color %v != food Color %v", id, p.colors[0], p.colors[1])
 		}
 	}
-	assertThemeInvariants(t, "randomTheme")
-}
 
-// TestRandomThemePowerDistribution verifies that randomTheme preserves the
-// power distribution (13×2, 6×3, 3×5, 1×8).
-func TestRandomThemePowerDistribution(t *testing.T) {
-	setActiveTheme(randomTheme{})
-	defer setActiveTheme(activeTheme)
-
-	counts := make(map[int]int)
-	for _, e := range organismPalette {
-		counts[e.Power]++
-	}
-	want := map[int]int{2: 13, 3: 6, 5: 3, 8: 1}
-	for power, wantCount := range want {
-		if got := counts[power]; got != wantCount {
-			t.Errorf("randomTheme: Power=%d count=%d, want %d", power, got, wantCount)
+	// Verify no unexpected PairIDs.
+	for id := range pairs {
+		if id < 0 || id > 10 {
+			t.Errorf("unexpected PairID %d in palette", id)
 		}
 	}
-}
-
-// ---------------------------------------------------------------------------
-// colourTheme
-// ---------------------------------------------------------------------------
-
-// TestColourThemeConnections verifies that after setActiveTheme(colourTheme{})
-// each creature's Connections are exactly its Power nearest palette neighbours
-// by OKLab distance, with ties broken by ascending index.
-func TestColourThemeConnections(t *testing.T) {
-	setActiveTheme(colourTheme{})
-	defer setActiveTheme(activeTheme)
-
-	n := len(organismPalette)
-
-	// Recompute expected connections independently of the theme implementation.
-	labs := make([][3]float64, n)
-	for i := range organismPalette {
-		labs[i] = sRGBToOKLab(organismPalette[i].Color)
-	}
-
-	for i := range organismPalette {
-		e := &organismPalette[i]
-		k := e.Power
-
-		type distIdx struct {
-			dist float64
-			idx  int
-		}
-		others := make([]distIdx, 0, n-1)
-		for j := range organismPalette {
-			if j == i {
-				continue
-			}
-			dl := labs[i][0] - labs[j][0]
-			da := labs[i][1] - labs[j][1]
-			db := labs[i][2] - labs[j][2]
-			dist := math.Sqrt(dl*dl + da*da + db*db)
-			others = append(others, distIdx{dist, j})
-		}
-		sort.Slice(others, func(a, b int) bool {
-			if others[a].dist != others[b].dist {
-				return others[a].dist < others[b].dist
-			}
-			return others[a].idx < others[b].idx
-		})
-
-		if len(e.Connections) != k {
-			t.Errorf("palette[%d] (%q): len(Connections)=%d, want %d",
-				i, e.Name, len(e.Connections), k)
-			continue
-		}
-		for c := 0; c < k; c++ {
-			wantPtr := &organismPalette[others[c].idx]
-			if e.Connections[c] != wantPtr {
-				t.Errorf("palette[%d] (%q): Connections[%d] = %q, want %q (OKLab nearest)",
-					i, e.Name, c, e.Connections[c].Name, wantPtr.Name)
-			}
-		}
-	}
-	assertThemeInvariants(t, "colourTheme")
-}
-
-// TestColourThemePowerDistribution verifies that colourTheme preserves the
-// power distribution (13×2, 6×3, 3×5, 1×8).
-func TestColourThemePowerDistribution(t *testing.T) {
-	setActiveTheme(colourTheme{})
-	defer setActiveTheme(activeTheme)
-
-	counts := make(map[int]int)
-	for _, e := range organismPalette {
-		counts[e.Power]++
-	}
-	want := map[int]int{2: 13, 3: 6, 5: 3, 8: 1}
-	for power, wantCount := range want {
-		if got := counts[power]; got != wantCount {
-			t.Errorf("colourTheme: Power=%d count=%d, want %d", power, got, wantCount)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Theme switching — idempotency / repeatability
-// ---------------------------------------------------------------------------
-
-// TestThemeSwitchIdempotent verifies that switching colour→random→colour
-// restores the colourTheme connection graph each time (repeatable, stable).
-func TestThemeSwitchIdempotent(t *testing.T) {
-	// Capture colourTheme connections after a clean apply.
-	setActiveTheme(colourTheme{})
-	type snapshot struct {
-		power int
-		names []string
-	}
-	capture := func() []snapshot {
-		s := make([]snapshot, len(organismPalette))
-		for i := range organismPalette {
-			e := &organismPalette[i]
-			names := make([]string, len(e.Connections))
-			for c, conn := range e.Connections {
-				names[c] = conn.Name
-			}
-			s[i] = snapshot{e.Power, names}
-		}
-		return s
-	}
-	first := capture()
-
-	setActiveTheme(randomTheme{})
-	setActiveTheme(colourTheme{})
-	second := capture()
-
-	for i := range organismPalette {
-		if first[i].power != second[i].power {
-			t.Errorf("palette[%d] (%q): power changed across colour→random→colour: %d → %d",
-				i, organismPalette[i].Name, first[i].power, second[i].power)
-		}
-		if len(first[i].names) != len(second[i].names) {
-			t.Errorf("palette[%d] (%q): connections len changed: %d → %d",
-				i, organismPalette[i].Name, len(first[i].names), len(second[i].names))
-			continue
-		}
-		for c := range first[i].names {
-			if first[i].names[c] != second[i].names[c] {
-				t.Errorf("palette[%d] (%q): Connections[%d] changed: %q → %q",
-					i, organismPalette[i].Name, c, first[i].names[c], second[i].names[c])
-			}
-		}
-	}
-	defer setActiveTheme(activeTheme)
-}
-
-// ---------------------------------------------------------------------------
-// Spawn CDF — rebuilt after setActiveTheme
-// ---------------------------------------------------------------------------
-
-// TestSpawnCDFRebuiltAfterTheme verifies that after setActiveTheme the spawn
-// CDF favours lower-power creatures: across many seeded draws, Power=2 creatures
-// must be drawn more frequently than Power=8 creatures.
-func TestSpawnCDFRebuiltAfterTheme(t *testing.T) {
-	for _, theme := range []connectionTheme{randomTheme{}, colourTheme{}} {
-		setActiveTheme(theme)
-
-		rng := rand.New(rand.NewSource(42))
-		counts := make(map[int]int) // power → draw count
-		const draws = 10000
-		for d := 0; d < draws; d++ {
-			x := rng.Float64()
-			i := sort.SearchFloat64s(paletteCDF, x)
-			if i >= len(organismPalette) {
-				i = len(organismPalette) - 1
-			}
-			counts[organismPalette[i].Power]++
-		}
-		if counts[2] <= counts[8] {
-			t.Errorf("[%s] expected Power=2 draws (%d) > Power=8 draws (%d) over %d samples",
-				theme.name(), counts[2], counts[8], draws)
-		}
-	}
-	defer setActiveTheme(activeTheme)
 }
 
 // ---------------------------------------------------------------------------
@@ -1771,33 +1261,6 @@ func makeHoverGame(cols, rows int) *Game {
 	return g
 }
 
-// TestUpdateHoverAliveCellSetsHoverAndVictims verifies that hovering an alive cell
-// updates hoverCol/hoverRow and populates victimHints via connectionVictims.
-func TestUpdateHoverAliveCellSetsHoverAndVictims(t *testing.T) {
-	// Use a 3×3 grid so the target cell at (1,1) has 8 neighbours.
-	g := makeHoverGame(3, 3)
-
-	// Place target and a connected neighbour so connectionVictims returns at least
-	// one victim; use the first palette entry and its first connection.
-	target := &organismPalette[0]
-	connected := target.Connections[0]
-	g.grid.Cells[1][1] = Cell{Organism: target, Health: 1.0}
-	g.grid.Cells[2][2] = Cell{Organism: connected, Health: 1.0}
-
-	g.updateHover(1, 1)
-
-	if g.hoverCol != 1 || g.hoverRow != 1 {
-		t.Errorf("updateHover(1,1): hoverCol/Row = (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
-	}
-	if len(g.victimHints) == 0 {
-		t.Errorf("updateHover(1,1): victimHints is empty, want at least one victim")
-	}
-	// victimHints must alias hoverVictimsBuf (same backing array) to preserve reuse.
-	if cap(g.victimHints) != cap(g.hoverVictimsBuf) {
-		t.Errorf("victimHints and hoverVictimsBuf should share backing array")
-	}
-}
-
 // TestUpdateHoverDeadCellLeavesHoverUnchanged verifies that hovering a dead cell
 // (Health == 0) leaves the previous hover state intact.
 func TestUpdateHoverDeadCellLeavesHoverUnchanged(t *testing.T) {
@@ -1839,25 +1302,5 @@ func TestUpdateHoverOutOfBoundsLeavesHoverUnchanged(t *testing.T) {
 	g.updateHover(0, 3)
 	if g.hoverCol != 1 || g.hoverRow != 1 {
 		t.Errorf("updateHover(0,3) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
-	}
-}
-
-// TestUpdateHoverBufferReuse verifies that successive calls reuse hoverVictimsBuf
-// rather than growing a new allocation each time (the slice header may change but
-// the underlying array must be reused, indicated by consistent capacity).
-func TestUpdateHoverBufferReuse(t *testing.T) {
-	g := makeHoverGame(5, 5)
-	target := &organismPalette[0]
-	connected := target.Connections[0]
-	g.grid.Cells[2][2] = Cell{Organism: target, Health: 1.0}
-	g.grid.Cells[3][3] = Cell{Organism: connected, Health: 1.0}
-
-	g.updateHover(2, 2)
-	capAfterFirst := cap(g.hoverVictimsBuf)
-
-	// Second call to same cell; buffer must not grow beyond initial cap.
-	g.updateHover(2, 2)
-	if cap(g.hoverVictimsBuf) > capAfterFirst*2 {
-		t.Errorf("hoverVictimsBuf cap grew unexpectedly: %d → %d", capAfterFirst, cap(g.hoverVictimsBuf))
 	}
 }

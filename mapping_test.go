@@ -390,18 +390,3 @@ func TestScreenToBoardOutOfBounds(t *testing.T) {
 		t.Errorf("out-of-bounds tap: got (%d,%d), want (-1,-1)", col, row)
 	}
 }
-
-// TestConnectionThemeInstructions verifies that both themes implement
-// connectionTheme and return non-empty instruction strings.
-func TestConnectionThemeInstructions(t *testing.T) {
-	themes := []connectionTheme{colourTheme{}, randomTheme{}}
-	for _, th := range themes {
-		th := th
-		t.Run(th.name(), func(t *testing.T) {
-			s := th.instructions()
-			if s == "" {
-				t.Errorf("%T.instructions() returned empty string", th)
-			}
-		})
-	}
-}
