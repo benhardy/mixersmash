@@ -903,16 +903,16 @@ func makeHoverGame(cols, rows int) *Game {
 func TestUpdateHoverDeadCellLeavesHoverUnchanged(t *testing.T) {
 	g := makeHoverGame(3, 3)
 	// Pre-set hover to a known position.
-	g.hoverCol = 0
-	g.hoverRow = 0
+	g.input.hoverCol = 0
+	g.input.hoverRow = 0
 
 	// Kill cell (1,1).
 	g.grid.Cells[1][1].Health = 0
 
 	g.updateHover(1, 1)
 
-	if g.hoverCol != 0 || g.hoverRow != 0 {
-		t.Errorf("updateHover on dead cell changed hover to (%d,%d), want (0,0)", g.hoverCol, g.hoverRow)
+	if g.input.hoverCol != 0 || g.input.hoverRow != 0 {
+		t.Errorf("updateHover on dead cell changed hover to (%d,%d), want (0,0)", g.input.hoverCol, g.input.hoverRow)
 	}
 }
 
@@ -920,25 +920,25 @@ func TestUpdateHoverDeadCellLeavesHoverUnchanged(t *testing.T) {
 // (hc, hr) pair leaves the hover state unchanged.
 func TestUpdateHoverOutOfBoundsLeavesHoverUnchanged(t *testing.T) {
 	g := makeHoverGame(3, 3)
-	g.hoverCol = 1
-	g.hoverRow = 1
+	g.input.hoverCol = 1
+	g.input.hoverRow = 1
 
 	// Negative col — out of bounds.
 	g.updateHover(-1, 0)
-	if g.hoverCol != 1 || g.hoverRow != 1 {
-		t.Errorf("updateHover(-1,0) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	if g.input.hoverCol != 1 || g.input.hoverRow != 1 {
+		t.Errorf("updateHover(-1,0) changed hover to (%d,%d), want (1,1)", g.input.hoverCol, g.input.hoverRow)
 	}
 
 	// Col beyond grid width.
 	g.updateHover(3, 0)
-	if g.hoverCol != 1 || g.hoverRow != 1 {
-		t.Errorf("updateHover(3,0) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	if g.input.hoverCol != 1 || g.input.hoverRow != 1 {
+		t.Errorf("updateHover(3,0) changed hover to (%d,%d), want (1,1)", g.input.hoverCol, g.input.hoverRow)
 	}
 
 	// Row beyond grid height.
 	g.updateHover(0, 3)
-	if g.hoverCol != 1 || g.hoverRow != 1 {
-		t.Errorf("updateHover(0,3) changed hover to (%d,%d), want (1,1)", g.hoverCol, g.hoverRow)
+	if g.input.hoverCol != 1 || g.input.hoverRow != 1 {
+		t.Errorf("updateHover(0,3) changed hover to (%d,%d), want (1,1)", g.input.hoverCol, g.input.hoverRow)
 	}
 }
 

@@ -93,20 +93,8 @@ type Game struct {
 	cellCount    int // number of live cells currently in the grid
 	score        int // cumulative score
 
-	// hover hint fields
-	hoverCol, hoverRow int      // cell under cursor (-1 = none)
-	victimHints        [][2]int // closest-colour neighbours of hovered cell (empty = none)
-
-	// touch tracking fields
-	touchActive   bool
-	activeTouchID ebiten.TouchID
-	lastTouchX    int // last device-pixel X while the tracked finger was down (raw screen coords)
-	lastTouchY    int // last device-pixel Y while the tracked finger was down (raw screen coords)
-
-	// per-frame reuse buffers for touch ID slices (avoids per-frame allocation)
-	touchIDsBuf     []ebiten.TouchID // reused for ebiten.AppendTouchIDs
-	justPressedBuf  []ebiten.TouchID // reused for inpututil.AppendJustPressedTouchIDs
-	justReleasedBuf []ebiten.TouchID // reused for inpututil.AppendJustReleasedTouchIDs
+	// input holds pointer/touch tracking and hover-hint state derived from device input.
+	input inputState
 
 	// victim movement animation fields (one entry per simultaneous victim)
 	victimCount int
@@ -178,6 +166,26 @@ type perfCounters struct {
 	prevWindowMaxSpr int
 }
 
+// inputState holds the pointer/touch tracking and hover-hint state derived from
+// device input each tick. It is written by the input-handling path (updateWaiting,
+// updateHover) and read by the HUD and victim-line rendering.
+type inputState struct {
+	// hover hint fields
+	hoverCol, hoverRow int      // cell under cursor (-1 = none)
+	victimHints        [][2]int // closest-colour neighbours of hovered cell (empty = none)
+
+	// touch tracking fields
+	touchActive   bool
+	activeTouchID ebiten.TouchID
+	lastTouchX    int // last device-pixel X while the tracked finger was down (raw screen coords)
+	lastTouchY    int // last device-pixel Y while the tracked finger was down (raw screen coords)
+
+	// per-frame reuse buffers for touch ID slices (avoids per-frame allocation)
+	touchIDsBuf     []ebiten.TouchID // reused for ebiten.AppendTouchIDs
+	justPressedBuf  []ebiten.TouchID // reused for inpututil.AppendJustPressedTouchIDs
+	justReleasedBuf []ebiten.TouchID // reused for inpututil.AppendJustReleasedTouchIDs
+}
+
 // newGameState returns a Game with data fields initialised but no ebiten.Image
 // allocated.  Callers that need a canvas (i.e. main) must set g.canvas after
 // calling this.
@@ -188,15 +196,16 @@ func newGameState(grid *Grid) *Game {
 		actionCol:       -1,
 		actionRow:       -1,
 		cellCount:       grid.Cols * grid.Rows,
-		hoverCol:        -1,
-		hoverRow:        -1,
-		victimHints:     nil,
 		victimAnims:     make([]MoveAnim, gridCols*gridRows), // flood can clear up to Cols*Rows cells
 		victimCount:     0,
 		targetAnimating: false,
-		touchIDsBuf:     make([]ebiten.TouchID, 0, 10),
-		justPressedBuf:  make([]ebiten.TouchID, 0, 10),
-		justReleasedBuf: make([]ebiten.TouchID, 0, 10),
+		input: inputState{
+			hoverCol:        -1,
+			hoverRow:        -1,
+			touchIDsBuf:     make([]ebiten.TouchID, 0, 10),
+			justPressedBuf:  make([]ebiten.TouchID, 0, 10),
+			justReleasedBuf: make([]ebiten.TouchID, 0, 10),
+		},
 	}
 }
 
@@ -890,7 +899,7 @@ func (g *Game) frameDims() (frameW, frameH float64, hudDevW int) {
 	return
 }
 
-// updateHover sets g.hoverCol/g.hoverRow when (hc, hr) is in-bounds and alive.
+// updateHover sets g.input.hoverCol/g.input.hoverRow when (hc, hr) is in-bounds and alive.
 // For animal cells, victimHints is populated with the flood-match cluster coords
 // (the cells that would clear on click) so the hover preview highlights the match.
 // For non-animal or empty cells, victimHints is cleared.
@@ -903,16 +912,16 @@ func (g *Game) updateHover(hc, hr int) {
 	if cell.IsDead() {
 		return
 	}
-	g.hoverCol, g.hoverRow = hc, hr
+	g.input.hoverCol, g.input.hoverRow = hc, hr
 	if cell.Organism == nil || !cell.Organism.IsAnimal {
-		g.victimHints = g.victimHints[:0]
+		g.input.victimHints = g.input.victimHints[:0]
 		return
 	}
 	cluster := floodMatchCluster(g.grid.Cells, hc, hr, g.grid.Cols, g.grid.Rows)
 	if clusterHasFood(g.grid.Cells, cluster) {
-		g.victimHints = cluster
+		g.input.victimHints = cluster
 	} else {
-		g.victimHints = g.victimHints[:0]
+		g.input.victimHints = g.input.victimHints[:0]
 	}
 }
 
@@ -933,21 +942,21 @@ func (g *Game) updateWaiting() error {
 
 	// Determine whether any touch activity is happening this frame so the mouse
 	// path can be suppressed (dedupe: synthesised mouse clicks on touch devices).
-	g.touchIDsBuf = ebiten.AppendTouchIDs(g.touchIDsBuf[:0])
-	g.justPressedBuf = inpututil.AppendJustPressedTouchIDs(g.justPressedBuf[:0])
-	g.justReleasedBuf = inpututil.AppendJustReleasedTouchIDs(g.justReleasedBuf[:0])
-	currentTouches := g.touchIDsBuf
-	justPressed := g.justPressedBuf
-	justReleased := g.justReleasedBuf
-	touchFrameActive := g.touchActive || len(currentTouches) > 0 || len(justPressed) > 0 || len(justReleased) > 0
+	g.input.touchIDsBuf = ebiten.AppendTouchIDs(g.input.touchIDsBuf[:0])
+	g.input.justPressedBuf = inpututil.AppendJustPressedTouchIDs(g.input.justPressedBuf[:0])
+	g.input.justReleasedBuf = inpututil.AppendJustReleasedTouchIDs(g.input.justReleasedBuf[:0])
+	currentTouches := g.input.touchIDsBuf
+	justPressed := g.input.justPressedBuf
+	justReleased := g.input.justReleasedBuf
+	touchFrameActive := g.input.touchActive || len(currentTouches) > 0 || len(justPressed) > 0 || len(justReleased) > 0
 
 	// Touch input block.
 	// New press: begin tracking the first finger.
-	if !g.touchActive && len(justPressed) > 0 {
-		g.touchActive = true
-		g.activeTouchID = justPressed[0]
+	if !g.input.touchActive && len(justPressed) > 0 {
+		g.input.touchActive = true
+		g.input.activeTouchID = justPressed[0]
 		// Store the raw screen press position so a single-frame tap has a valid stored position.
-		g.lastTouchX, g.lastTouchY = ebiten.TouchPosition(g.activeTouchID)
+		g.input.lastTouchX, g.input.lastTouchY = ebiten.TouchPosition(g.input.activeTouchID)
 	}
 
 	// Hold-as-hover: mirror the mouse hover recompute using the active touch position.
@@ -955,9 +964,9 @@ func (g *Game) updateWaiting() error {
 	// Guard requires the tracked ID to still be present in currentTouches: on the
 	// release frame the ID is absent, so lastTouchX/Y retain the last valid position
 	// and the release-commit loop below reads the correct cell instead of (0,0).
-	if g.touchActive && containsTouchID(currentTouches, g.activeTouchID) {
-		tx, ty := ebiten.TouchPosition(g.activeTouchID)
-		g.lastTouchX, g.lastTouchY = tx, ty
+	if g.input.touchActive && containsTouchID(currentTouches, g.input.activeTouchID) {
+		tx, ty := ebiten.TouchPosition(g.input.activeTouchID)
+		g.input.lastTouchX, g.input.lastTouchY = tx, ty
 		hc, hr := screenToBoard(float64(tx), float64(ty), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
 		g.updateHover(hc, hr)
 	}
@@ -966,10 +975,10 @@ func (g *Game) updateWaiting() error {
 	// raw screen position, mapped to a board cell via screenToBoard.
 	// Do NOT re-read ebiten.TouchPosition for the released ID — on this Ebitengine
 	// version it returns (0,0) for an already-released touch.
-	if findReleasedID(justReleased, g.activeTouchID) {
-		col, row := screenToBoard(float64(g.lastTouchX), float64(g.lastTouchY), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
+	if findReleasedID(justReleased, g.input.activeTouchID) {
+		col, row := screenToBoard(float64(g.input.lastTouchX), float64(g.input.lastTouchY), sw, sh, frameW, frameH, g.portrait, hudDevW, dcs)
 		// Clear touch state before commit so a reused ID cannot match stale state.
-		g.touchActive = false
+		g.input.touchActive = false
 		if err := g.commitCellAt(col, row); err != nil {
 			return err
 		}
@@ -1068,8 +1077,8 @@ func (g *Game) Update() error {
 	ebiten.SetWindowTitle(fmt.Sprintf("MixerSmash — cells: %d  score: %d", g.cellCount, g.score))
 
 	// Reset hover every tick; recompute below if conditions are met.
-	g.hoverCol, g.hoverRow = -1, -1
-	g.victimHints = g.victimHints[:0]
+	g.input.hoverCol, g.input.hoverRow = -1, -1
+	g.input.victimHints = g.input.victimHints[:0]
 
 	if g.targetAnimating {
 		if elapsedFraction(g.targetAnimStart, time.Now(), targetAnimDuration) >= 1.0 {
@@ -1129,7 +1138,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawMoveAnims(g.frame, hudDevW)
 
 	// Draw the HUD strip in the left portion of the frame.
-	g.hud.draw(g.frame, hudDevW, g.score, g.hoverCol, g.hoverRow, g.grid)
+	g.hud.draw(g.frame, hudDevW, g.score, g.input.hoverCol, g.input.hoverRow, g.grid)
 
 	// Draw orientation debug readout (gated by showOrientationDebug const).
 	if showOrientationDebug {
@@ -1195,7 +1204,7 @@ func presentGeoM(portrait bool, sw, sh, fw, fh float64) ebiten.GeoM {
 // tied victim, each from that victim's cell toward the hovered cell.
 // xOffset is added to all board-local X coordinates before drawing into dst.
 func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
-	if g.hoverCol == -1 || len(g.victimHints) == 0 {
+	if g.input.hoverCol == -1 || len(g.input.victimHints) == 0 {
 		return
 	}
 	dcs := g.deviceCellSize
@@ -1207,7 +1216,7 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 		s = 1.0
 	}
 	xOff := float32(xOffset)
-	toX, toY := deviceCellCenter(g.hoverCol, g.hoverRow, dcs)
+	toX, toY := deviceCellCenter(g.input.hoverCol, g.input.hoverRow, dcs)
 	// Dot spacing and radius scale with device scale so they appear the same
 	// physical size on all displays.
 	dotSpacing := float32(8) * float32(s)
@@ -1215,7 +1224,7 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 	// Offset advances at 20 logical px/sec = 20*s device px/sec = 20*s/60 device px/tick.
 	rawOff := float64(ebiten.Tick()) * (20.0 * s / 60.0)
 	offset := float32(math.Mod(rawOff, float64(dotSpacing)))
-	for _, hint := range g.victimHints {
+	for _, hint := range g.input.victimHints {
 		hc, hr := hint[0], hint[1]
 		fromX, fromY := deviceCellCenter(hc, hr, dcs)
 		dx := toX - fromX
