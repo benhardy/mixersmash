@@ -140,18 +140,27 @@ type Game struct {
 	// repaintGrid is called to bake all sprites with a live graphics context.
 	initialPainted bool
 
-	// Performance counters for showPerfDebug readout.
-	// spritesThisFrame counts drawCompositeSprite blits in the current Draw call;
-	// reset to 0 at the top of each Draw.
-	// bakeCount is cumulative: incremented each time compositeCachedSprite builds
-	// (bakes) a new sprite on a cache miss; never reset.
+	// perf holds the per-frame performance counters for the showPerfDebug readout.
+	perf perfCounters
+
+	// hud holds the persistent HUD strip cache and its dirty-check state.
+	hud hud
+}
+
+// perfCounters holds the performance instrumentation for the showPerfDebug
+// readout. Every field is written only on the Draw path and read only by
+// drawPerfDebug; none carries game-logic meaning.
+type perfCounters struct {
+	// spritesThisFrame counts drawCompositeSprite blits in the current Draw
+	// call; reset to 0 at the top of each Draw. bakeCount is cumulative:
+	// incremented each time compositeCachedSprite bakes a new sprite on a cache
+	// miss; never reset.
 	spritesThisFrame int
 	bakeCount        int
 
-	// Worst-frame-time tracking for showPerfDebug.
-	// lastDrawTime records when the previous Draw call started (zero = unset).
-	// worstFrameMs is the worst Draw-to-Draw delta seen in the current 2s window.
-	// worstWindowStart marks when the current window began.
+	// Worst-frame-time tracking. lastDrawTime records when the previous Draw
+	// call started (zero = unset). worstFrameMs is the worst Draw-to-Draw delta
+	// in the current 2s window. worstWindowStart marks when the window began.
 	// prevWindowWorstMs is the worst value from the completed previous window,
 	// displayed so the readout stays stable while the current window accumulates.
 	lastDrawTime      time.Time
@@ -159,18 +168,14 @@ type Game struct {
 	worstWindowStart  time.Time
 	prevWindowWorstMs float64
 
-	// Min-FPS and max-sprite-count tracking over the same 2s window.
-	// minFpsWindow is the lowest ActualFPS sample seen in the current window
-	// (-1 means no sample yet).  maxSprWindow is the highest spritesThisFrame
-	// seen in the current window.  The prev* fields hold the completed window's
-	// values for display (same latch pattern as prevWindowWorstMs).
+	// Min-FPS and max-sprite-count tracking over the same 2s window. minFpsWindow
+	// is the lowest ActualFPS sample in the current window (-1 = no sample yet).
+	// maxSprWindow is the highest spritesThisFrame. The prev* fields latch the
+	// completed window's values for display.
 	minFpsWindow     float64
 	maxSprWindow     int
 	prevWindowMinFps float64
 	prevWindowMaxSpr int
-
-	// hud holds the persistent HUD strip cache and its dirty-check state.
-	hud hud
 }
 
 // newGameState returns a Game with data fields initialised but no ebiten.Image
@@ -279,7 +284,7 @@ func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
 	gelOpts.Images[0] = base
 	composite.DrawRectShader(sz, sz, g.gelShader, &gelOpts)
 
-	g.bakeCount++
+	g.perf.bakeCount++
 	o.Sprite = composite
 	return composite
 }
@@ -295,7 +300,7 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o 
 	if img == nil {
 		return
 	}
-	g.spritesThisFrame++
+	g.perf.spritesThisFrame++
 	// Scale so the sprite's inscribed circle (diameter = sprite bake size)
 	// matches the requested radius.
 	refSz := g.spriteRefSize
@@ -1091,7 +1096,7 @@ func (g *Game) Update() error {
 // Draw blits the offscreen canvas to g.frame, then presents g.frame onto the
 // screen with optional 90° CCW rotation for portrait orientation.
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.spritesThisFrame = 0
+	g.perf.spritesThisFrame = 0
 
 	if g.glowShader == nil {
 		s, err := ebiten.NewShader([]byte(glowShaderSrc))
@@ -1361,44 +1366,44 @@ func (g *Game) drawOrientationDebug(frame *ebiten.Image) {
 func (g *Game) drawPerfDebug(frame *ebiten.Image) {
 	// --- worst-frame-time measurement ---
 	now := time.Now()
-	if !g.lastDrawTime.IsZero() {
-		deltaMs := float64(now.Sub(g.lastDrawTime).Microseconds()) / 1000.0
-		if deltaMs > g.worstFrameMs {
-			g.worstFrameMs = deltaMs
+	if !g.perf.lastDrawTime.IsZero() {
+		deltaMs := float64(now.Sub(g.perf.lastDrawTime).Microseconds()) / 1000.0
+		if deltaMs > g.perf.worstFrameMs {
+			g.perf.worstFrameMs = deltaMs
 		}
 
 		// Sample min-FPS and max-sprite-count for the current window.
 		fps := ebiten.ActualFPS()
-		if g.minFpsWindow < 0 || fps < g.minFpsWindow {
-			g.minFpsWindow = fps
+		if g.perf.minFpsWindow < 0 || fps < g.perf.minFpsWindow {
+			g.perf.minFpsWindow = fps
 		}
-		if g.spritesThisFrame > g.maxSprWindow {
-			g.maxSprWindow = g.spritesThisFrame
+		if g.perf.spritesThisFrame > g.perf.maxSprWindow {
+			g.perf.maxSprWindow = g.perf.spritesThisFrame
 		}
 
 		// Advance the 2-second window when it has elapsed.
-		if g.worstWindowStart.IsZero() {
-			g.worstWindowStart = now
-		} else if now.Sub(g.worstWindowStart) >= 2*time.Second {
-			g.prevWindowWorstMs = g.worstFrameMs
-			g.prevWindowMinFps = g.minFpsWindow
-			g.prevWindowMaxSpr = g.maxSprWindow
-			g.worstFrameMs = deltaMs
-			g.minFpsWindow = fps
-			g.maxSprWindow = g.spritesThisFrame
-			g.worstWindowStart = now
+		if g.perf.worstWindowStart.IsZero() {
+			g.perf.worstWindowStart = now
+		} else if now.Sub(g.perf.worstWindowStart) >= 2*time.Second {
+			g.perf.prevWindowWorstMs = g.perf.worstFrameMs
+			g.perf.prevWindowMinFps = g.perf.minFpsWindow
+			g.perf.prevWindowMaxSpr = g.perf.maxSprWindow
+			g.perf.worstFrameMs = deltaMs
+			g.perf.minFpsWindow = fps
+			g.perf.maxSprWindow = g.perf.spritesThisFrame
+			g.perf.worstWindowStart = now
 		}
 	} else {
-		g.worstWindowStart = now
-		g.minFpsWindow = -1
+		g.perf.worstWindowStart = now
+		g.perf.minFpsWindow = -1
 	}
-	g.lastDrawTime = now
+	g.perf.lastDrawTime = now
 
 	// --- build display lines ---
 	line1 := fmt.Sprintf("fps %.0f  tps %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
-	line2 := fmt.Sprintf("max %.1fms", g.prevWindowWorstMs)
-	line3 := fmt.Sprintf("spr %d  bk %d", g.spritesThisFrame, g.bakeCount)
-	line4 := fmt.Sprintf("lo %.0f  spr^ %d", g.prevWindowMinFps, g.prevWindowMaxSpr)
+	line2 := fmt.Sprintf("max %.1fms", g.perf.prevWindowWorstMs)
+	line3 := fmt.Sprintf("spr %d  bk %d", g.perf.spritesThisFrame, g.perf.bakeCount)
+	line4 := fmt.Sprintf("lo %.0f  spr^ %d", g.perf.prevWindowMinFps, g.perf.prevWindowMaxSpr)
 
 	const scale = 3.0
 	const lineSpacing = 13 // basicfont.Face7x13 glyph height
