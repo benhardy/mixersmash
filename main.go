@@ -693,6 +693,43 @@ func (g *Game) updateShuffling() error {
 	return nil
 }
 
+func (g *Game) commitMixer(cell *Cell, col int, row int) error {
+	oldHealth := cell.Health
+	cell.BumpHealth(mixerHealthChangeOnClick)
+	if !cell.IsDead() {
+		// Clicks 1 and 2: show new size, shuffle neighbours.
+		g.repaintGrid()
+		g.buildShuffleAnims(col, row)
+		return nil
+	}
+	// Click 3: remove the Mixer cell via victim-shrink pipeline.
+	dcs := g.deviceCellSize
+	if dcs <= 0 {
+		dcs = cellSize
+	}
+	organism := cell.Organism
+	g.cellCount--
+	g.drawCell(col, row, 1.0)
+	g.actionCol = col
+	g.actionRow = row
+	g.victimCount = 0
+	fromX, fromY := deviceCellCenter(col, row, dcs)
+	g.victimAnims[0] = MoveAnim{
+		Col:      col,
+		Row:      row,
+		Cell:     Cell{Organism: organism, Health: oldHealth},
+		FromX:    fromX,
+		FromY:    fromY,
+		ToX:      fromX,
+		ToY:      fromY,
+		PathType: 0,
+	}
+	g.victimCount = 1
+	g.animStart = time.Now()
+	g.currentState = stateVictimMoving
+	return nil
+}
+
 // commitCellAt clears the flood-match cluster rooted at an animal cell through
 // the victim-shrink→drop pipeline. Clicking a non-animal, empty, or dead cell
 // is a no-op. Out-of-bounds clicks are ignored.
@@ -707,40 +744,7 @@ func (g *Game) commitCellAt(col, row int) error {
 
 	// Mixer click path: increment click count and either shuffle or remove.
 	if cell.Organism != nil && cell.Organism.IsMixer {
-		oldHealth := cell.Health
-		cell.BumpHealth(mixerHealthChangeOnClick)
-		if !cell.IsDead() {
-			// Clicks 1 and 2: show new size, shuffle neighbours.
-			g.repaintGrid()
-			g.buildShuffleAnims(col, row)
-			return nil
-		}
-		// Click 3: remove the Mixer cell via victim-shrink pipeline.
-		dcs := g.deviceCellSize
-		if dcs <= 0 {
-			dcs = cellSize
-		}
-		organism := cell.Organism
-		g.cellCount--
-		g.drawCell(col, row, 1.0)
-		g.actionCol = col
-		g.actionRow = row
-		g.victimCount = 0
-		fromX, fromY := deviceCellCenter(col, row, dcs)
-		g.victimAnims[0] = MoveAnim{
-			Col:      col,
-			Row:      row,
-			Cell:     Cell{Organism: organism, Health: oldHealth},
-			FromX:    fromX,
-			FromY:    fromY,
-			ToX:      fromX,
-			ToY:      fromY,
-			PathType: 0,
-		}
-		g.victimCount = 1
-		g.animStart = time.Now()
-		g.currentState = stateVictimMoving
-		return nil
+		return g.commitMixer(cell, col, row)
 	}
 
 	if cell.Organism == nil || !cell.Organism.IsAnimal {
