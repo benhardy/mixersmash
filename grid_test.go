@@ -106,7 +106,7 @@ func TestElapsedFraction(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := elapsedFraction(base, base.Add(tc.elapsed), dur)
+			got := ElapsedFraction(base, base.Add(tc.elapsed), dur)
 			if got != tc.want {
 				t.Errorf("elapsedFraction elapsed=%v dur=%v = %v, want %v",
 					tc.elapsed, dur, got, tc.want)
@@ -121,8 +121,8 @@ func TestElapsedFraction(t *testing.T) {
 		tickWindow := time.Second / 60 // ~16.67ms
 		now1 := start.Add(tickWindow / 3)
 		now2 := start.Add(2 * tickWindow / 3)
-		f1 := elapsedFraction(start, now1, shuffleDuration)
-		f2 := elapsedFraction(start, now2, shuffleDuration)
+		f1 := ElapsedFraction(start, now1, shuffleDuration)
+		f2 := ElapsedFraction(start, now2, shuffleDuration)
 		if f1 == f2 {
 			t.Errorf("sub-tick: elapsedFraction at %v and %v within same tick window returned identical fraction %v; wall-clock not used",
 				now1.Sub(start), now2.Sub(start), f1)
@@ -249,7 +249,7 @@ func TestEightNeighborsCentre(t *testing.T) {
 // TestGravityMovesNoHoles verifies that gravityMoves with no holes returns an
 // empty slice — no cell changes row when nothing is removed.
 func TestGravityMovesNoHoles(t *testing.T) {
-	got := gravityMoves(18, nil)
+	got := GravityMoves(18, nil)
 	if len(got) != 0 {
 		t.Errorf("gravityMoves(18, nil) = %v, want empty slice", got)
 	}
@@ -260,7 +260,7 @@ func TestGravityMovesNoHoles(t *testing.T) {
 // in their correct positions.
 // alive=[0,1,3,4], newCount=1 → 0→1, 1→2; 3→3(stay), 4→4(stay)
 func TestGravityMovesSingleHoleMiddle(t *testing.T) {
-	got := gravityMoves(5, []int{2})
+	got := GravityMoves(5, []int{2})
 	want := [][2]int{{0, 1}, {1, 2}}
 	if len(got) != len(want) {
 		t.Fatalf("gravityMoves(5, [2]) = %v, want %v", got, want)
@@ -276,7 +276,7 @@ func TestGravityMovesSingleHoleMiddle(t *testing.T) {
 // column results in no moves — alive rows [1,2,3,4] land at positions [1,2,3,4].
 // alive=[1,2,3,4], newCount=1 → 1→1(stay), 2→2(stay), 3→3(stay), 4→4(stay)
 func TestGravityMovesSingleHoleTop(t *testing.T) {
-	got := gravityMoves(5, []int{0})
+	got := GravityMoves(5, []int{0})
 	if len(got) != 0 {
 		t.Errorf("gravityMoves(5, [0]) = %v, want empty slice", got)
 	}
@@ -286,7 +286,7 @@ func TestGravityMovesSingleHoleTop(t *testing.T) {
 // 5-row column compacts all remaining rows downward by one.
 // alive=[0,1,2,3], newCount=1 → 0→1, 1→2, 2→3, 3→4
 func TestGravityMovesSingleHoleBottom(t *testing.T) {
-	got := gravityMoves(5, []int{4})
+	got := GravityMoves(5, []int{4})
 	want := [][2]int{{0, 1}, {1, 2}, {2, 3}, {3, 4}}
 	if len(got) != len(want) {
 		t.Fatalf("gravityMoves(5, [4]) = %v, want %v", got, want)
@@ -302,7 +302,7 @@ func TestGravityMovesSingleHoleBottom(t *testing.T) {
 // 6-row column.
 // alive=[0,2,4,5], newCount=2 → 0→2, 2→3; 4→4(stay), 5→5(stay)
 func TestGravityMovesTwoHolesSameColumn(t *testing.T) {
-	got := gravityMoves(6, []int{1, 3})
+	got := GravityMoves(6, []int{1, 3})
 	want := [][2]int{{0, 2}, {2, 3}}
 	if len(got) != len(want) {
 		t.Fatalf("gravityMoves(6, [1,3]) = %v, want %v", got, want)
@@ -317,7 +317,7 @@ func TestGravityMovesTwoHolesSameColumn(t *testing.T) {
 // TestGravityMovesAllHoles verifies that removing every row in a 3-row column
 // returns an empty slice — no alive rows, no moves.
 func TestGravityMovesAllHoles(t *testing.T) {
-	got := gravityMoves(3, []int{0, 1, 2})
+	got := GravityMoves(3, []int{0, 1, 2})
 	if len(got) != 0 {
 		t.Errorf("gravityMoves(3, [0,1,2]) = %v, want empty slice", got)
 	}
@@ -329,8 +329,8 @@ func TestGravityMovesAllHoles(t *testing.T) {
 
 // TestOrganismPaletteSize verifies the palette has exactly 23 entries.
 func TestOrganismPaletteSize(t *testing.T) {
-	if len(organismPalette) != 23 {
-		t.Errorf("organismPalette has %d entries, want exactly 23", len(organismPalette))
+	if len(OrganismPalette) != 23 {
+		t.Errorf("organismPalette has %d entries, want exactly 23", len(OrganismPalette))
 	}
 }
 
@@ -338,7 +338,7 @@ func TestOrganismPaletteSize(t *testing.T) {
 // distinct, non-zero glyph rune.
 func TestOrganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
 	seen := make(map[rune]int)
-	for i, e := range organismPalette {
+	for i, e := range OrganismPalette {
 		if e.Glyph == 0 {
 			t.Errorf("organismPalette[%d] (%q) has zero Glyph", i, e.Name)
 		}
@@ -352,7 +352,7 @@ func TestOrganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
 
 // TestOrganismPaletteAlphaAll255 verifies that every palette entry has Color.A == 255.
 func TestOrganismPaletteAlphaAll255(t *testing.T) {
-	for i, e := range organismPalette {
+	for i, e := range OrganismPalette {
 		if e.Color.A != 255 {
 			t.Errorf("organismPalette[%d] (%q) Color.A = %d, want 255", i, e.Name, e.Color.A)
 		}
@@ -402,7 +402,7 @@ func TestGlyphTint(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := glyphTint(tc.input)
+			got := GlyphTint(tc.input)
 			if got != tc.want {
 				t.Errorf("glyphTint(%v) = %v, want %v", tc.input, got, tc.want)
 			}
@@ -543,7 +543,7 @@ func TestApplyColumnCollapse(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot := makeSnapshot(tc.numCols, numRows)
-			result := applyColumnCollapse(snapshot, tc.moves)
+			result := ApplyColumnCollapse(snapshot, tc.moves)
 
 			// 1. Destination columns must hold the correct source data.
 			for dstCol, srcCol := range tc.wantDst {
@@ -656,7 +656,7 @@ func TestHorizontalCollapseMoves(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := horizontalCollapseMoves(tc.numCols, tc.emptyCols)
+			got := HorizontalCollapseMoves(tc.numCols, tc.emptyCols)
 			// Normalise nil vs empty for length check.
 			if len(got) == 0 && len(tc.want) == 0 {
 				return
@@ -677,7 +677,7 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 	// Separate mixer entries from non-mixer entries.
 	var mixers []Organism
 	var nonMixers []Organism
-	for _, e := range organismPalette {
+	for _, e := range OrganismPalette {
 		if e.IsMixer {
 			mixers = append(mixers, e)
 		} else {
@@ -758,7 +758,7 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 
 // TestSRGBToOKLabBlack verifies that pure black maps to OKLab (0, 0, 0).
 func TestSRGBToOKLabBlack(t *testing.T) {
-	lab := sRGBToOKLab(color.RGBA{R: 0, G: 0, B: 0, A: 255})
+	lab := SRGBToOKLab(color.RGBA{R: 0, G: 0, B: 0, A: 255})
 	if lab[0] != 0 || lab[1] != 0 || lab[2] != 0 {
 		t.Errorf("sRGBToOKLab(black) = %v, want [0 0 0]", lab)
 	}
@@ -766,7 +766,7 @@ func TestSRGBToOKLabBlack(t *testing.T) {
 
 // TestSRGBToOKLabWhiteLuminance verifies that pure white has OKLab L close to 1.
 func TestSRGBToOKLabWhiteLuminance(t *testing.T) {
-	lab := sRGBToOKLab(color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	lab := SRGBToOKLab(color.RGBA{R: 255, G: 255, B: 255, A: 255})
 	if math.Abs(lab[0]-1.0) > 1e-5 {
 		t.Errorf("sRGBToOKLab(white).L = %f, want ~1.0", lab[0])
 	}
@@ -775,9 +775,9 @@ func TestSRGBToOKLabWhiteLuminance(t *testing.T) {
 // TestSRGBToOKLabRedGreenDistance verifies that red and green are farther apart
 // in OKLab than red and orange (perceptual ordering check).
 func TestSRGBToOKLabRedGreenDistance(t *testing.T) {
-	red := sRGBToOKLab(color.RGBA{R: 220, G: 60, B: 60, A: 255})
-	green := sRGBToOKLab(color.RGBA{R: 60, G: 180, B: 60, A: 255})
-	orange := sRGBToOKLab(color.RGBA{R: 220, G: 140, B: 60, A: 255})
+	red := SRGBToOKLab(color.RGBA{R: 220, G: 60, B: 60, A: 255})
+	green := SRGBToOKLab(color.RGBA{R: 60, G: 180, B: 60, A: 255})
+	orange := SRGBToOKLab(color.RGBA{R: 220, G: 140, B: 60, A: 255})
 
 	dist := func(a, b [3]float64) float64 {
 		dl, da, db := a[0]-b[0], a[1]-b[1], a[2]-b[2]
@@ -889,8 +889,8 @@ func makeHoverGame(cols, rows int) *Game {
 	// Assign creatures and set health so cells are alive.
 	for c := 0; c < cols; c++ {
 		for r := 0; r < rows; r++ {
-			idx := (c*rows + r) % len(organismPalette)
-			grid.Cells[c][r].Organism = &organismPalette[idx]
+			idx := (c*rows + r) % len(OrganismPalette)
+			grid.Cells[c][r].Organism = &OrganismPalette[idx]
 			grid.Cells[c][r].Health = 1.0
 		}
 	}
@@ -957,7 +957,7 @@ func TestScoreForCluster(t *testing.T) {
 		{10, 100},
 	}
 	for _, tc := range cases {
-		got := scoreForCluster(tc.n)
+		got := ScoreForCluster(tc.n)
 		if got != tc.want {
 			t.Errorf("scoreForCluster(%d) = %d, want %d", tc.n, got, tc.want)
 		}
@@ -999,7 +999,7 @@ func TestFloodMatchClusterLoneAnimal(t *testing.T) {
 	placeOrganism(cells, 1, 0, other)
 	placeOrganism(cells, 1, 2, other)
 
-	got := floodMatchCluster(cells, 1, 1, 3, 3)
+	got := FloodMatchCluster(cells, 1, 1, 3, 3)
 	if len(got) != 1 || got[0] != [2]int{1, 1} {
 		t.Errorf("floodMatchCluster lone animal = %v, want [{1 1}]", got)
 	}
@@ -1016,7 +1016,7 @@ func TestFloodMatchClusterChainOfAnimals(t *testing.T) {
 	placeOrganism(cells, 1, 0, animal)
 	placeOrganism(cells, 2, 0, animal)
 
-	got := floodMatchCluster(cells, 0, 0, 3, 1)
+	got := FloodMatchCluster(cells, 0, 0, 3, 1)
 	if len(got) != 3 {
 		t.Fatalf("floodMatchCluster chain of 3 = %v (len %d), want 3 results", got, len(got))
 	}
@@ -1041,7 +1041,7 @@ func TestFloodMatchClusterWithPairedFood(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 0, food)
 
-	got := floodMatchCluster(cells, 0, 0, 2, 1)
+	got := FloodMatchCluster(cells, 0, 0, 2, 1)
 	if len(got) != 2 {
 		t.Fatalf("floodMatchCluster animal+food = %v (len %d), want 2", got, len(got))
 	}
@@ -1064,7 +1064,7 @@ func TestFloodMatchClusterNonPairedFoodExcluded(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 0, wrongFood)
 
-	got := floodMatchCluster(cells, 0, 0, 2, 1)
+	got := FloodMatchCluster(cells, 0, 0, 2, 1)
 	if len(got) != 1 || got[0] != [2]int{0, 0} {
 		t.Errorf("floodMatchCluster non-paired food = %v, want only [{0 0}]", got)
 	}
@@ -1085,7 +1085,7 @@ func TestFloodMatchClusterFoodDoesNotSpread(t *testing.T) {
 	placeOrganism(cells, 1, 0, food)
 	placeOrganism(cells, 2, 0, animal)
 
-	got := floodMatchCluster(cells, 0, 0, 3, 1)
+	got := FloodMatchCluster(cells, 0, 0, 3, 1)
 	// Seed at (0,0) finds food at (1,0) → included but not enqueued.
 	// (2,0) is never reached from (1,0) because food is not enqueued.
 	if len(got) != 2 {
@@ -1115,7 +1115,7 @@ func TestFloodMatchClusterDiagonalIncluded(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 1, animal)
 
-	got := floodMatchCluster(cells, 0, 0, 2, 2)
+	got := FloodMatchCluster(cells, 0, 0, 2, 2)
 	if len(got) != 2 {
 		t.Fatalf("floodMatchCluster diagonal included = %v (len %d), want 2 results", got, len(got))
 	}
@@ -1141,7 +1141,7 @@ func TestFloodMatchClusterDiagonalFoodIncluded(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 1, food)
 
-	got := floodMatchCluster(cells, 0, 0, 2, 2)
+	got := FloodMatchCluster(cells, 0, 0, 2, 2)
 	if len(got) != 2 {
 		t.Fatalf("floodMatchCluster diagonal food included = %v (len %d), want 2 results", got, len(got))
 	}
@@ -1168,7 +1168,7 @@ func TestClusterHasFoodWithFood(t *testing.T) {
 	placeOrganism(cells, 1, 0, food)
 
 	coords := [][2]int{{0, 0}, {1, 0}}
-	if !clusterHasFood(cells, coords) {
+	if !ClusterHasFood(cells, coords) {
 		t.Error("clusterHasFood with food cell = false, want true")
 	}
 }
@@ -1182,7 +1182,7 @@ func TestClusterHasFoodAnimalsOnly(t *testing.T) {
 	placeOrganism(cells, 1, 0, animal)
 
 	coords := [][2]int{{0, 0}, {1, 0}}
-	if clusterHasFood(cells, coords) {
+	if ClusterHasFood(cells, coords) {
 		t.Error("clusterHasFood animals-only = true, want false")
 	}
 }
@@ -1195,7 +1195,7 @@ func TestClusterHasFoodSingleAnimal(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 
 	coords := [][2]int{{0, 0}}
-	if clusterHasFood(cells, coords) {
+	if ClusterHasFood(cells, coords) {
 		t.Error("clusterHasFood single animal = true, want false")
 	}
 }

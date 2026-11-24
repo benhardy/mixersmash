@@ -37,7 +37,7 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	}
 
 	holeRows := []int{2}
-	moves := gravityMoves(rows, holeRows) // [[0,1],[1,2]]
+	moves := GravityMoves(rows, holeRows) // [[0,1],[1,2]]
 
 	g.buildDropMoveAnims(0, holeRows, moves, dcs)
 

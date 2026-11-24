@@ -79,7 +79,7 @@ func NewGrid(cols, rows int) *Grid {
 		cells[c] = make([]Cell, rows)
 		for r := 0; r < rows; r++ {
 			cells[c][r] = Cell{
-				Organism: paletteOrganism(),
+				Organism: PaletteOrganism(),
 				Health:   1.0,
 			}
 		}
@@ -112,10 +112,10 @@ func eightNeighbors(buf [][2]int, col, row, cols, rows int) [][2]int {
 	return buf
 }
 
-// gravityMoves returns the [oldRow, newRow] mapping for cells in a column of numRows
+// GravityMoves returns the [oldRow, newRow] mapping for cells in a column of numRows
 // when holes appear at holeRows. Only returns entries for cells that actually change row.
 // Cells not in holeRows are "alive" and compact downward; holeRows are removed.
-func gravityMoves(numRows int, holeRows []int) [][2]int {
+func GravityMoves(numRows int, holeRows []int) [][2]int {
 	// Build a set of hole rows for fast lookup.
 	holeSet := make(map[int]bool, len(holeRows))
 	for _, r := range holeRows {
@@ -139,7 +139,7 @@ func gravityMoves(numRows int, holeRows []int) [][2]int {
 	return moves
 }
 
-// horizontalCollapseMoves returns the [oldCol, newCol] mapping for non-empty
+// HorizontalCollapseMoves returns the [oldCol, newCol] mapping for non-empty
 // columns when empty columns are removed and the remaining columns are packed
 // toward the centre.
 //
@@ -147,7 +147,7 @@ func gravityMoves(numRows int, holeRows []int) [][2]int {
 // leftEmpties = count of emptyCols entries with index < numCols/2.
 // nonEmpty[i] maps to (leftEmpties + i).
 // Only pairs where oldCol != newCol are returned.
-func horizontalCollapseMoves(numCols int, emptyCols []int) [][2]int {
+func HorizontalCollapseMoves(numCols int, emptyCols []int) [][2]int {
 	emptySet := make(map[int]bool, len(emptyCols))
 	for _, c := range emptyCols {
 		emptySet[c] = true
@@ -175,7 +175,7 @@ func horizontalCollapseMoves(numCols int, emptyCols []int) [][2]int {
 	return moves
 }
 
-// applyColumnCollapse returns a new column layout derived from snapshot by
+// ApplyColumnCollapse returns a new column layout derived from snapshot by
 // applying the given moves. It is a pure function with no ebiten dependency.
 //
 // Algorithm:
@@ -186,7 +186,7 @@ func horizontalCollapseMoves(numCols int, emptyCols []int) [][2]int {
 //     not themselves targeted as a destination.
 //
 // Columns that neither moved nor were landed on are preserved unchanged.
-func applyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
+func ApplyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 	numCols := len(snapshot)
 	result := make([][]Cell, numCols)
 	for c := 0; c < numCols; c++ {
@@ -218,7 +218,7 @@ func applyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 	return result
 }
 
-// floodMatchCluster returns all grid coordinates that belong to the flood-match
+// FloodMatchCluster returns all grid coordinates that belong to the flood-match
 // cluster seeded at (col, row). The seed cell must hold an animal Organism.
 //
 // Rules (BFS over 8-neighbours, pure — no mutation):
@@ -229,7 +229,7 @@ func applyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 //
 // Returns a [][2]int of (col, row) pairs including the seed. A lone animal with no
 // matching neighbours returns a single-element slice.
-func floodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
+func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 	seed := cells[col][row].Organism
 	if seed == nil || !seed.IsAnimal {
 		return nil
@@ -273,10 +273,10 @@ func floodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 	return result
 }
 
-// clusterHasFood reports whether any cell in coords is a food cell
+// ClusterHasFood reports whether any cell in coords is a food cell
 // (Organism != nil and IsAnimal == false). Used by commitCellAt to gate the
 // no-food no-op rule: a cluster with no paired food must not clear.
-func clusterHasFood(cells [][]Cell, coords [][2]int) bool {
+func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
 	for _, coord := range coords {
 		o := cells[coord[0]][coord[1]].Organism
 		if o != nil && !o.IsAnimal {
@@ -286,18 +286,18 @@ func clusterHasFood(cells [][]Cell, coords [][2]int) bool {
 	return false
 }
 
-// scoreForCluster returns the score for clearing a cluster of n cells.
+// ScoreForCluster returns the score for clearing a cluster of n cells.
 // Score is super-linear: n*n.
-func scoreForCluster(n int) int {
+func ScoreForCluster(n int) int {
 	return n * n
 }
 
-// elapsedFraction returns how far through a phase we are as a 0→1 float32,
+// ElapsedFraction returns how far through a phase we are as a 0→1 float32,
 // clamped to [0, 1].  start is the wall-clock time when the phase began,
 // now is the current wall-clock time, and duration is the total phase length.
 // Using wall-clock time (rather than game ticks) allows smooth interpolation
 // at display refresh rates above 60 Hz.
-func elapsedFraction(start, now time.Time, duration time.Duration) float32 {
+func ElapsedFraction(start, now time.Time, duration time.Duration) float32 {
 	f := float32(now.Sub(start)) / float32(duration)
 	if f < 0 {
 		return 0
@@ -308,9 +308,9 @@ func elapsedFraction(start, now time.Time, duration time.Duration) float32 {
 	return f
 }
 
-// deviceCellCenter returns the device-pixel centre of a grid cell for the given
+// DeviceCellCenter returns the device-pixel centre of a grid cell for the given
 // device cell size dcs.  Used wherever pixel coordinates must map to the
 // device-resolution canvas or screen.
-func deviceCellCenter(col, row, dcs int) (float32, float32) {
+func DeviceCellCenter(col, row, dcs int) (float32, float32) {
 	return float32(col*dcs + dcs/2), float32(row*dcs + dcs/2)
 }

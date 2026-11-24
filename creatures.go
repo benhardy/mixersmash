@@ -51,11 +51,11 @@ type Organism struct {
 	IsMixer  bool
 }
 
-// organismPalette is the master list of organisms: 22 Australian animal/food
+// OrganismPalette is the master list of organisms: 22 Australian animal/food
 // pair entries (PairIDs 0..10) plus one Mixer entry (PairID -1, IsMixer=true).
 // Each animal/food pair shares a PairID and Color; one entry is the animal
 // (IsAnimal=true), the other is the food (IsAnimal=false).
-var organismPalette = []Organism{
+var OrganismPalette = []Organism{
 	{Name: "Kangaroo", Glyph: '🦘', Color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, PairID: 0, IsAnimal: true},
 	{Name: "Grass", Glyph: '🌿', Color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, PairID: 0, IsAnimal: false},
 	{Name: "Koala", Glyph: '🐨', Color: color.RGBA{R: 255, G: 119, B: 0, A: 255}, PairID: 1, IsAnimal: true},
@@ -81,22 +81,22 @@ var organismPalette = []Organism{
 	{Name: "Mixer", Glyph: '\U0001F300', Color: color.RGBA{R: 255, G: 255, B: 255, A: 255}, PairID: -1, IsAnimal: false, IsMixer: true},
 }
 
-// paletteOrganism returns a pointer to a random entry in organismPalette.
+// PaletteOrganism returns a pointer to a random entry in organismPalette.
 // Spawn probability is uniform across all entries.
 // The pointer is stable because organismPalette is a package-level slice
 // that is never reallocated after init.
-func paletteOrganism() *Organism {
-	which := rand.Intn(len(organismPalette) + mixerBias)
-	if which >= len(organismPalette) {
-		which = len(organismPalette) - 1 // Mixer entry with bias
+func PaletteOrganism() *Organism {
+	which := rand.Intn(len(OrganismPalette) + mixerBias)
+	if which >= len(OrganismPalette) {
+		which = len(OrganismPalette) - 1 // Mixer entry with bias
 	}
-	return &organismPalette[which]
+	return &OrganismPalette[which]
 }
 
-// sRGBToOKLab converts a colour.RGBA to OKLab [L, a, b].
+// SRGBToOKLab converts a colour.RGBA to OKLab [L, a, b].
 // Used by glyphTint to determine contrast colour.
 // Reference: https://bottosson.github.io/posts/oklab/
-func sRGBToOKLab(c color.RGBA) [3]float64 {
+func SRGBToOKLab(c color.RGBA) [3]float64 {
 	// Linear sRGB (gamma expand).
 	toLinear := func(u uint8) float64 {
 		s := float64(u) / 255.0
@@ -127,11 +127,11 @@ func sRGBToOKLab(c color.RGBA) [3]float64 {
 	return [3]float64{L, a, bk}
 }
 
-// glyphTint returns a near-black or near-white tint for a glyph drawn over c,
+// GlyphTint returns a near-black or near-white tint for a glyph drawn over c,
 // chosen by OKLab luminance: L >= 0.65 → near-black {30,25,20,255};
 // L < 0.65 → near-white {230,225,215,255}. Always A=255.
-func glyphTint(c color.RGBA) color.RGBA {
-	lab := sRGBToOKLab(c)
+func GlyphTint(c color.RGBA) color.RGBA {
+	lab := SRGBToOKLab(c)
 	if lab[0] >= 0.65 {
 		return color.RGBA{R: 30, G: 25, B: 20, A: 255}
 	}
