@@ -235,7 +235,10 @@ func floodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 		return nil
 	}
 
-	var visited [gridCols][gridRows]bool
+	visited := make([][]bool, cols)
+	for i := range visited {
+		visited[i] = make([]bool, rows)
+	}
 	visited[col][row] = true
 
 	result := [][2]int{{col, row}}
