@@ -37,8 +37,8 @@ Authoritative targets are in `Makefile`. Summary:
 All source is in the flat `main` package at the repo root.
 
 - `main.go` — game loop entry point; Ebitengine `Update` state machine with per-state handlers; `Draw` + all rendering; input handling (mouse + touch); HUD; the `present` step that blits the offscreen frame to the real screen via `presentGeoM`
-- `grid.go` — pure model: `Cell`, `Grid`, `MoveAnim`; gravity/collapse logic; victim identification; `elapsedFraction` (wall-clock animation progress)
-- `creatures.go` — `Creature` struct; OKLCh colour palette; connection themes (`Colour`, `Random`); embedded title image asset
+- `grid.go` — pure model (no ebiten import): `Cell`, `Grid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `elapsedFraction` (wall-clock animation progress). Earmarked to move to `internal/board` (Plan B; see ROADMAP)
+- `creatures.go` — `Organism` struct (name/glyph/colour/PairID/IsAnimal/IsMixer) and `organismPalette` (11 animal/food pairs + a Mixer); OKLab colour math (`sRGBToOKLab`, `glyphTint`); `paletteOrganism`; glyph-font loader and embedded title-image asset. Baked sprites are NOT stored here — they live in `Game.spriteCache` in the render layer
 - `device.go` — `LayoutF`; `frameScaleFor`; `deviceCellSize` / `spriteRef` sizing; sprite-cache clear on realloc (currently immediate — see gotchas)
 - `mapping.go` — `screenToFrame` / `screenToBoard`; inverts `presentGeoM` for input hit-testing
 - `lerp.go` — easing and bezier helpers
@@ -50,6 +50,8 @@ All source is in the flat `main` package at the repo root.
 **Rendering model.** Every frame is drawn into an offscreen `*ebiten.Image` (the "frame"), then presented to the real screen via `presentGeoM`: identity in landscape, 90-degree rotation in portrait. Input coordinates are mapped back through the inverse of that same `GeoM` (`mapping.go`). The board canvas and HUD are model-derived caches; they are re-synced from the model on every settle to `stateWaiting` via `repaintGrid` / `enterWaiting`.
 
 **Animation timing** is wall-clock-based (`time.Time` / `time.Duration`, not ticks) so it stays smooth above 60 fps on high-refresh displays (`elapsedFraction` in `grid.go`).
+
+**`Game` struct layout.** `Game` (in `main.go`) is grouped into named sub-structs by concern — `board` (grid/score/cellCount), `anim` (state machine + animations), `input` (hover/touch), `view` (device geometry + offscreen targets), `perf` (debug counters) — plus render resources (shaders, glyph font, `spriteCache`) and the `hud` cache. The dispatch phase is a typed `gameState`. See DECISIONS.md → Architecture.
 
 ---
 
@@ -83,9 +85,11 @@ Full details in `CLAUDE.md` under "Ebitengine rendering notes". One line each:
 
 ## Current state
 
-Working: desktop and mobile play; mobile touch (hold = hover, release = commit); orientation lock and fullscreen on Start; loading screen with accurate progress bar and Start button; PWA manifest; connection-graph mechanic with Colour/Random themes; HiDPI two-seam rotated rendering; perf tuned (wall-clock timing, GC-at-settle; ~90-100 fps, occasional ~33 ms spike).
+Working: desktop and mobile play; mobile touch (hold = hover, release = commit); orientation lock and fullscreen on Start; loading screen with accurate progress bar and Start button; PWA manifest; animal/food cluster-matching mechanic (clear a flood-connected cluster that includes its paired food) plus the Mixer; HiDPI two-seam rotated rendering; perf tuned (wall-clock timing, GC-at-settle; ~90-100 fps, occasional ~33 ms spike).
 
 A temporary perf readout exists behind `const showPerfDebug` in `main.go` (currently `false`).
+
+Architecture refactor in progress: Plan A (grouping `Game`'s fields into sub-structs) is complete; Plan B (extract `internal/board` / `internal/anim`) has its prerequisites done (commits for B1/B2) with the remaining B3/B4 steps staged in detail in `ROADMAP.md` → Architecture.
 
 ---
 
