@@ -16,44 +16,6 @@ func cellWithColor(c color.RGBA) Cell {
 	return Cell{Organism: o}
 }
 
-// TestRandomColorAlpha verifies that randomColor returns a colour with A == 255.
-func TestRandomColorAlpha(t *testing.T) {
-	for i := 0; i < 100; i++ {
-		c := randomColor()
-		if c.A != 255 {
-			t.Fatalf("randomColor() returned A=%d, want 255", c.A)
-		}
-	}
-}
-
-// TestRandomColorReturnsRGBA verifies that randomColor returns a color.RGBA value.
-func TestRandomColorReturnsRGBA(t *testing.T) {
-	_ = randomColor()
-}
-
-// TestCellFromPixel verifies that cellFromPixel maps pixel coordinates to the
-// correct (col, row) grid cell.
-func TestCellFromPixel(t *testing.T) {
-	cases := []struct {
-		px, py, cellSize int
-		wantCol, wantRow int
-	}{
-		{0, 0, 32, 0, 0},
-		{31, 31, 32, 0, 0},
-		{32, 0, 32, 1, 0},
-		{0, 32, 32, 0, 1},
-		{64, 96, 32, 2, 3},
-		{10, 20, 10, 1, 2},
-	}
-	for _, tc := range cases {
-		col, row := cellFromPixel(tc.px, tc.py, tc.cellSize)
-		if col != tc.wantCol || row != tc.wantRow {
-			t.Errorf("cellFromPixel(%d, %d, %d) = (%d, %d), want (%d, %d)",
-				tc.px, tc.py, tc.cellSize, col, row, tc.wantCol, tc.wantRow)
-		}
-	}
-}
-
 // TestGridInitialisation verifies that NewGrid returns a Grid whose Cells
 // slice has dimensions [Cols][Rows] with every cell having Color.A == 255.
 func TestGridInitialisation(t *testing.T) {
@@ -235,22 +197,6 @@ func TestInitialCellHealth(t *testing.T) {
 			if g.Cells[c][r].Health != 1.0 {
 				t.Errorf("Cells[%d][%d].Health = %v, want 1.0", c, r, g.Cells[c][r].Health)
 			}
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// randomColor — white exclusion
-// ---------------------------------------------------------------------------
-
-// TestRandomColorNeverReturnsWhite verifies that randomColor never returns
-// {R:255, G:255, B:255} across a large number of calls.
-func TestRandomColorNeverReturnsWhite(t *testing.T) {
-	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
-	for i := 0; i < 10_000; i++ {
-		c := randomColor()
-		if c.R == white.R && c.G == white.G && c.B == white.B {
-			t.Fatalf("randomColor() returned white {255,255,255} on iteration %d", i)
 		}
 	}
 }

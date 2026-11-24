@@ -2,7 +2,6 @@ package main
 
 import (
 	"image/color"
-	"math/rand"
 	"time"
 )
 
@@ -90,32 +89,6 @@ func NewGrid(cols, rows int) *Grid {
 		Rows:  rows,
 		Cells: cells,
 	}
-}
-
-// randomColor returns a random opaque colour (A=255).
-// will be a subset of web-safe colours
-func randomColor() color.RGBA {
-	for {
-		col := color.RGBA{
-			R: uint8(51 * (rand.Intn(4) + 2)),
-			G: uint8(51 * (rand.Intn(4) + 2)),
-			B: uint8(51 * (rand.Intn(4) + 2)),
-			A: 255,
-		}
-		if col.R == 255 && col.G == 255 && col.B == 255 {
-			continue // don't use white
-		}
-		if col.R < 102 || col.G < 102 || col.B < 102 {
-			continue // don't use too-dark colours
-		}
-		return col
-	}
-}
-
-// cellFromPixel converts pixel coordinates to (col, row) grid indices.
-// No bounds clamping is applied.
-func cellFromPixel(px, py, cellSize int) (int, int) {
-	return px / cellSize, py / cellSize
 }
 
 // eightNeighbors appends all in-bounds (col+dx, row+dy) for dx,dy in
