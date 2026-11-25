@@ -386,6 +386,22 @@ Each animal/food pair shares one hue. The visual effect is that scanning the boa
 
 ## Architecture
 
+## Grid encapsulation (2026-11-25)
+
+**Grid as single owner of cell population**
+`board.Grid` is now the fully-encapsulated owner of the cell slice: the backing slice is unexported, all mutations go through Grid methods, and Grid maintains an exact live-cell count exposed via `Live()`.
+
+The maintained count is only drift-proof if no code outside Grid can mutate cells — an exported slice makes single-writer a convention, not a constraint. Unexporting the slice makes it a compiler error. The same change removed the main package's direct coupling to the grid's internal representation, which was the proximate source of the count drifting: main was adjusting the count ad-hoc rather than letting Grid track it.
+
+Two alternatives were rejected:
+
+- **Recompute-on-read (`CountLiveCells` scan):** drift-proof because it derives the count from truth each time, but it leaves the slice exposed so encapsulation is not improved. Cells can still be mutated behind Grid's back; the count just no longer relies on those mutations being announced.
+- **Route writes through Grid but keep the slice exported:** single-writer by convention only. A future stray write bypasses the convention without any compiler feedback. Because the slice is still exported, this is strictly weaker than the scan approach if the convention erodes — the worst of both worlds.
+
+The decision was driven by a user preference that all population changes be channelled through Grid so nothing mutates cell state without Grid being notified. The unexported slice is the mechanical guarantee that this preference holds permanently, not just until the next casual write.
+
+---
+
 **Game struct separation of concerns (Plan A: sub-structs)**
 The `Game` struct had grown to ~60 flat fields in a 1485-line `main.go`, mixing board/model state, animation/state-machine state, device/presentation state, input state, and perf-debug counters. Grouped the fields into named sub-structs on `Game` — `boardState` (grid, cellCount, score), `animState` (phase, timing, action cell, move/victim/target anims), `inputState` (hover + pointer/touch), `viewState` (canvas/frame, scales, screen dims, portrait), and `perfCounters` — plus a distinct typed `gameState` enum for the dispatch switch. Render resources (shaders, glyph font, hud cache) stay on `Game` as they are not state.
 
