@@ -413,7 +413,21 @@ The goal was to shrink the mutable public surface of these packages: an exported
 `main` uses `*board.Organism` pointer identity as the sprite-cache key (a `map[*board.Organism]...`) and also takes palette entry addresses for board seeding (`&palette[i]`). These two uses require that the slice of `Organism` values not be replaced or moved. Exporting a mutable slice (`var OrganismPalette []Organism`) makes copying or reassigning it easy to do accidentally. The fix was to unexport the slice and expose only index-based accessors, preserving the pointer-identity guarantee at the API level while removing the footgun.
 
 **Stop boundary**
-Encapsulation stopped where the remaining exported `board` and `anim` symbols (`DeviceCellCenter`, `GravityMoves`, `HorizontalCollapseMoves`, `ApplyColumnCollapse`, `ScoreForCluster`, `ElapsedFraction`, `Grid.Cols`/`Rows`, `GridFromCells`) each have a legitimate cross-package caller in `main`. Unexporting them would require moving render or state-machine logic into `board`, which is code relocation, not encapsulation. All added accessors are inlinable field returns, so no measurable per-frame cost was incurred; the stop was the API boundary, not a performance constraint.
+Encapsulation stopped where the remaining exported `board` and `anim` symbols (`GravityMoves`, `HorizontalCollapseMoves`, `ApplyColumnCollapse`, `ScoreForCluster`, `ElapsedFraction`, `Grid.Cols`/`Rows`) each have a legitimate cross-package caller in `main`. Unexporting them would require moving render or state-machine logic into `board`, which is code relocation, not encapsulation. All added accessors are inlinable field returns, so no measurable per-frame cost was incurred; the stop was the API boundary, not a performance constraint. `DeviceCellCenter` and `GridFromCells` appeared in this list at the time but were subsequently removed in a follow-up pass (see below).
+
+---
+
+## Concern-separation pass (2026-11-25)
+
+**Encapsulation difficulty as a signal of misplaced logic**
+The encapsulation pass identified two `internal/board` exports that could not be cleanly justified as model concerns: `DeviceCellCenter` (converts a grid coordinate to a device-pixel centre) and `GridFromCells` (constructs a `Grid` from a raw cell slice, used only in tests). The difficulty of keeping these in the board package — `DeviceCellCenter` requires device-pixel knowledge that board should never hold; `GridFromCells` exposed a test-construction seam on the production surface — was treated as a signal that the layering was wrong, not that encapsulation was too expensive.
+
+`DeviceCellCenter` was removed from `internal/board` and reimplemented as unexported `deviceCellCenter` in `main/device.go`. This keeps the board package entirely free of device or render concepts; the function's natural home is beside the other device-geometry helpers. `GridFromCells` was deleted from `internal/board`'s public API; the two `main` test call sites were updated to construct grids via `NewGrid` + `Place`/`NewCell`, which are the same constructors production code uses.
+
+The improvement on both moves is the same: the board package no longer needs to know what it should not know, and the reduction in exported surface is a by-product, not the goal.
+
+**ElapsedFraction left in internal/board**
+`ElapsedFraction` (wall-clock animation progress) was identified as a borderline case: its natural home is arguably `internal/anim`, but it has no cross-package caller in `anim` and moving it would be code relocation without an encapsulation gain. The move was judged a cohesion nit and deferred; it is not blocking further layering work.
 
 ---
 
