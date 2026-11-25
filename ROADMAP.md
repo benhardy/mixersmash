@@ -16,9 +16,6 @@ Current organism glyphs are placeholder emoji. Several are inaccurate stand-ins 
 
 Trigger: user plans this next. Pick up when SVG source art is available. Scope is the sprite-baking pipeline: replace the font-based glyph draw step with an SVG rasterisation step, keeping the gel-shader pass and cache-per-organism structure unchanged.
 
-### Defer the sprite-cache clear to the next settle
-`LayoutF`'s `needRealloc` branch (device.go ~115-134) clears every `Creature.Sprite` (nil) IMMEDIATELY on a scale change. This contradicts the codified lesson "do not invalidate the per-creature sprite cache mid-animation -> rebake storm." It is latent in fullscreen (dims are stable, so it does not fire during steady play), but a viewport change landing mid-animation would rebake all sprites in-flight and spike. Harden by deferring the clear to the next settle (`stateWaiting`/`enterWaiting`) instead of doing it in `LayoutF`. Low-risk; do it next time this area is touched.
-
 ## Architecture
 
 ### Game struct refactor — Plan B / Plan C (deferred from Plan A)
