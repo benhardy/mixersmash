@@ -251,8 +251,8 @@ func makeHoverGame(cols, rows int) *Game {
 	// Assign creatures and set health so cells are alive.
 	for c := 0; c < cols; c++ {
 		for r := 0; r < rows; r++ {
-			idx := (c*rows + r) % len(board.OrganismPalette)
-			grid.Place(c, r, board.NewCell(&board.OrganismPalette[idx], 1.0))
+			idx := (c*rows + r) % board.PaletteSize()
+			grid.Place(c, r, board.NewCell(board.PaletteOrganismAt(idx), 1.0))
 		}
 	}
 	g := newGameState(grid)

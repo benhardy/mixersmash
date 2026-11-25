@@ -181,34 +181,34 @@ func TestGravityMovesAllHoles(t *testing.T) {
 // organismPalette — structure and palette-level invariants
 // ---------------------------------------------------------------------------
 
-// TestOrganismPaletteSize verifies the palette has exactly 23 entries.
-func TestOrganismPaletteSize(t *testing.T) {
-	if len(OrganismPalette) != 23 {
-		t.Errorf("OrganismPalette has %d entries, want exactly 23", len(OrganismPalette))
+// TestorganismPaletteSize verifies the palette has exactly 23 entries.
+func TestorganismPaletteSize(t *testing.T) {
+	if len(organismPalette) != 23 {
+		t.Errorf("organismPalette has %d entries, want exactly 23", len(organismPalette))
 	}
 }
 
-// TestOrganismPaletteGlyphsUniqueAndNonZero verifies that every entry has a
+// TestorganismPaletteGlyphsUniqueAndNonZero verifies that every entry has a
 // distinct, non-zero glyph rune.
-func TestOrganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
+func TestorganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
 	seen := make(map[rune]int)
-	for i, e := range OrganismPalette {
+	for i, e := range organismPalette {
 		if e.glyph == 0 {
-			t.Errorf("OrganismPalette[%d] (%q) has zero Glyph", i, e.name)
+			t.Errorf("organismPalette[%d] (%q) has zero Glyph", i, e.name)
 		}
 		if prev, ok := seen[e.glyph]; ok {
-			t.Errorf("OrganismPalette[%d] and OrganismPalette[%d] share glyph %q",
+			t.Errorf("organismPalette[%d] and organismPalette[%d] share glyph %q",
 				prev, i, e.glyph)
 		}
 		seen[e.glyph] = i
 	}
 }
 
-// TestOrganismPaletteAlphaAll255 verifies that every palette entry has Color.A == 255.
-func TestOrganismPaletteAlphaAll255(t *testing.T) {
-	for i, e := range OrganismPalette {
+// TestorganismPaletteAlphaAll255 verifies that every palette entry has Color.A == 255.
+func TestorganismPaletteAlphaAll255(t *testing.T) {
+	for i, e := range organismPalette {
 		if e.color.A != 255 {
-			t.Errorf("OrganismPalette[%d] (%q) Color.A = %d, want 255", i, e.name, e.color.A)
+			t.Errorf("organismPalette[%d] (%q) Color.A = %d, want 255", i, e.name, e.color.A)
 		}
 	}
 }
@@ -521,17 +521,17 @@ func TestHorizontalCollapseMoves(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestOrganismPalettePairStructure — new palette invariants
+// TestorganismPalettePairStructure — new palette invariants
 // ---------------------------------------------------------------------------
 
-// TestOrganismPalettePairStructure verifies that the palette has the correct
+// TestorganismPalettePairStructure verifies that the palette has the correct
 // structure: exactly one Mixer entry (PairID -1, IsAnimal false, IsMixer true)
 // and 22 non-mixer entries forming 11 animal/food pairs (PairIDs 0..10).
-func TestOrganismPalettePairStructure(t *testing.T) {
+func TestorganismPalettePairStructure(t *testing.T) {
 	// Separate mixer entries from non-mixer entries.
 	var mixers []Organism
 	var nonMixers []Organism
-	for _, e := range OrganismPalette {
+	for _, e := range organismPalette {
 		if e.isMixer {
 			mixers = append(mixers, e)
 		} else {

@@ -51,11 +51,11 @@ func (o *Organism) IsAnimal() bool { return o.isAnimal }
 // IsMixer reports whether this organism is the Mixer entry.
 func (o *Organism) IsMixer() bool { return o.isMixer }
 
-// OrganismPalette is the master list of organisms: 22 Australian animal/food
+// organismPalette is the master list of organisms: 22 Australian animal/food
 // pair entries (PairIDs 0..10) plus one Mixer entry (PairID -1, IsMixer=true).
 // Each animal/food pair shares a PairID and Color; one entry is the animal
 // (IsAnimal=true), the other is the food (IsAnimal=false).
-var OrganismPalette = []Organism{
+var organismPalette = []Organism{
 	{name: "Kangaroo", glyph: '🦘', color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, pairID: 0, isAnimal: true},
 	{name: "Grass", glyph: '🌿', color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, pairID: 0, isAnimal: false},
 	{name: "Koala", glyph: '🐨', color: color.RGBA{R: 255, G: 119, B: 0, A: 255}, pairID: 1, isAnimal: true},
@@ -81,16 +81,29 @@ var OrganismPalette = []Organism{
 	{name: "Mixer", glyph: '\U0001F300', color: color.RGBA{R: 255, G: 255, B: 255, A: 255}, pairID: -1, isAnimal: false, isMixer: true},
 }
 
-// PaletteOrganism returns a pointer to a random entry in OrganismPalette.
+// PaletteOrganism returns a pointer to a random entry in organismPalette.
 // Spawn probability is uniform across all entries.
-// The pointer is stable because OrganismPalette is a package-level slice
+// The pointer is stable because organismPalette is a package-level slice
 // that is never reallocated after init.
 func PaletteOrganism() *Organism {
-	which := rand.Intn(len(OrganismPalette) + mixerBias)
-	if which >= len(OrganismPalette) {
-		which = len(OrganismPalette) - 1 // Mixer entry with bias
+	which := rand.Intn(len(organismPalette) + mixerBias)
+	if which >= len(organismPalette) {
+		which = len(organismPalette) - 1 // Mixer entry with bias
 	}
-	return &OrganismPalette[which]
+	return &organismPalette[which]
+}
+
+// PaletteOrganismAt returns a pointer to the palette entry at index idx.
+// The pointer is stable — organismPalette is never reallocated after init —
+// so it is safe to use as a sprite-cache key.
+// Panics if idx is out of range.
+func PaletteOrganismAt(idx int) *Organism {
+	return &organismPalette[idx]
+}
+
+// PaletteSize returns the number of entries in the organism palette.
+func PaletteSize() int {
+	return len(organismPalette)
 }
 
 // SRGBToOKLab converts a colour.RGBA to OKLab [L, a, b].
