@@ -141,6 +141,11 @@ type animState struct {
 	targetAnimPeakR    float32
 	targetAnimEndR     float32
 	targetAnimOrganism *board.Organism
+
+	// pendingSpriteCacheReset is set when a device realloc (LayoutF) fires during
+	// an animation. The sprite cache is not cleared mid-animation to avoid a
+	// re-bake storm; instead the clear is deferred to the next enterWaiting call.
+	pendingSpriteCacheReset bool
 }
 
 // viewState holds the device/presentation geometry and offscreen render targets.
@@ -612,6 +617,12 @@ func (g *Game) repaintGrid() {
 // stateWaiting. All settle-to-waiting paths must go through this helper so
 // canvas drift is corrected on every settle.
 func (g *Game) enterWaiting() {
+	// If a device realloc fired during animation, the sprite cache was not cleared
+	// mid-flight. Consume the pending flag now so repaintGrid bakes at the new scale.
+	if g.anim.pendingSpriteCacheReset {
+		clear(g.spriteCache)
+		g.anim.pendingSpriteCacheReset = false
+	}
 	g.repaintGrid()
 	g.anim.currentState = stateWaiting
 	// Force a GC collection while the screen is static between moves, so the

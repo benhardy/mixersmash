@@ -121,13 +121,21 @@ func (g *Game) LayoutF(outsideWidth, outsideHeight float64) (float64, float64) {
 		g.view.spriteRefSize = spriteRefSizeFor(g.view.deviceCellSize)
 		g.view.frame = ebiten.NewImage(fw, fh)
 		g.view.canvas = ebiten.NewImage(boardW, fh)
-		// Invalidate per-organism sprite cache — sprites were baked at the old size.
-		clear(g.spriteCache)
-		// Repaint all live cells into the new device-sized canvas.
-		for c := 0; c < g.board.grid.Cols; c++ {
-			for r := 0; r < g.board.grid.Rows; r++ {
-				g.drawCell(c, r, 1.0)
+		// spriteRefSize is updated above before this branch, so deferred repaints
+		// bake at the new scale.
+		if g.anim.currentState == stateWaiting {
+			// Idle path: invalidate cache and repaint immediately (existing behaviour).
+			clear(g.spriteCache)
+			for c := 0; c < g.board.grid.Cols; c++ {
+				for r := 0; r < g.board.grid.Rows; r++ {
+					g.drawCell(c, r, 1.0)
+				}
 			}
+		} else {
+			// Animating path: defer cache clear to the next enterWaiting to avoid a
+			// mid-animation re-bake storm. The in-flight animation finishes and
+			// enterWaiting will clear the cache and call repaintGrid at that point.
+			g.anim.pendingSpriteCacheReset = true
 		}
 	}
 	return float64(sw), float64(sh)
