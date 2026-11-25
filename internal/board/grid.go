@@ -213,21 +213,6 @@ func NewGrid(cols, rows int) *Grid {
 	}
 }
 
-// GridFromCells constructs a Grid backed by the provided cells slice (not
-// copied). The live count is computed from the supplied cells. Intended for
-// tests that build grids from hand-crafted cell slices.
-func GridFromCells(cols, rows int, cells [][]Cell) *Grid {
-	live := 0
-	for c := 0; c < cols; c++ {
-		for r := 0; r < rows; r++ {
-			if cells[c][r].health > 0 {
-				live++
-			}
-		}
-	}
-	return &Grid{Cols: cols, Rows: rows, cells: cells, live: live}
-}
-
 // Live returns the number of cells whose Health is greater than zero.
 func (g *Grid) Live() int {
 	return g.live

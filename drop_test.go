@@ -24,16 +24,13 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	const cols = 1
 	const rows = 4
 
-	cells := make([][]board.Cell, cols)
-	cells[0] = []board.Cell{
-		board.NewCell(nil, 0),   // row 0: vacated slot
-		board.NewCell(nil, 1.0), // row 1: compacted from row 0
-		board.NewCell(nil, 1.0), // row 2: compacted from row 1
-		board.NewCell(nil, 1.0), // row 3: unchanged
-	}
+	// Build the post-drop grid: rows 1–3 alive (NewGrid starts all alive),
+	// row 0 vacated. Cell fields are not under test; only coordinates matter.
+	grid := board.NewGrid(cols, rows)
+	grid.Place(0, 0, board.NewCell(nil, 0)) // row 0: vacated slot
 
 	g := &Game{
-		board: boardState{grid: board.GridFromCells(cols, rows, cells)},
+		board: boardState{grid: grid},
 	}
 
 	holeRows := []int{2}

@@ -109,11 +109,13 @@ func TestNeedsRedraw(t *testing.T) {
 // --- buildTextLines tests ---
 
 func makeTestGrid(cols, rows int) *board.Grid {
-	cells := make([][]board.Cell, cols)
+	g := board.NewGrid(cols, rows)
 	for c := 0; c < cols; c++ {
-		cells[c] = make([]board.Cell, rows)
+		for r := 0; r < rows; r++ {
+			g.Place(c, r, board.NewCell(nil, 0))
+		}
 	}
-	return board.GridFromCells(cols, rows, cells)
+	return g
 }
 
 func TestBuildTextLines(t *testing.T) {
