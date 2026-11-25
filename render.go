@@ -390,23 +390,23 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		for _, mv := range g.anim.moveAnims {
 			cx, cy := anim.MoveAnimPos(mv, kindOf(g.anim.currentState), t)
 			var r float32
-			if g.anim.currentState == stateShuffling && mv.Rotations != 0 {
+			if g.anim.currentState == stateShuffling && mv.Rotations() != 0 {
 				// Clicked-mixer entry only: interpolate radius from old health to new health
 				// with a gentle bounce envelope so the shrink is visually sprung.
 				// Identified by Rotations!=0 (set to 1 only on the prepended mixer entry in
 				// buildShuffleAnims); neighbour Mixers have Rotations==0 and fall through
 				// to the standard radius path below. Works for NewHealth==0 (final click).
-				// mv.Cell.Health() = pre-click health; mv.NewHealth = post-click health.
+				// mv.Cell().Health() = pre-click health; mv.NewHealth() = post-click health.
 				et := anim.EaseInOutQuad(t)
-				base := anim.Lerp(mv.Cell.Health(), mv.NewHealth, et)
+				base := anim.Lerp(mv.Cell().Health(), mv.NewHealth(), et)
 				// Bounce: gentle spring envelope peaks at t=0.5, amplitude 15%.
 				bounce := base * (1 + 0.15*float32(math.Sin(float64(t)*math.Pi)))
 				r = maxR * bounce
 			} else {
-				r = maxR * mv.Cell.Health()
+				r = maxR * mv.Cell().Health()
 			}
 			if r > 0 {
-				g.drawCompositeSprite(dst, xOff+cx, cy, r, mv.Cell.Organism())
+				g.drawCompositeSprite(dst, xOff+cx, cy, r, mv.Cell().Organism())
 			}
 		}
 	}
@@ -421,9 +421,9 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 			if dcs2 <= 0 {
 				dcs2 = cellSize
 			}
-			radius := float32(dcs2/2-2) * v.Cell.Health() * (1 - t)
+			radius := float32(dcs2/2-2) * v.Cell().Health() * (1 - t)
 			if radius > 0 {
-				g.drawCompositeSprite(dst, xOff+cx, cy, radius, v.Cell.Organism())
+				g.drawCompositeSprite(dst, xOff+cx, cy, radius, v.Cell().Organism())
 			}
 		}
 	}

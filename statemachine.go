@@ -107,7 +107,7 @@ func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs i
 		cell := g.board.grid.At(col, m[1])
 		fx, fy := board.DeviceCellCenter(col, m[0], dcs)
 		tx, ty := board.DeviceCellCenter(col, m[1], dcs)
-		g.anim.moveAnims = append(g.anim.moveAnims, board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+		g.anim.moveAnims = append(g.anim.moveAnims, board.NewMoveAnim(fx, fy, tx, ty, cell))
 	}
 }
 
@@ -206,7 +206,7 @@ func (g *Game) buildCollapseAnims() bool {
 			}
 			fx, fy := board.DeviceCellCenter(oldCol, r, dcs)
 			tx, ty := board.DeviceCellCenter(newCol, r, dcs)
-			g.anim.moveAnims = append(g.anim.moveAnims, board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+			g.anim.moveAnims = append(g.anim.moveAnims, board.NewMoveAnim(fx, fy, tx, ty, cell))
 		}
 	}
 
@@ -254,8 +254,8 @@ func (g *Game) updateColumnCollapsing() error {
 	if elapsed >= 1.0 {
 		dcs := g.view.deviceCellSize
 		for _, mv := range g.anim.moveAnims {
-			col := int(mv.ToX) / dcs
-			row := int(mv.ToY) / dcs
+			col := int(mv.ToX()) / dcs
+			row := int(mv.ToY()) / dcs
 			if col >= 0 && col < g.board.grid.Cols && row >= 0 && row < g.board.grid.Rows {
 				g.drawCell(col, row, 1.0)
 			}
@@ -289,18 +289,12 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 			aliveNeighbors = append(aliveNeighbors, n)
 		}
 	}
-	mixerAnim := board.MoveAnim{
-		FromX:     float32(col*dcs + dcs/2),
-		FromY:     float32(row*dcs + dcs/2),
-		ToX:       float32(col*dcs + dcs/2),
-		ToY:       float32(row*dcs + dcs/2),
-		CtrlX:     float32(col*dcs + dcs/2),
-		CtrlY:     float32(row*dcs + dcs/2),
-		Cell:      board.NewCell(g.board.grid.At(col, row).Organism(), oldMixerHealth),
-		NewHealth: newMixerHealth,
-		PathType:  0, // stationary path
-		Rotations: 1, // reserved for future spin; currently unused
-	}
+	mixerAnim := board.NewMixerAnim(
+		float32(col*dcs+dcs/2),
+		float32(row*dcs+dcs/2),
+		board.NewCell(g.board.grid.At(col, row).Organism(), oldMixerHealth),
+		newMixerHealth,
+	)
 	anims := make([]board.MoveAnim, len(aliveNeighbors)+1) // +1 for the mixer itself
 	anims[0] = mixerAnim
 	if len(aliveNeighbors) > 0 {
@@ -341,7 +335,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 				ctrlX = fx
 				ctrlY = fy
 			}
-			anims[i+1] = board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
+			anims[i+1] = board.NewShuffleAnim(fx, fy, tx, ty, ctrlX, ctrlY, src.cell)
 		}
 
 		// Clear source positions on canvas (they will be drawn as moving overlays).
@@ -468,37 +462,14 @@ func (g *Game) commitCellAt(col, row int) error {
 		var v board.MoveAnim
 		if c == col && r == row {
 			// Seed cell: shrinks in place (stationary).
-			v = board.MoveAnim{
-				Col:       c,
-				Row:       r,
-				Cell:      board.NewCell(organism, oldHealth),
-				FromX:     fromX,
-				FromY:     fromY,
-				ToX:       fromX,
-				ToY:       fromY,
-				PathType:  0,
-				Rotations: 0,
-			}
+			v = board.NewVictimSeedAnim(c, r, board.NewCell(organism, oldHealth), fromX, fromY)
 		} else {
 			// Non-seed: animate toward the seed using spiral/curved path.
 			pt, cx, cy, st := anim.VictimPathParams(fromX, fromY, seedCenterX, seedCenterY)
 			// Clear victim's canvas position (it is now an overlay animation).
 			x0, y0 := c*dcs, r*dcs
 			g.view.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
-			v = board.MoveAnim{
-				Col:         c,
-				Row:         r,
-				Cell:        board.NewCell(organism, oldHealth),
-				FromX:       fromX,
-				FromY:       fromY,
-				ToX:         seedCenterX,
-				ToY:         seedCenterY,
-				PathType:    pt,
-				CtrlX:       cx,
-				CtrlY:       cy,
-				SpiralTurns: st,
-				Rotations:   0,
-			}
+			v = board.NewVictimAnim(c, r, board.NewCell(organism, oldHealth), fromX, fromY, seedCenterX, seedCenterY, pt, cx, cy, st)
 		}
 		g.anim.victimAnims[g.anim.victimCount] = v
 		g.anim.victimCount++
@@ -523,7 +494,7 @@ func (g *Game) updateVictimMoving() error {
 	colSeen[g.anim.actionCol] = true
 	for i := 0; i < g.anim.victimCount; i++ {
 		v := g.anim.victimAnims[i]
-		colSeen[v.Col] = true
+		colSeen[v.Col()] = true
 	}
 	var affectedColsArr [gridCols]int
 	affectedColsCount := 0
@@ -554,8 +525,8 @@ func (g *Game) updateDropping() error {
 	}
 	dcs := g.view.deviceCellSize
 	for _, mv := range g.anim.moveAnims {
-		col := int(mv.ToX) / dcs
-		row := int(mv.ToY) / dcs
+		col := int(mv.ToX()) / dcs
+		row := int(mv.ToY()) / dcs
 		if col >= 0 && col < g.board.grid.Cols && row >= 0 && row < g.board.grid.Rows {
 			g.drawCell(col, row, 1.0)
 		}

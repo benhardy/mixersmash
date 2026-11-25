@@ -51,30 +51,138 @@ func (c Cell) Color() color.RGBA {
 }
 
 // MoveAnim describes the animated movement of a cell from one pixel position to
-// another during shuffle, drop, or victim-move phases. FromX/FromY and ToX/ToY
-// are pixel centres. CtrlX/CtrlY is the quadratic Bézier control point used
+// another during shuffle, drop, or victim-move phases. fromX/fromY and toX/toY
+// are pixel centres. ctrlX/ctrlY is the quadratic Bézier control point used
 // during shuffle and arc-path victim moves; zero value falls back to straight-line
 // interpolation (used for drops).
 //
-// Col, Row, PathType, and SpiralTurns are used only by the victim-move phase.
-// PathType: 0 = straight line, 1 = quadratic Bézier arc, 2 = inward spiral.
-// SpiralTurns: signed — positive = CCW, negative = CW.
+// col, row, pathType, and spiralTurns are used only by the victim-move phase.
+// pathType: 0 = straight line, 1 = quadratic Bézier arc, 2 = inward spiral.
+// spiralTurns: signed — positive = CCW, negative = CW.
 //
-// NewHealth is used only for the Mixer's stationary shuffle entry: it holds the
-// post-click health so the bounce animation can interpolate from Cell.Health
-// (pre-click) to NewHealth (post-click). Zero for all other entries.
+// newHealth is used only for the Mixer's stationary shuffle entry: it holds the
+// post-click health so the bounce animation can interpolate from cell.Health
+// (pre-click) to newHealth (post-click). Zero for all other entries.
+//
+// rotations is reserved for a planned feature (spin animation). The mixer
+// constructor sets it to 1; render uses it as a non-zero sentinel.
 type MoveAnim struct {
-	FromX, FromY float32
-	ToX, ToY     float32
-	CtrlX, CtrlY float32 // quadratic Bézier control point; zero = straight line
-	Cell         Cell
-	Col          int     // victim-move phase: original grid column
-	Row          int     // victim-move phase: original grid row
-	PathType     int     // victim-move phase: 0=straight, 1=arc, 2=spiral
-	SpiralTurns  float32 // victim-move phase: signed turn count
-	Rotations    float32 // victim-move phase: signed rotation count
-	NewHealth    float32 // Mixer shuffle entry only: post-click health (zero for neighbours)
+	fromX, fromY float32
+	toX, toY     float32
+	ctrlX, ctrlY float32 // quadratic Bézier control point; zero = straight line
+	cell         Cell
+	col          int     // victim-move phase: original grid column
+	row          int     // victim-move phase: original grid row
+	pathType     int     // victim-move phase: 0=straight, 1=arc, 2=spiral
+	spiralTurns  float32 // victim-move phase: signed turn count
+	rotations    float32 // reserved: signed rotation count (mixer sets to 1)
+	newHealth    float32 // Mixer shuffle entry only: post-click health (zero for neighbours)
 }
+
+// NewMoveAnim constructs a plain move animation (used for drops and horizontal
+// column-collapse slides). No Bézier control, no victim fields.
+func NewMoveAnim(fromX, fromY, toX, toY float32, cell Cell) MoveAnim {
+	return MoveAnim{fromX: fromX, fromY: fromY, toX: toX, toY: toY, cell: cell}
+}
+
+// NewShuffleAnim constructs a shuffle-neighbour animation with a quadratic
+// Bézier arc from (fromX,fromY) to (toX,toY) through (ctrlX,ctrlY).
+func NewShuffleAnim(fromX, fromY, toX, toY, ctrlX, ctrlY float32, cell Cell) MoveAnim {
+	return MoveAnim{
+		fromX: fromX, fromY: fromY,
+		toX: toX, toY: toY,
+		ctrlX: ctrlX, ctrlY: ctrlY,
+		cell: cell,
+	}
+}
+
+// NewMixerAnim constructs the stationary mixer-click animation entry. The
+// position is a fixed point (fromX,fromY) == (toX,toY) == (ctrlX,ctrlY).
+// rotations is set to 1 as a non-zero sentinel used by render to identify this
+// entry and apply the bounce-radius interpolation. newHealth is the post-click
+// health for the radius interpolation.
+func NewMixerAnim(fromX, fromY float32, cell Cell, newHealth float32) MoveAnim {
+	return MoveAnim{
+		fromX: fromX, fromY: fromY,
+		toX: fromX, toY: fromY,
+		ctrlX: fromX, ctrlY: fromY,
+		cell:      cell,
+		newHealth: newHealth,
+		pathType:  0,
+		rotations: 1,
+	}
+}
+
+// NewVictimSeedAnim constructs the stationary victim-seed animation entry
+// (the clicked cell, which shrinks in place).
+func NewVictimSeedAnim(col, row int, cell Cell, fromX, fromY float32) MoveAnim {
+	return MoveAnim{
+		col: col, row: row,
+		cell:  cell,
+		fromX: fromX, fromY: fromY,
+		toX: fromX, toY: fromY,
+		pathType:  0,
+		rotations: 0,
+	}
+}
+
+// NewVictimAnim constructs a non-seed victim animation entry that travels
+// from (fromX,fromY) toward the seed centre using the given path parameters.
+func NewVictimAnim(col, row int, cell Cell, fromX, fromY, toX, toY float32, pathType int, ctrlX, ctrlY, spiralTurns float32) MoveAnim {
+	return MoveAnim{
+		col: col, row: row,
+		cell:  cell,
+		fromX: fromX, fromY: fromY,
+		toX: toX, toY: toY,
+		pathType:    pathType,
+		ctrlX:       ctrlX,
+		ctrlY:       ctrlY,
+		spiralTurns: spiralTurns,
+		rotations:   0,
+	}
+}
+
+// FromX returns the animation start pixel X coordinate.
+func (m MoveAnim) FromX() float32 { return m.fromX }
+
+// FromY returns the animation start pixel Y coordinate.
+func (m MoveAnim) FromY() float32 { return m.fromY }
+
+// ToX returns the animation end pixel X coordinate.
+func (m MoveAnim) ToX() float32 { return m.toX }
+
+// ToY returns the animation end pixel Y coordinate.
+func (m MoveAnim) ToY() float32 { return m.toY }
+
+// CtrlX returns the quadratic Bézier control point X coordinate.
+func (m MoveAnim) CtrlX() float32 { return m.ctrlX }
+
+// CtrlY returns the quadratic Bézier control point Y coordinate.
+func (m MoveAnim) CtrlY() float32 { return m.ctrlY }
+
+// Cell returns the cell being animated.
+func (m MoveAnim) Cell() Cell { return m.cell }
+
+// Col returns the original grid column (victim-move phase only).
+func (m MoveAnim) Col() int { return m.col }
+
+// Row returns the original grid row (victim-move phase only).
+func (m MoveAnim) Row() int { return m.row }
+
+// PathType returns the path type for victim animations
+// (0=straight, 1=Bézier arc, 2=inward spiral).
+func (m MoveAnim) PathType() int { return m.pathType }
+
+// SpiralTurns returns the signed spiral turn count (victim spiral path only).
+func (m MoveAnim) SpiralTurns() float32 { return m.spiralTurns }
+
+// Rotations returns the signed rotation count. Non-zero identifies the mixer
+// entry in the shuffle animation; reserved for a future spin feature.
+func (m MoveAnim) Rotations() float32 { return m.rotations }
+
+// NewHealth returns the post-click health for the mixer bounce animation.
+// Zero for all non-mixer entries.
+func (m MoveAnim) NewHealth() float32 { return m.newHealth }
 
 // Grid holds the grid dimensions and per-cell colours.
 type Grid struct {

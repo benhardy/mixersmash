@@ -67,13 +67,13 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			a := g.anim.moveAnims[i]
-			if a.FromX != tc.fromX || a.FromY != tc.fromY {
+			if a.FromX() != tc.fromX || a.FromY() != tc.fromY {
 				t.Errorf("anim[%d] From = (%.1f,%.1f); want (%.1f,%.1f)",
-					i, a.FromX, a.FromY, tc.fromX, tc.fromY)
+					i, a.FromX(), a.FromY(), tc.fromX, tc.fromY)
 			}
-			if a.ToX != tc.toX || a.ToY != tc.toY {
+			if a.ToX() != tc.toX || a.ToY() != tc.toY {
 				t.Errorf("anim[%d] To = (%.1f,%.1f); want (%.1f,%.1f)",
-					i, a.ToX, a.ToY, tc.toX, tc.toY)
+					i, a.ToX(), a.ToY(), tc.toX, tc.toY)
 			}
 		})
 	}
