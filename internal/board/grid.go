@@ -72,9 +72,11 @@ type Grid struct {
 	Cols  int
 	Rows  int
 	Cells [][]Cell
+	live  int // count of cells whose Health > 0
 }
 
 // NewGrid initialises a Grid with random opaque colours in every cell.
+// Every cell starts with Health=1.0, so live is seeded as cols*rows.
 func NewGrid(cols, rows int) *Grid {
 	cells := make([][]Cell, cols)
 	for c := 0; c < cols; c++ {
@@ -90,7 +92,96 @@ func NewGrid(cols, rows int) *Grid {
 		Cols:  cols,
 		Rows:  rows,
 		Cells: cells,
+		live:  cols * rows,
 	}
+}
+
+// Live returns the number of cells whose Health is greater than zero.
+func (g *Grid) Live() int {
+	return g.live
+}
+
+// At returns a copy of the cell at (col, row).
+func (g *Grid) At(col, row int) Cell {
+	return g.Cells[col][row]
+}
+
+// Column returns a fresh copy slice of all cells in the given column.
+func (g *Grid) Column(col int) []Cell {
+	src := g.Cells[col]
+	dst := make([]Cell, len(src))
+	copy(dst, src)
+	return dst
+}
+
+// Snapshot returns a full deep copy of all grid cells as a [cols][rows] slice.
+func (g *Grid) Snapshot() [][]Cell {
+	result := make([][]Cell, g.Cols)
+	for c := 0; c < g.Cols; c++ {
+		col := make([]Cell, g.Rows)
+		copy(col, g.Cells[c])
+		result[c] = col
+	}
+	return result
+}
+
+// Place assigns c to the cell at (col, row) and updates the live count by the
+// liveness delta (liveness defined as Health > 0).
+func (g *Grid) Place(col, row int, c Cell) {
+	old := g.Cells[col][row]
+	g.Cells[col][row] = c
+	wasAlive := 0
+	if old.Health > 0 {
+		wasAlive = 1
+	}
+	isAlive := 0
+	if c.Health > 0 {
+		isAlive = 1
+	}
+	g.live += isAlive - wasAlive
+}
+
+// BumpHealthAt applies BumpHealth to the cell at (col, row) and returns the
+// old health. g.live is updated by the liveness delta.
+func (g *Grid) BumpHealthAt(col, row int, delta float32) float32 {
+	wasAlive := g.Cells[col][row].Health > 0
+	oldHealth := g.Cells[col][row].BumpHealth(delta)
+	isAlive := g.Cells[col][row].Health > 0
+	if wasAlive && !isAlive {
+		g.live--
+	} else if !wasAlive && isAlive {
+		g.live++
+	}
+	return oldHealth
+}
+
+// SetHealthZero sets the Health of the cell at (col, row) to zero.
+// g.live is decremented only if the cell was previously alive (Health > 0).
+func (g *Grid) SetHealthZero(col, row int) {
+	if g.Cells[col][row].Health > 0 {
+		g.Cells[col][row].Health = 0
+		g.live--
+	}
+}
+
+// ReplaceColumn copies src into column col cell-by-cell, accumulating the
+// total liveness delta for the column and applying it once to g.live.
+func (g *Grid) ReplaceColumn(col int, src []Cell) {
+	delta := 0
+	for r, c := range src {
+		old := g.Cells[col][r]
+		g.Cells[col][r] = c
+		wasAlive := 0
+		if old.Health > 0 {
+			wasAlive = 1
+		}
+		isAlive := 0
+		if c.Health > 0 {
+			isAlive = 1
+		}
+		delta += isAlive - wasAlive
+	}
+	g.live += delta
 }
 
 // eightNeighbors appends all in-bounds (col+dx, row+dy) for dx,dy in
@@ -298,6 +389,20 @@ func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
 // Score is super-linear: n*n.
 func ScoreForCluster(n int) int {
 	return n * n
+}
+
+// CountLiveCells returns the number of cells in the grid whose Health is
+// greater than zero. It iterates every column and row without allocating.
+func (g *Grid) CountLiveCells() int {
+	n := 0
+	for c := 0; c < g.Cols; c++ {
+		for r := 0; r < g.Rows; r++ {
+			if g.Cells[c][r].Health > 0 {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // ElapsedFraction returns how far through a phase we are as a 0→1 float32,
