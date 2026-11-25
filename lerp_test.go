@@ -32,7 +32,7 @@ func TestLerp(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := lerp(tc.a, tc.b, tc.tVal)
+			got := Lerp(tc.a, tc.b, tc.tVal)
 			if !approxEq(got, tc.want) {
 				t.Errorf("lerp(%v, %v, %v) = %v, want %v", tc.a, tc.b, tc.tVal, got, tc.want)
 			}
@@ -55,7 +55,7 @@ func TestLerp2(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gx, gy := lerp2(tc.ax, tc.ay, tc.bx, tc.by, tc.tVal)
+			gx, gy := Lerp2(tc.ax, tc.ay, tc.bx, tc.by, tc.tVal)
 			if !approxEq(gx, tc.wantX) || !approxEq(gy, tc.wantY) {
 				t.Errorf("lerp2(%v,%v,%v,%v,%v) = (%v,%v), want (%v,%v)",
 					tc.ax, tc.ay, tc.bx, tc.by, tc.tVal, gx, gy, tc.wantX, tc.wantY)
@@ -83,7 +83,7 @@ func TestQuadBezier(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := quadBezier(p0, c, p1, tc.tVal)
+			got := QuadBezier(p0, c, p1, tc.tVal)
 			if !approxEq(got, tc.want) {
 				t.Errorf("quadBezier(%v,%v,%v,%v) = %v, want %v", p0, c, p1, tc.tVal, got, tc.want)
 			}
@@ -109,7 +109,7 @@ func TestQuadBezier2(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gx, gy := quadBezier2(p0x, p0y, cX, cY, p1x, p1y, tc.tVal)
+			gx, gy := QuadBezier2(p0x, p0y, cX, cY, p1x, p1y, tc.tVal)
 			if !approxEq(gx, tc.wantX) || !approxEq(gy, tc.wantY) {
 				t.Errorf("quadBezier2 at t=%v = (%v,%v), want (%v,%v)",
 					tc.tVal, gx, gy, tc.wantX, tc.wantY)
@@ -133,7 +133,7 @@ func TestEaseInQuad(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := easeInQuad(tc.tVal)
+			got := EaseInQuad(tc.tVal)
 			if !approxEq(got, tc.want) {
 				t.Errorf("easeInQuad(%v) = %v, want %v", tc.tVal, got, tc.want)
 			}
@@ -156,7 +156,7 @@ func TestEaseOutQuad(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := easeOutQuad(tc.tVal)
+			got := EaseOutQuad(tc.tVal)
 			if !approxEq(got, tc.want) {
 				t.Errorf("easeOutQuad(%v) = %v, want %v", tc.tVal, got, tc.want)
 			}
@@ -181,7 +181,7 @@ func TestEaseInOutQuad(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := easeInOutQuad(tc.tVal)
+			got := EaseInOutQuad(tc.tVal)
 			if !approxEq(got, tc.want) {
 				t.Errorf("easeInOutQuad(%v) = %v, want %v", tc.tVal, got, tc.want)
 			}
@@ -193,8 +193,8 @@ func TestEaseInOutQuad(t *testing.T) {
 		steps := 20
 		for i := 0; i <= steps; i++ {
 			tVal := float32(i) / float32(steps)
-			a := easeInOutQuad(tVal)
-			b := easeInOutQuad(1 - tVal)
+			a := EaseInOutQuad(tVal)
+			b := EaseInOutQuad(1 - tVal)
 			sum := a + b
 			if !approxEq(sum, 1) {
 				t.Errorf("symmetry failure at t=%v: easeInOutQuad(t)+easeInOutQuad(1-t) = %v, want 1",

@@ -874,7 +874,7 @@ func (g *Game) commitCellAt(col, row int) error {
 			}
 		} else {
 			// Non-seed: animate toward the seed using spiral/curved path.
-			pt, cx, cy, st := victimPathParams(fromX, fromY, seedCenterX, seedCenterY)
+			pt, cx, cy, st := VictimPathParams(fromX, fromY, seedCenterX, seedCenterY)
 			// Clear victim's canvas position (it is now an overlay animation).
 			x0, y0 := c*dcs, r*dcs
 			g.view.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
@@ -1304,12 +1304,12 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	var r float32
 	if t < 0.5 {
 		lt := t * 2              // 0→1 in phase 1
-		eased := easeOutQuad(lt) // ease-out: fast start, slow at peak
-		r = lerp(g.anim.targetAnimStartR, g.anim.targetAnimPeakR, eased)
+		eased := EaseOutQuad(lt) // ease-out: fast start, slow at peak
+		r = Lerp(g.anim.targetAnimStartR, g.anim.targetAnimPeakR, eased)
 	} else {
 		lt := (t - 0.5) * 2     // 0→1 in phase 2
-		eased := easeInQuad(lt) // ease-in: slow at peak, fast at end
-		r = lerp(g.anim.targetAnimPeakR, g.anim.targetAnimEndR, eased)
+		eased := EaseInQuad(lt) // ease-in: slow at peak, fast at end
+		r = Lerp(g.anim.targetAnimPeakR, g.anim.targetAnimEndR, eased)
 	}
 	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
@@ -1326,7 +1326,7 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	xOff := float32(xOffset)
 	if len(g.anim.moveAnims) > 0 {
-		dur := moveAnimDuration(g.anim.currentState)
+		dur := MoveAnimDuration(g.anim.currentState)
 		t := board.ElapsedFraction(g.anim.animStart, time.Now(), dur)
 		t = min(t, 1.0)
 		dcs := g.view.deviceCellSize
@@ -1335,7 +1335,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		}
 		maxR := float32(dcs/2 - 2)
 		for _, anim := range g.anim.moveAnims {
-			cx, cy := moveAnimPos(anim, g.anim.currentState, t)
+			cx, cy := MoveAnimPos(anim, g.anim.currentState, t)
 			var r float32
 			if g.anim.currentState == stateShuffling && anim.Rotations != 0 {
 				// Clicked-mixer entry only: interpolate radius from old health to new health
@@ -1344,8 +1344,8 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 				// buildShuffleAnims); neighbour Mixers have Rotations==0 and fall through
 				// to the standard radius path below. Works for NewHealth==0 (final click).
 				// anim.Cell.Health = pre-click health; anim.NewHealth = post-click health.
-				et := easeInOutQuad(t)
-				base := lerp(anim.Cell.Health, anim.NewHealth, et)
+				et := EaseInOutQuad(t)
+				base := Lerp(anim.Cell.Health, anim.NewHealth, et)
 				// Bounce: gentle spring envelope peaks at t=0.5, amplitude 15%.
 				bounce := base * (1 + 0.15*float32(math.Sin(float64(t)*math.Pi)))
 				r = maxR * bounce
@@ -1363,7 +1363,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		t = min(t, 1.0)
 		for i := 0; i < g.anim.victimCount; i++ {
 			v := g.anim.victimAnims[i]
-			cx, cy := victimAnimPos(v, t)
+			cx, cy := VictimAnimPos(v, t)
 			dcs2 := g.view.deviceCellSize
 			if dcs2 <= 0 {
 				dcs2 = cellSize
