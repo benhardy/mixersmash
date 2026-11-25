@@ -34,11 +34,12 @@ Authoritative targets are in `Makefile`. Summary:
 
 ## Architecture (file map)
 
-All source is in the flat `main` package at the repo root.
+The repo root holds the flat `main` package. `internal/board` holds the pure, ebiten-free model layer extracted under Plan B step B3.
 
 - `main.go` — game loop entry point; Ebitengine `Update` state machine with per-state handlers; `Draw` + all rendering; input handling (mouse + touch); HUD; the `present` step that blits the offscreen frame to the real screen via `presentGeoM`
-- `grid.go` — pure model (no ebiten import): `Cell`, `Grid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `elapsedFraction` (wall-clock animation progress). Earmarked to move to `internal/board` (Plan B; see ROADMAP)
-- `creatures.go` — `Organism` struct (name/glyph/colour/PairID/IsAnimal/IsMixer) and `organismPalette` (11 animal/food pairs + a Mixer); OKLab colour math (`sRGBToOKLab`, `glyphTint`); `paletteOrganism`; glyph-font loader and embedded title-image asset. Baked sprites are NOT stored here — they live in `Game.spriteCache` in the render layer
+- `internal/board/` — ebiten-free model layer (`package board`): `Cell`, `Grid`, `NewGrid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `ElapsedFraction` (wall-clock animation progress); `Organism`, `OrganismPalette`, `GlyphTint`, OKLab colour math. `main` depends on this package; nothing here imports ebiten.
+- `grid.go` — retained in `main` for call-site qualification bridge; pure model types now live in `internal/board`
+- `creatures.go` — glyph-font loader and embedded title-image asset; baked sprites are NOT stored here — they live in `Game.spriteCache` in the render layer. Pure `Organism` data and palette helpers have moved to `internal/board`
 - `device.go` — `LayoutF`; `frameScaleFor`; `deviceCellSize` / `spriteRef` sizing; sprite-cache clear on realloc (currently immediate — see gotchas)
 - `mapping.go` — `screenToFrame` / `screenToBoard`; inverts `presentGeoM` for input hit-testing
 - `lerp.go` — easing and bezier helpers
@@ -89,7 +90,7 @@ Working: desktop and mobile play; mobile touch (hold = hover, release = commit);
 
 A temporary perf readout exists behind `const showPerfDebug` in `main.go` (currently `false`).
 
-Architecture refactor in progress: Plan A (grouping `Game`'s fields into sub-structs) is complete; Plan B (extract `internal/board` / `internal/anim`) has its prerequisites done (commits for B1/B2) with the remaining B3/B4 steps staged in detail in `ROADMAP.md` → Architecture.
+Architecture refactor in progress: Plan A (grouping `Game`'s fields into sub-structs) is complete. Plan B step B3 is complete — `internal/board` now holds the ebiten-free model layer and `main` depends on it (commits `56ffb71`, `a4ce4b4`; 139 subtests pass). B4 (extract `internal/anim`) is next; its `gameState`-placement open question is documented in `ROADMAP.md` → Architecture.
 
 ---
 
