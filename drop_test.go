@@ -24,14 +24,12 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	const cols = 1
 	const rows = 4
 
-	cr := func() *board.Organism { return &board.Organism{} }
-
 	cells := make([][]board.Cell, cols)
 	cells[0] = []board.Cell{
-		board.NewCell(nil, 0),    // row 0: vacated slot
-		board.NewCell(cr(), 1.0), // row 1: compacted from row 0
-		board.NewCell(cr(), 1.0), // row 2: compacted from row 1
-		board.NewCell(cr(), 1.0), // row 3: unchanged
+		board.NewCell(nil, 0),   // row 0: vacated slot
+		board.NewCell(nil, 1.0), // row 1: compacted from row 0
+		board.NewCell(nil, 1.0), // row 2: compacted from row 1
+		board.NewCell(nil, 1.0), // row 3: unchanged
 	}
 
 	g := &Game{

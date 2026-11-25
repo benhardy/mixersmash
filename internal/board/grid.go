@@ -47,7 +47,7 @@ func (c Cell) Color() color.RGBA {
 	if c.organism == nil {
 		return color.RGBA{}
 	}
-	return c.organism.Color
+	return c.organism.color
 }
 
 // MoveAnim describes the animated movement of a cell from one pixel position to
@@ -354,7 +354,7 @@ func ApplyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 // matching neighbours returns a single-element slice.
 func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 	seed := cells[col][row].organism
-	if seed == nil || !seed.IsAnimal {
+	if seed == nil || !seed.isAnimal {
 		return nil
 	}
 
@@ -386,7 +386,7 @@ func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 				visited[nc][nr] = true
 				result = append(result, [2]int{nc, nr})
 				queue = append(queue, [2]int{nc, nr})
-			} else if o.PairID == seed.PairID && !o.IsAnimal {
+			} else if o.pairID == seed.pairID && !o.isAnimal {
 				// Paired food: add but do NOT enqueue.
 				visited[nc][nr] = true
 				result = append(result, [2]int{nc, nr})
@@ -402,7 +402,7 @@ func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
 	for _, coord := range coords {
 		o := cells[coord[0]][coord[1]].organism
-		if o != nil && !o.IsAnimal {
+		if o != nil && !o.isAnimal {
 			return true
 		}
 	}

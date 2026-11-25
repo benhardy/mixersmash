@@ -428,11 +428,11 @@ func (g *Game) commitCellAt(col, row int) error {
 	}
 
 	// Mixer click path: increment click count and either shuffle or remove.
-	if cell.Organism() != nil && cell.Organism().IsMixer {
+	if cell.Organism() != nil && cell.Organism().IsMixer() {
 		return g.commitMixer(col, row)
 	}
 
-	if cell.Organism() == nil || !cell.Organism().IsAnimal {
+	if cell.Organism() == nil || !cell.Organism().IsAnimal() {
 		return nil
 	}
 

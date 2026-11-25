@@ -9,7 +9,7 @@ import (
 // cellWithColor returns a Cell with the given colour wrapped in an Organism.
 // Health is left at its zero value; callers that need Health=1.0 must set it explicitly.
 func cellWithColor(c color.RGBA) Cell {
-	o := &Organism{Color: c}
+	o := &Organism{color: c}
 	return Cell{organism: o}
 }
 
@@ -193,22 +193,22 @@ func TestOrganismPaletteSize(t *testing.T) {
 func TestOrganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
 	seen := make(map[rune]int)
 	for i, e := range OrganismPalette {
-		if e.Glyph == 0 {
-			t.Errorf("OrganismPalette[%d] (%q) has zero Glyph", i, e.Name)
+		if e.glyph == 0 {
+			t.Errorf("OrganismPalette[%d] (%q) has zero Glyph", i, e.name)
 		}
-		if prev, ok := seen[e.Glyph]; ok {
+		if prev, ok := seen[e.glyph]; ok {
 			t.Errorf("OrganismPalette[%d] and OrganismPalette[%d] share glyph %q",
-				prev, i, e.Glyph)
+				prev, i, e.glyph)
 		}
-		seen[e.Glyph] = i
+		seen[e.glyph] = i
 	}
 }
 
 // TestOrganismPaletteAlphaAll255 verifies that every palette entry has Color.A == 255.
 func TestOrganismPaletteAlphaAll255(t *testing.T) {
 	for i, e := range OrganismPalette {
-		if e.Color.A != 255 {
-			t.Errorf("OrganismPalette[%d] (%q) Color.A = %d, want 255", i, e.Name, e.Color.A)
+		if e.color.A != 255 {
+			t.Errorf("OrganismPalette[%d] (%q) Color.A = %d, want 255", i, e.name, e.color.A)
 		}
 	}
 }
@@ -532,7 +532,7 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 	var mixers []Organism
 	var nonMixers []Organism
 	for _, e := range OrganismPalette {
-		if e.IsMixer {
+		if e.isMixer {
 			mixers = append(mixers, e)
 		} else {
 			nonMixers = append(nonMixers, e)
@@ -544,10 +544,10 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 		t.Fatalf("palette has %d IsMixer entries, want exactly 1", len(mixers))
 	}
 	m := mixers[0]
-	if m.PairID != -1 {
-		t.Errorf("Mixer PairID = %d, want -1", m.PairID)
+	if m.pairID != -1 {
+		t.Errorf("Mixer PairID = %d, want -1", m.pairID)
 	}
-	if m.IsAnimal {
+	if m.isAnimal {
 		t.Errorf("Mixer IsAnimal = true, want false")
 	}
 
@@ -565,17 +565,17 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 	pairs := make(map[int]*pairInfo)
 	for i := range nonMixers {
 		e := &nonMixers[i]
-		if pairs[e.PairID] == nil {
-			pairs[e.PairID] = &pairInfo{}
+		if pairs[e.pairID] == nil {
+			pairs[e.pairID] = &pairInfo{}
 		}
-		p := pairs[e.PairID]
+		p := pairs[e.pairID]
 		p.count++
-		if e.IsAnimal {
+		if e.isAnimal {
 			p.animals++
 		} else {
 			p.foods++
 		}
-		p.colors = append(p.colors, e.Color)
+		p.colors = append(p.colors, e.color)
 	}
 
 	for id := 0; id <= 10; id++ {
@@ -598,7 +598,7 @@ func TestOrganismPalettePairStructure(t *testing.T) {
 		}
 	}
 
-	// Verify no unexpected PairIDs among non-mixer entries.
+	// Verify no unexpected pairIDs among non-mixer entries.
 	for id := range pairs {
 		if id < 0 || id > 10 {
 			t.Errorf("unexpected PairID %d in non-mixer palette entries", id)
@@ -691,8 +691,8 @@ func placeOrganism(cells [][]Cell, col, row int, o *Organism) {
 // TestFloodMatchClusterLoneAnimal verifies that a single animal with no matching
 // neighbours returns only the seed.
 func TestFloodMatchClusterLoneAnimal(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 0, IsAnimal: true}
-	other := &Organism{Name: "B", PairID: 1, IsAnimal: true}
+	animal := &Organism{name: "A", pairID: 0, isAnimal: true}
+	other := &Organism{name: "B", pairID: 1, isAnimal: true}
 
 	cells := makeTestCells(3, 3)
 	placeOrganism(cells, 1, 1, animal)
@@ -710,7 +710,7 @@ func TestFloodMatchClusterLoneAnimal(t *testing.T) {
 // TestFloodMatchClusterChainOfAnimals verifies that a chain of 3 same-pointer
 // animals (all orthogonally adjacent) are all included via flood spread.
 func TestFloodMatchClusterChainOfAnimals(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 0, IsAnimal: true}
+	animal := &Organism{name: "A", pairID: 0, isAnimal: true}
 
 	// Layout (3×1): [animal][animal][animal]
 	cells := makeTestCells(3, 1)
@@ -736,8 +736,8 @@ func TestFloodMatchClusterChainOfAnimals(t *testing.T) {
 // TestFloodMatchClusterWithPairedFood verifies that an animal with an
 // orthogonally adjacent paired food includes both.
 func TestFloodMatchClusterWithPairedFood(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 2, IsAnimal: true}
-	food := &Organism{Name: "F", PairID: 2, IsAnimal: false}
+	animal := &Organism{name: "A", pairID: 2, isAnimal: true}
+	food := &Organism{name: "F", pairID: 2, isAnimal: false}
 
 	cells := makeTestCells(2, 1)
 	placeOrganism(cells, 0, 0, animal)
@@ -759,8 +759,8 @@ func TestFloodMatchClusterWithPairedFood(t *testing.T) {
 // TestFloodMatchClusterNonPairedFoodExcluded verifies that adjacent food with a
 // different PairID is not included.
 func TestFloodMatchClusterNonPairedFoodExcluded(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 2, IsAnimal: true}
-	wrongFood := &Organism{Name: "WF", PairID: 3, IsAnimal: false}
+	animal := &Organism{name: "A", pairID: 2, isAnimal: true}
+	wrongFood := &Organism{name: "WF", pairID: 3, isAnimal: false}
 
 	cells := makeTestCells(2, 1)
 	placeOrganism(cells, 0, 0, animal)
@@ -779,8 +779,8 @@ func TestFloodMatchClusterNonPairedFoodExcluded(t *testing.T) {
 // The food is adjacent to both animals but food does not enqueue, so only the
 // seed animal and the food it touches are included — the far animal is not reachable.
 func TestFloodMatchClusterFoodDoesNotSpread(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 5, IsAnimal: true}
-	food := &Organism{Name: "F", PairID: 5, IsAnimal: false}
+	animal := &Organism{name: "A", pairID: 5, isAnimal: true}
+	food := &Organism{name: "F", pairID: 5, isAnimal: false}
 
 	cells := makeTestCells(3, 1)
 	placeOrganism(cells, 0, 0, animal)
@@ -808,7 +808,7 @@ func TestFloodMatchClusterFoodDoesNotSpread(t *testing.T) {
 // TestFloodMatchClusterDiagonalIncluded verifies that a diagonally adjacent
 // same-animal cell IS included (8-neighbour flood).
 func TestFloodMatchClusterDiagonalIncluded(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 7, IsAnimal: true}
+	animal := &Organism{name: "A", pairID: 7, isAnimal: true}
 
 	// Layout (2×2): [animal][empty]
 	//               [empty][animal]
@@ -833,8 +833,8 @@ func TestFloodMatchClusterDiagonalIncluded(t *testing.T) {
 // TestFloodMatchClusterDiagonalFoodIncluded verifies that a diagonally adjacent
 // paired food cell IS included as a leaf (8-neighbour).
 func TestFloodMatchClusterDiagonalFoodIncluded(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 3, IsAnimal: true}
-	food := &Organism{Name: "F", PairID: 3, IsAnimal: false}
+	animal := &Organism{name: "A", pairID: 3, isAnimal: true}
+	food := &Organism{name: "F", pairID: 3, isAnimal: false}
 
 	// Layout (2×2): [animal][empty]
 	//               [empty][food]
@@ -862,8 +862,8 @@ func TestFloodMatchClusterDiagonalFoodIncluded(t *testing.T) {
 
 // TestClusterHasFoodWithFood verifies that a cluster containing a food cell returns true.
 func TestClusterHasFoodWithFood(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 1, IsAnimal: true}
-	food := &Organism{Name: "F", PairID: 1, IsAnimal: false}
+	animal := &Organism{name: "A", pairID: 1, isAnimal: true}
+	food := &Organism{name: "F", pairID: 1, isAnimal: false}
 
 	cells := makeTestCells(2, 1)
 	placeOrganism(cells, 0, 0, animal)
@@ -877,7 +877,7 @@ func TestClusterHasFoodWithFood(t *testing.T) {
 
 // TestClusterHasFoodAnimalsOnly verifies that an animals-only cluster returns false.
 func TestClusterHasFoodAnimalsOnly(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 1, IsAnimal: true}
+	animal := &Organism{name: "A", pairID: 1, isAnimal: true}
 
 	cells := makeTestCells(2, 1)
 	placeOrganism(cells, 0, 0, animal)
@@ -891,7 +891,7 @@ func TestClusterHasFoodAnimalsOnly(t *testing.T) {
 
 // TestClusterHasFoodSingleAnimal verifies that a lone animal (seed only) returns false.
 func TestClusterHasFoodSingleAnimal(t *testing.T) {
-	animal := &Organism{Name: "A", PairID: 1, IsAnimal: true}
+	animal := &Organism{name: "A", pairID: 1, isAnimal: true}
 
 	cells := makeTestCells(1, 1)
 	placeOrganism(cells, 0, 0, animal)

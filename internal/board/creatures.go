@@ -17,42 +17,68 @@ const (
 // render layer (Game.spriteCache), keyed by organism pointer, so this type
 // carries no rendering handles.
 type Organism struct {
-	Name     string
-	Glyph    rune
-	Color    color.RGBA
-	PairID   int
-	IsAnimal bool
-	IsMixer  bool
+	name     string
+	glyph    rune
+	color    color.RGBA
+	pairID   int
+	isAnimal bool
+	isMixer  bool
 }
+
+// NewOrganism constructs an Organism with the given attributes.
+// Use this from outside package board where struct-literal construction is not possible.
+func NewOrganism(name string, glyph rune, clr color.RGBA, pairID int, isAnimal, isMixer bool) *Organism {
+	return &Organism{name: name, glyph: glyph, color: clr, pairID: pairID, isAnimal: isAnimal, isMixer: isMixer}
+}
+
+// Name returns the organism's display name.
+func (o *Organism) Name() string { return o.name }
+
+// Glyph returns the organism's emoji rune.
+func (o *Organism) Glyph() rune { return o.glyph }
+
+// Color returns the organism's background colour.
+func (o *Organism) Color() color.RGBA { return o.color }
+
+// PairID returns the pair identifier grouping each animal with its food (0..10;
+// -1 for the Mixer).
+func (o *Organism) PairID() int { return o.pairID }
+
+// IsAnimal reports whether this organism is the animal (true) or the food (false)
+// in its pair.
+func (o *Organism) IsAnimal() bool { return o.isAnimal }
+
+// IsMixer reports whether this organism is the Mixer entry.
+func (o *Organism) IsMixer() bool { return o.isMixer }
 
 // OrganismPalette is the master list of organisms: 22 Australian animal/food
 // pair entries (PairIDs 0..10) plus one Mixer entry (PairID -1, IsMixer=true).
 // Each animal/food pair shares a PairID and Color; one entry is the animal
 // (IsAnimal=true), the other is the food (IsAnimal=false).
 var OrganismPalette = []Organism{
-	{Name: "Kangaroo", Glyph: '🦘', Color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, PairID: 0, IsAnimal: true},
-	{Name: "Grass", Glyph: '🌿', Color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, PairID: 0, IsAnimal: false},
-	{Name: "Koala", Glyph: '🐨', Color: color.RGBA{R: 255, G: 119, B: 0, A: 255}, PairID: 1, IsAnimal: true},
-	{Name: "Eucalyptus Leaf", Glyph: '🍃', Color: color.RGBA{R: 255, G: 119, B: 0, A: 255}, PairID: 1, IsAnimal: false},
-	{Name: "Echidna", Glyph: '🦔', Color: color.RGBA{R: 220, G: 150, B: 0, A: 255}, PairID: 2, IsAnimal: true},
-	{Name: "Ant", Glyph: '🐜', Color: color.RGBA{R: 220, G: 150, B: 0, A: 255}, PairID: 2, IsAnimal: false},
-	{Name: "Cockatoo", Glyph: '🦜', Color: color.RGBA{R: 155, G: 179, B: 0, A: 255}, PairID: 3, IsAnimal: true},
-	{Name: "Seeds", Glyph: '🌾', Color: color.RGBA{R: 155, G: 179, B: 0, A: 255}, PairID: 3, IsAnimal: false},
-	{Name: "Rainbow Lorikeet", Glyph: '🐦', Color: color.RGBA{R: 0, G: 198, B: 93, A: 255}, PairID: 4, IsAnimal: true},
-	{Name: "Nectar", Glyph: '🌺', Color: color.RGBA{R: 0, G: 198, B: 93, A: 255}, PairID: 4, IsAnimal: false},
-	{Name: "Magpie", Glyph: '🦆', Color: color.RGBA{R: 0, G: 202, B: 178, A: 255}, PairID: 5, IsAnimal: true},
-	{Name: "Lizard", Glyph: '🦎', Color: color.RGBA{R: 0, G: 202, B: 178, A: 255}, PairID: 5, IsAnimal: false},
-	{Name: "Flying Fox", Glyph: '🦇', Color: color.RGBA{R: 0, G: 191, B: 244, A: 255}, PairID: 6, IsAnimal: true},
-	{Name: "Native Figs", Glyph: '🍈', Color: color.RGBA{R: 0, G: 191, B: 244, A: 255}, PairID: 6, IsAnimal: false},
-	{Name: "Crocodile", Glyph: '🐊', Color: color.RGBA{R: 0, G: 169, B: 255, A: 255}, PairID: 7, IsAnimal: true},
-	{Name: "Barramundi", Glyph: '🐟', Color: color.RGBA{R: 0, G: 169, B: 255, A: 255}, PairID: 7, IsAnimal: false},
-	{Name: "Blue-tongued Lizard", Glyph: '🐸', Color: color.RGBA{R: 148, G: 143, B: 255, A: 255}, PairID: 8, IsAnimal: true},
-	{Name: "Beetle", Glyph: '\U0001FAB2', Color: color.RGBA{R: 148, G: 143, B: 255, A: 255}, PairID: 8, IsAnimal: false},
-	{Name: "Galah", Glyph: '🦩', Color: color.RGBA{R: 210, G: 119, B: 250, A: 255}, PairID: 9, IsAnimal: true},
-	{Name: "Roots", Glyph: '🥕', Color: color.RGBA{R: 210, G: 119, B: 250, A: 255}, PairID: 9, IsAnimal: false},
-	{Name: "Kookaburra", Glyph: '🦅', Color: color.RGBA{R: 249, G: 102, B: 188, A: 255}, PairID: 10, IsAnimal: true},
-	{Name: "Worms", Glyph: '\U0001FAB1', Color: color.RGBA{R: 249, G: 102, B: 188, A: 255}, PairID: 10, IsAnimal: false},
-	{Name: "Mixer", Glyph: '\U0001F300', Color: color.RGBA{R: 255, G: 255, B: 255, A: 255}, PairID: -1, IsAnimal: false, IsMixer: true},
+	{name: "Kangaroo", glyph: '🦘', color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, pairID: 0, isAnimal: true},
+	{name: "Grass", glyph: '🌿', color: color.RGBA{R: 255, G: 100, B: 111, A: 255}, pairID: 0, isAnimal: false},
+	{name: "Koala", glyph: '🐨', color: color.RGBA{R: 255, G: 119, B: 0, A: 255}, pairID: 1, isAnimal: true},
+	{name: "Eucalyptus Leaf", glyph: '🍃', color: color.RGBA{R: 255, G: 119, B: 0, A: 255}, pairID: 1, isAnimal: false},
+	{name: "Echidna", glyph: '🦔', color: color.RGBA{R: 220, G: 150, B: 0, A: 255}, pairID: 2, isAnimal: true},
+	{name: "Ant", glyph: '🐜', color: color.RGBA{R: 220, G: 150, B: 0, A: 255}, pairID: 2, isAnimal: false},
+	{name: "Cockatoo", glyph: '🦜', color: color.RGBA{R: 155, G: 179, B: 0, A: 255}, pairID: 3, isAnimal: true},
+	{name: "Seeds", glyph: '🌾', color: color.RGBA{R: 155, G: 179, B: 0, A: 255}, pairID: 3, isAnimal: false},
+	{name: "Rainbow Lorikeet", glyph: '🐦', color: color.RGBA{R: 0, G: 198, B: 93, A: 255}, pairID: 4, isAnimal: true},
+	{name: "Nectar", glyph: '🌺', color: color.RGBA{R: 0, G: 198, B: 93, A: 255}, pairID: 4, isAnimal: false},
+	{name: "Magpie", glyph: '🦆', color: color.RGBA{R: 0, G: 202, B: 178, A: 255}, pairID: 5, isAnimal: true},
+	{name: "Lizard", glyph: '🦎', color: color.RGBA{R: 0, G: 202, B: 178, A: 255}, pairID: 5, isAnimal: false},
+	{name: "Flying Fox", glyph: '🦇', color: color.RGBA{R: 0, G: 191, B: 244, A: 255}, pairID: 6, isAnimal: true},
+	{name: "Native Figs", glyph: '🍈', color: color.RGBA{R: 0, G: 191, B: 244, A: 255}, pairID: 6, isAnimal: false},
+	{name: "Crocodile", glyph: '🐊', color: color.RGBA{R: 0, G: 169, B: 255, A: 255}, pairID: 7, isAnimal: true},
+	{name: "Barramundi", glyph: '🐟', color: color.RGBA{R: 0, G: 169, B: 255, A: 255}, pairID: 7, isAnimal: false},
+	{name: "Blue-tongued Lizard", glyph: '🐸', color: color.RGBA{R: 148, G: 143, B: 255, A: 255}, pairID: 8, isAnimal: true},
+	{name: "Beetle", glyph: '\U0001FAB2', color: color.RGBA{R: 148, G: 143, B: 255, A: 255}, pairID: 8, isAnimal: false},
+	{name: "Galah", glyph: '🦩', color: color.RGBA{R: 210, G: 119, B: 250, A: 255}, pairID: 9, isAnimal: true},
+	{name: "Roots", glyph: '🥕', color: color.RGBA{R: 210, G: 119, B: 250, A: 255}, pairID: 9, isAnimal: false},
+	{name: "Kookaburra", glyph: '🦅', color: color.RGBA{R: 249, G: 102, B: 188, A: 255}, pairID: 10, isAnimal: true},
+	{name: "Worms", glyph: '\U0001FAB1', color: color.RGBA{R: 249, G: 102, B: 188, A: 255}, pairID: 10, isAnimal: false},
+	{name: "Mixer", glyph: '\U0001F300', color: color.RGBA{R: 255, G: 255, B: 255, A: 255}, pairID: -1, isAnimal: false, isMixer: true},
 }
 
 // PaletteOrganism returns a pointer to a random entry in OrganismPalette.

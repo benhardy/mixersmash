@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image/color"
 	"testing"
 
 	"mixersmash/internal/board"
@@ -148,7 +149,7 @@ func TestBuildTextLines(t *testing.T) {
 	t.Run("hover alive cell adds name", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		creature := &board.Organism{Name: "cat"}
+		creature := board.NewOrganism("cat", 0, color.RGBA{}, 0, false, false)
 		grid.Place(2, 3, board.NewCell(creature, 1.0))
 
 		lines := h.buildTextLines(0, 2, 3, maxChars, grid)
@@ -182,7 +183,7 @@ func TestBuildTextLines(t *testing.T) {
 	t.Run("hover dead cell omits creature line", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		creature := &board.Organism{Name: "wolf"}
+		creature := board.NewOrganism("wolf", 0, color.RGBA{}, 0, false, false)
 		grid.Place(1, 1, board.NewCell(creature, 0)) // dead
 
 		lines := h.buildTextLines(0, 1, 1, maxChars, grid)

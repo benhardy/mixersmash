@@ -68,7 +68,7 @@ func (g *Game) compositeCachedSprite(o *board.Organism) *ebiten.Image {
 		sz = compositeSpriteRefSize
 	}
 	half := float32(sz) / 2
-	clr := o.Color
+	clr := o.Color()
 
 	// ------------------------------------------------------------------ //
 	// Step 1: build the base image — opaque fill colour + organism glyph.
@@ -84,7 +84,7 @@ func (g *Game) compositeCachedSprite(o *board.Organism) *ebiten.Image {
 		Source: g.glyphFont,
 		Size:   glyphSize,
 	}
-	str := string(o.Glyph)
+	str := string(o.Glyph())
 	w, h := text.Measure(str, face, 0)
 	tint := board.GlyphTint(clr)
 	var drawOpts text.DrawOptions
