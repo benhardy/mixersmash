@@ -70,10 +70,10 @@ func TestPlaceLiveDeltas(t *testing.T) {
 			g := &Grid{
 				Cols:  1,
 				Rows:  1,
-				Cells: [][]Cell{{{}}},
+				cells: [][]Cell{{{}}},
 			}
 			// Seed the cell directly and set live accordingly.
-			g.Cells[0][0] = tc.initial
+			g.cells[0][0] = tc.initial
 			if tc.initial.Health > 0 {
 				g.live = 1
 			}
@@ -96,7 +96,7 @@ func TestSetHealthZeroDeltas(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			Cells: [][]Cell{{liveCell()}},
+			cells: [][]Cell{{liveCell()}},
 			live:  1,
 		}
 		g.SetHealthZero(0, 0)
@@ -109,7 +109,7 @@ func TestSetHealthZeroDeltas(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			Cells: [][]Cell{{liveCell()}},
+			cells: [][]Cell{{liveCell()}},
 			live:  1,
 		}
 		g.SetHealthZero(0, 0)
@@ -130,7 +130,7 @@ func TestBumpHealthAtLivenessAndReturn(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			Cells: [][]Cell{{{Health: 0.5}}},
+			cells: [][]Cell{{{Health: 0.5}}},
 			live:  1,
 		}
 		oldH := g.BumpHealthAt(0, 0, -0.6) // 0.5 + (-0.6) = -0.1 → clamped to 0
@@ -146,7 +146,7 @@ func TestBumpHealthAtLivenessAndReturn(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			Cells: [][]Cell{{{Health: 0.5}}},
+			cells: [][]Cell{{{Health: 0.5}}},
 			live:  1,
 		}
 		oldH := g.BumpHealthAt(0, 0, -0.3) // 0.5 - 0.3 = 0.2 > 0
@@ -162,7 +162,7 @@ func TestBumpHealthAtLivenessAndReturn(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			Cells: [][]Cell{{{Health: 0}}},
+			cells: [][]Cell{{{Health: 0}}},
 			live:  0,
 		}
 		g.BumpHealthAt(0, 0, 0.5)
@@ -183,7 +183,7 @@ func TestReplaceColumnLiveDeltas(t *testing.T) {
 		g := &Grid{
 			Cols: 1,
 			Rows: 3,
-			Cells: [][]Cell{{
+			cells: [][]Cell{{
 				liveCell(),
 				liveCell(),
 				liveCell(),
@@ -202,7 +202,7 @@ func TestReplaceColumnLiveDeltas(t *testing.T) {
 		g := &Grid{
 			Cols: 1,
 			Rows: 3,
-			Cells: [][]Cell{{
+			cells: [][]Cell{{
 				deadCell(),
 				deadCell(),
 				deadCell(),
@@ -232,7 +232,7 @@ func TestGravityLikeSequence(t *testing.T) {
 	g := &Grid{
 		Cols: 1,
 		Rows: 4,
-		Cells: [][]Cell{{
+		cells: [][]Cell{{
 			liveCell(), // row 0
 			liveCell(), // row 1
 			liveCell(), // row 2
@@ -296,7 +296,7 @@ func TestRoundTripBirthDeathBirth(t *testing.T) {
 	g := &Grid{
 		Cols:  1,
 		Rows:  1,
-		Cells: [][]Cell{{deadCell()}},
+		cells: [][]Cell{{deadCell()}},
 		live:  0,
 	}
 

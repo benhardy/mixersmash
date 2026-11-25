@@ -12,13 +12,6 @@ type Cell struct {
 	Health   float32
 }
 
-// Die kills a cell stone dead, returning its old health. The caller must redraw the cell after calling Die().
-func (c *Cell) Die() float32 {
-	oldHealth := c.Health
-	c.Health = 0
-	return oldHealth
-}
-
 // BumpHealth adjusts the cell's health by delta (clamped to >= 0) and returns the old health.
 func (c *Cell) BumpHealth(delta float32) float32 {
 	oldHealth := c.Health
@@ -27,7 +20,7 @@ func (c *Cell) BumpHealth(delta float32) float32 {
 }
 
 // IsDead reports whether the cell's health is at or below zero.
-func (c *Cell) IsDead() bool {
+func (c Cell) IsDead() bool {
 	return c.Health <= 0
 }
 
@@ -71,7 +64,7 @@ type MoveAnim struct {
 type Grid struct {
 	Cols  int
 	Rows  int
-	Cells [][]Cell
+	cells [][]Cell
 	live  int // count of cells whose Health > 0
 }
 
@@ -91,7 +84,7 @@ func NewGrid(cols, rows int) *Grid {
 	return &Grid{
 		Cols:  cols,
 		Rows:  rows,
-		Cells: cells,
+		cells: cells,
 		live:  cols * rows,
 	}
 }
@@ -108,7 +101,7 @@ func GridFromCells(cols, rows int, cells [][]Cell) *Grid {
 			}
 		}
 	}
-	return &Grid{Cols: cols, Rows: rows, Cells: cells, live: live}
+	return &Grid{Cols: cols, Rows: rows, cells: cells, live: live}
 }
 
 // Live returns the number of cells whose Health is greater than zero.
@@ -118,12 +111,12 @@ func (g *Grid) Live() int {
 
 // At returns a copy of the cell at (col, row).
 func (g *Grid) At(col, row int) Cell {
-	return g.Cells[col][row]
+	return g.cells[col][row]
 }
 
 // Column returns a fresh copy slice of all cells in the given column.
 func (g *Grid) Column(col int) []Cell {
-	src := g.Cells[col]
+	src := g.cells[col]
 	dst := make([]Cell, len(src))
 	copy(dst, src)
 	return dst
@@ -134,7 +127,7 @@ func (g *Grid) Snapshot() [][]Cell {
 	result := make([][]Cell, g.Cols)
 	for c := 0; c < g.Cols; c++ {
 		col := make([]Cell, g.Rows)
-		copy(col, g.Cells[c])
+		copy(col, g.cells[c])
 		result[c] = col
 	}
 	return result
@@ -143,8 +136,8 @@ func (g *Grid) Snapshot() [][]Cell {
 // Place assigns c to the cell at (col, row) and updates the live count by the
 // liveness delta (liveness defined as Health > 0).
 func (g *Grid) Place(col, row int, c Cell) {
-	old := g.Cells[col][row]
-	g.Cells[col][row] = c
+	old := g.cells[col][row]
+	g.cells[col][row] = c
 	wasAlive := 0
 	if old.Health > 0 {
 		wasAlive = 1
@@ -159,9 +152,9 @@ func (g *Grid) Place(col, row int, c Cell) {
 // BumpHealthAt applies BumpHealth to the cell at (col, row) and returns the
 // old health. g.live is updated by the liveness delta.
 func (g *Grid) BumpHealthAt(col, row int, delta float32) float32 {
-	wasAlive := g.Cells[col][row].Health > 0
-	oldHealth := g.Cells[col][row].BumpHealth(delta)
-	isAlive := g.Cells[col][row].Health > 0
+	wasAlive := g.cells[col][row].Health > 0
+	oldHealth := g.cells[col][row].BumpHealth(delta)
+	isAlive := g.cells[col][row].Health > 0
 	if wasAlive && !isAlive {
 		g.live--
 	} else if !wasAlive && isAlive {
@@ -173,8 +166,8 @@ func (g *Grid) BumpHealthAt(col, row int, delta float32) float32 {
 // SetHealthZero sets the Health of the cell at (col, row) to zero.
 // g.live is decremented only if the cell was previously alive (Health > 0).
 func (g *Grid) SetHealthZero(col, row int) {
-	if g.Cells[col][row].Health > 0 {
-		g.Cells[col][row].Health = 0
+	if g.cells[col][row].Health > 0 {
+		g.cells[col][row].Health = 0
 		g.live--
 	}
 }
@@ -184,8 +177,8 @@ func (g *Grid) SetHealthZero(col, row int) {
 func (g *Grid) ReplaceColumn(col int, src []Cell) {
 	delta := 0
 	for r, c := range src {
-		old := g.Cells[col][r]
-		g.Cells[col][r] = c
+		old := g.cells[col][r]
+		g.cells[col][r] = c
 		wasAlive := 0
 		if old.Health > 0 {
 			wasAlive = 1
@@ -403,13 +396,13 @@ func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
 // FloodMatchCluster is a method that delegates to the package-level
 // FloodMatchCluster function using the receiver's own Cells slice.
 func (g *Grid) FloodMatchCluster(col, row int) [][2]int {
-	return FloodMatchCluster(g.Cells, col, row, g.Cols, g.Rows)
+	return FloodMatchCluster(g.cells, col, row, g.Cols, g.Rows)
 }
 
 // ClusterHasFood is a method that delegates to the package-level
 // ClusterHasFood function using the receiver's own Cells slice.
 func (g *Grid) ClusterHasFood(coords [][2]int) bool {
-	return ClusterHasFood(g.Cells, coords)
+	return ClusterHasFood(g.cells, coords)
 }
 
 // ScoreForCluster returns the score for clearing a cluster of n cells.
@@ -424,7 +417,7 @@ func (g *Grid) CountLiveCells() int {
 	n := 0
 	for c := 0; c < g.Cols; c++ {
 		for r := 0; r < g.Rows; r++ {
-			if g.Cells[c][r].Health > 0 {
+			if g.cells[c][r].Health > 0 {
 				n++
 			}
 		}

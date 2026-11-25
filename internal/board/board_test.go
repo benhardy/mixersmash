@@ -25,15 +25,15 @@ func TestGridInitialisation(t *testing.T) {
 	if g.Rows != rows {
 		t.Errorf("Grid.Rows = %d, want %d", g.Rows, rows)
 	}
-	if len(g.Cells) != cols {
-		t.Fatalf("len(Grid.Cells) = %d, want %d", len(g.Cells), cols)
+	if len(g.cells) != cols {
+		t.Fatalf("len(Grid.Cells) = %d, want %d", len(g.cells), cols)
 	}
 	for c := 0; c < cols; c++ {
-		if len(g.Cells[c]) != rows {
-			t.Fatalf("len(Grid.Cells[%d]) = %d, want %d", c, len(g.Cells[c]), rows)
+		if len(g.cells[c]) != rows {
+			t.Fatalf("len(Grid.Cells[%d]) = %d, want %d", c, len(g.cells[c]), rows)
 		}
 		for r := 0; r < rows; r++ {
-			cell := g.Cells[c][r]
+			cell := g.cells[c][r]
 			if cell.Color().A != 255 {
 				t.Errorf("Grid.Cells[%d][%d].Color().A = %d, want 255", c, r, cell.Color().A)
 			}
@@ -48,8 +48,8 @@ func TestInitialCellHealth(t *testing.T) {
 	g := NewGrid(cols, rows)
 	for c := 0; c < cols; c++ {
 		for r := 0; r < rows; r++ {
-			if g.Cells[c][r].Health != 1.0 {
-				t.Errorf("Cells[%d][%d].Health = %v, want 1.0", c, r, g.Cells[c][r].Health)
+			if g.cells[c][r].Health != 1.0 {
+				t.Errorf("Cells[%d][%d].Health = %v, want 1.0", c, r, g.cells[c][r].Health)
 			}
 		}
 	}
