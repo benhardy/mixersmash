@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"mixersmash/internal/board"
 )
 
 // --- needsRedraw tests ---
@@ -105,12 +107,12 @@ func TestNeedsRedraw(t *testing.T) {
 
 // --- buildTextLines tests ---
 
-func makeTestGrid(cols, rows int) *Grid {
-	cells := make([][]Cell, cols)
+func makeTestGrid(cols, rows int) *board.Grid {
+	cells := make([][]board.Cell, cols)
 	for c := 0; c < cols; c++ {
-		cells[c] = make([]Cell, rows)
+		cells[c] = make([]board.Cell, rows)
 	}
-	return &Grid{Cols: cols, Rows: rows, Cells: cells}
+	return &board.Grid{Cols: cols, Rows: rows, Cells: cells}
 }
 
 func TestBuildTextLines(t *testing.T) {
@@ -146,8 +148,8 @@ func TestBuildTextLines(t *testing.T) {
 	t.Run("hover alive cell adds name", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		creature := &Organism{Name: "cat"}
-		grid.Cells[2][3] = Cell{Organism: creature, Health: 1.0}
+		creature := &board.Organism{Name: "cat"}
+		grid.Cells[2][3] = board.Cell{Organism: creature, Health: 1.0}
 
 		lines := h.buildTextLines(0, 2, 3, maxChars, grid)
 
@@ -180,8 +182,8 @@ func TestBuildTextLines(t *testing.T) {
 	t.Run("hover dead cell omits creature line", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		creature := &Organism{Name: "wolf"}
-		grid.Cells[1][1] = Cell{Organism: creature, Health: 0} // dead
+		creature := &board.Organism{Name: "wolf"}
+		grid.Cells[1][1] = board.Cell{Organism: creature, Health: 0} // dead
 
 		lines := h.buildTextLines(0, 1, 1, maxChars, grid)
 		for _, l := range lines {
@@ -194,7 +196,7 @@ func TestBuildTextLines(t *testing.T) {
 	t.Run("hover nil creature omits creature line", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		grid.Cells[0][0] = Cell{Organism: nil, Health: 1.0}
+		grid.Cells[0][0] = board.Cell{Organism: nil, Health: 1.0}
 
 		lines := h.buildTextLines(0, 0, 0, maxChars, grid)
 		for _, l := range lines {

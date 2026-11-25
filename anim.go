@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/rand"
 	"time"
+
+	"mixersmash/internal/board"
 )
 
 // moveAnimDuration returns the wall-clock animation duration for the given
@@ -20,7 +22,7 @@ func moveAnimDuration(state gameState) time.Duration {
 // time t.  For stateShuffling the path is a quadratic ease-in-out Bézier; for
 // all other states it is a quadratic ease-in straight-line lerp.
 // Math copied verbatim from drawMoveAnims.
-func moveAnimPos(anim MoveAnim, state gameState, t float32) (cx, cy float32) {
+func moveAnimPos(anim board.MoveAnim, state gameState, t float32) (cx, cy float32) {
 	if state == stateShuffling {
 		et := easeInOutQuad(t)
 		cx, cy = quadBezier2(anim.FromX, anim.FromY, anim.CtrlX, anim.CtrlY, anim.ToX, anim.ToY, et)
@@ -68,7 +70,7 @@ func victimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrl
 // victimAnimPos returns the pixel centre (cx, cy) for a victim MoveAnim at
 // normalised time t.  PathType 0 = lerp, 1 = Bézier arc, 2 = inward spiral.
 // Math copied verbatim from drawMoveAnims.
-func victimAnimPos(v MoveAnim, t float32) (cx, cy float32) {
+func victimAnimPos(v board.MoveAnim, t float32) (cx, cy float32) {
 	switch v.PathType {
 	case 0: // straight line
 		cx, cy = lerp2(v.FromX, v.FromY, v.ToX, v.ToY, t)

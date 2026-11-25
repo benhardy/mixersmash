@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"mixersmash/internal/board"
 )
 
 // TestBuildDropMoveAnims verifies the MoveAnim entries produced by
@@ -22,10 +24,10 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	const cols = 1
 	const rows = 4
 
-	cr := func() *Organism { return &Organism{} }
+	cr := func() *board.Organism { return &board.Organism{} }
 
-	cells := make([][]Cell, cols)
-	cells[0] = []Cell{
+	cells := make([][]board.Cell, cols)
+	cells[0] = []board.Cell{
 		{Organism: nil, Health: 0},    // row 0: vacated slot
 		{Organism: cr(), Health: 1.0}, // row 1: compacted from row 0
 		{Organism: cr(), Health: 1.0}, // row 2: compacted from row 1
@@ -33,11 +35,11 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	}
 
 	g := &Game{
-		board: boardState{grid: &Grid{Cols: cols, Rows: rows, Cells: cells}},
+		board: boardState{grid: &board.Grid{Cols: cols, Rows: rows, Cells: cells}},
 	}
 
 	holeRows := []int{2}
-	moves := GravityMoves(rows, holeRows) // [[0,1],[1,2]]
+	moves := board.GravityMoves(rows, holeRows) // [[0,1],[1,2]]
 
 	g.buildDropMoveAnims(0, holeRows, moves, dcs)
 

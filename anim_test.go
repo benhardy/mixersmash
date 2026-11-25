@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"mixersmash/internal/board"
 )
 
 // --- moveAnimDuration tests ---
@@ -46,7 +48,7 @@ func approxEqF32(a, b float32) bool {
 func TestMoveAnimPos(t *testing.T) {
 	t.Helper()
 
-	anim := MoveAnim{
+	anim := board.MoveAnim{
 		FromX: 10, FromY: 20,
 		ToX: 110, ToY: 220,
 		CtrlX: 60, CtrlY: 320, // arc control point
@@ -107,7 +109,7 @@ func TestVictimAnimPos(t *testing.T) {
 	t.Helper()
 
 	t.Run("PathType 0 lerp t=0 returns From", func(t *testing.T) {
-		v := MoveAnim{PathType: 0, FromX: 5, FromY: 15, ToX: 50, ToY: 150}
+		v := board.MoveAnim{PathType: 0, FromX: 5, FromY: 15, ToX: 50, ToY: 150}
 		cx, cy := victimAnimPos(v, 0)
 		if !approxEqF32(cx, v.FromX) || !approxEqF32(cy, v.FromY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, v.FromX, v.FromY)
@@ -115,7 +117,7 @@ func TestVictimAnimPos(t *testing.T) {
 	})
 
 	t.Run("PathType 0 lerp t=1 returns To", func(t *testing.T) {
-		v := MoveAnim{PathType: 0, FromX: 5, FromY: 15, ToX: 50, ToY: 150}
+		v := board.MoveAnim{PathType: 0, FromX: 5, FromY: 15, ToX: 50, ToY: 150}
 		cx, cy := victimAnimPos(v, 1)
 		if !approxEqF32(cx, v.ToX) || !approxEqF32(cy, v.ToY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, v.ToX, v.ToY)
@@ -123,7 +125,7 @@ func TestVictimAnimPos(t *testing.T) {
 	})
 
 	t.Run("PathType 1 bezier t=0 returns From", func(t *testing.T) {
-		v := MoveAnim{PathType: 1, FromX: 10, FromY: 20, CtrlX: 60, CtrlY: 300, ToX: 110, ToY: 220}
+		v := board.MoveAnim{PathType: 1, FromX: 10, FromY: 20, CtrlX: 60, CtrlY: 300, ToX: 110, ToY: 220}
 		cx, cy := victimAnimPos(v, 0)
 		if !approxEqF32(cx, v.FromX) || !approxEqF32(cy, v.FromY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, v.FromX, v.FromY)
@@ -131,7 +133,7 @@ func TestVictimAnimPos(t *testing.T) {
 	})
 
 	t.Run("PathType 1 bezier t=1 returns To", func(t *testing.T) {
-		v := MoveAnim{PathType: 1, FromX: 10, FromY: 20, CtrlX: 60, CtrlY: 300, ToX: 110, ToY: 220}
+		v := board.MoveAnim{PathType: 1, FromX: 10, FromY: 20, CtrlX: 60, CtrlY: 300, ToX: 110, ToY: 220}
 		cx, cy := victimAnimPos(v, 1)
 		if !approxEqF32(cx, v.ToX) || !approxEqF32(cy, v.ToY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, v.ToX, v.ToY)
@@ -139,7 +141,7 @@ func TestVictimAnimPos(t *testing.T) {
 	})
 
 	t.Run("PathType 2 spiral t=0 returns From", func(t *testing.T) {
-		v := MoveAnim{PathType: 2, FromX: 100, FromY: 200, ToX: 50, ToY: 100, SpiralTurns: 1.5}
+		v := board.MoveAnim{PathType: 2, FromX: 100, FromY: 200, ToX: 50, ToY: 100, SpiralTurns: 1.5}
 		cx, cy := victimAnimPos(v, 0)
 		if !approxEqF32(cx, v.FromX) || !approxEqF32(cy, v.FromY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, v.FromX, v.FromY)
@@ -147,7 +149,7 @@ func TestVictimAnimPos(t *testing.T) {
 	})
 
 	t.Run("PathType 2 spiral t=1 returns To", func(t *testing.T) {
-		v := MoveAnim{PathType: 2, FromX: 100, FromY: 200, ToX: 50, ToY: 100, SpiralTurns: 1.5}
+		v := board.MoveAnim{PathType: 2, FromX: 100, FromY: 200, ToX: 50, ToY: 100, SpiralTurns: 1.5}
 		cx, cy := victimAnimPos(v, 1)
 		// At t=1: r = r0*(1-1) = 0, so cx = ToX + 0, cy = ToY + 0
 		if !approxEqF32(cx, v.ToX) || !approxEqF32(cy, v.ToY) {
@@ -157,7 +159,7 @@ func TestVictimAnimPos(t *testing.T) {
 
 	t.Run("PathType 2 spiral From==To is stationary", func(t *testing.T) {
 		// When From==To, r0=0 so cx=ToX, cy=ToY for all t.
-		v := MoveAnim{PathType: 2, FromX: 64, FromY: 128, ToX: 64, ToY: 128, SpiralTurns: 2.0}
+		v := board.MoveAnim{PathType: 2, FromX: 64, FromY: 128, ToX: 64, ToY: 128, SpiralTurns: 2.0}
 		for _, tval := range []float32{0, 0.25, 0.5, 0.75, 1.0} {
 			cx, cy := victimAnimPos(v, tval)
 			if !approxEqF32(cx, v.ToX) || !approxEqF32(cy, v.ToY) {
@@ -167,7 +169,7 @@ func TestVictimAnimPos(t *testing.T) {
 	})
 
 	t.Run("PathType 2 spiral mid-t matches manual formula", func(t *testing.T) {
-		v := MoveAnim{PathType: 2, FromX: 100, FromY: 200, ToX: 50, ToY: 100, SpiralTurns: 1.0}
+		v := board.MoveAnim{PathType: 2, FromX: 100, FromY: 200, ToX: 50, ToY: 100, SpiralTurns: 1.0}
 		tval := float32(0.5)
 		ddx := v.FromX - v.ToX
 		ddy := v.FromY - v.ToY

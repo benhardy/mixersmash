@@ -16,6 +16,7 @@ import (
 	text "github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 	"golang.org/x/image/font/basicfont"
+	"mixersmash/internal/board"
 )
 
 // gameState identifies which phase of the update/animation state machine the
@@ -88,7 +89,7 @@ type Game struct {
 	// spriteCache holds the lazily-baked composite sprite per organism, keyed by
 	// organism pointer. Cleared on a device-scale change (LayoutF) so sprites
 	// rebake at the new size. This is a render cache, not game state.
-	spriteCache map[*Organism]*ebiten.Image
+	spriteCache map[*board.Organism]*ebiten.Image
 
 	// board holds the logical game-board model: cell grid, live-cell count, score.
 	board boardState
@@ -114,7 +115,7 @@ type Game struct {
 // count, and the cumulative score. It is the model layer that the update*
 // methods mutate and the HUD and renderer read.
 type boardState struct {
-	grid      *Grid
+	grid      *board.Grid
 	cellCount int // number of live cells currently in the grid
 	score     int // cumulative score
 }
@@ -124,15 +125,15 @@ type boardState struct {
 // move/victim/target animation buffers. It is driven by the update* methods and
 // consumed by the draw* methods.
 type animState struct {
-	currentState gameState  // which state are we in?
-	animStart    time.Time  // when did the current animation phase start?
-	actionCol    int        // the column an action is happening
-	actionRow    int        // the row any given action is happening
-	moveAnims    []MoveAnim // used for both shuffle and drop phases
+	currentState gameState        // which state are we in?
+	animStart    time.Time        // when did the current animation phase start?
+	actionCol    int              // the column an action is happening
+	actionRow    int              // the row any given action is happening
+	moveAnims    []board.MoveAnim // used for both shuffle and drop phases
 
 	// victim movement animation fields (one entry per simultaneous victim)
 	victimCount int
-	victimAnims []MoveAnim
+	victimAnims []board.MoveAnim
 
 	// target cell bounce animation fields
 	targetAnimating    bool
@@ -140,7 +141,7 @@ type animState struct {
 	targetAnimStartR   float32
 	targetAnimPeakR    float32
 	targetAnimEndR     float32
-	targetAnimOrganism *Organism
+	targetAnimOrganism *board.Organism
 }
 
 // viewState holds the device/presentation geometry and offscreen render targets.
@@ -222,9 +223,9 @@ type inputState struct {
 // newGameState returns a Game with data fields initialised but no ebiten.Image
 // allocated.  Callers that need a canvas (i.e. main) must set g.canvas after
 // calling this.
-func newGameState(grid *Grid) *Game {
+func newGameState(grid *board.Grid) *Game {
 	return &Game{
-		spriteCache: make(map[*Organism]*ebiten.Image),
+		spriteCache: make(map[*board.Organism]*ebiten.Image),
 		board: boardState{
 			grid:      grid,
 			cellCount: grid.Cols * grid.Rows,
@@ -233,7 +234,7 @@ func newGameState(grid *Grid) *Game {
 			currentState:    stateWaiting,
 			actionCol:       -1,
 			actionRow:       -1,
-			victimAnims:     make([]MoveAnim, gridCols*gridRows), // flood can clear up to Cols*Rows cells
+			victimAnims:     make([]board.MoveAnim, gridCols*gridRows), // flood can clear up to Cols*Rows cells
 			victimCount:     0,
 			targetAnimating: false,
 		},
@@ -264,7 +265,7 @@ func newGameState(grid *Grid) *Game {
 // over it), giving an inset "carved into jelly" appearance.
 //
 // Returns nil if o is nil, the font is not loaded, or the gel shader fails to compile.
-func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
+func (g *Game) compositeCachedSprite(o *board.Organism) *ebiten.Image {
 	if o == nil || g.glyphFont == nil {
 		return nil
 	}
@@ -307,7 +308,7 @@ func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
 	}
 	str := string(o.Glyph)
 	w, h := text.Measure(str, face, 0)
-	tint := GlyphTint(clr)
+	tint := board.GlyphTint(clr)
 	var drawOpts text.DrawOptions
 	drawOpts.ColorScale.ScaleWithColor(tint)
 	nudgeY := float64(sz) * 0.03
@@ -339,7 +340,7 @@ func (g *Game) compositeCachedSprite(o *Organism) *ebiten.Image {
 // drawCompositeSprite blits the pre-rendered composite organism sprite for o
 // centred at (cx, cy) scaled so its inscribed circle matches radius.  Does
 // nothing if radius < 1, o is nil, or the sprite could not be baked.
-func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o *Organism) {
+func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o *board.Organism) {
 	if o == nil || radius < 1 {
 		return
 	}
@@ -416,7 +417,7 @@ func (g *Game) emptyColumns() []int {
 // indices in that column. moves is the [][2]int output of gravityMoves.
 // snapshot is a per-row copy of the column taken before any writes (aliasing
 // safety). spawned is incremented for each new cell written (respawnCells path).
-func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapshot []Cell) (spawned int) {
+func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapshot []board.Cell) (spawned int) {
 	// Write moved alive cells to their new positions.
 	for _, m := range moves {
 		g.board.grid.Cells[col][m[1]] = snapshot[m[0]]
@@ -425,13 +426,13 @@ func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapsh
 	if respawnCells {
 		// Write new random cells into the top slots (0..len(holeRows)-1).
 		for i := 0; i < len(holeRows); i++ {
-			g.board.grid.Cells[col][i] = Cell{Organism: PaletteOrganism(), Health: 1.0}
+			g.board.grid.Cells[col][i] = board.Cell{Organism: board.PaletteOrganism(), Health: 1.0}
 			spawned++
 		}
 	} else {
 		// Zero the top slots that were vacated and are not being filled.
 		for i := 0; i < len(holeRows); i++ {
-			g.board.grid.Cells[col][i] = Cell{} // Health=0, invisible; canvas already cleared by vacating moves
+			g.board.grid.Cells[col][i] = board.Cell{} // Health=0, invisible; canvas already cleared by vacating moves
 		}
 	}
 
@@ -462,9 +463,9 @@ func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs i
 	// Anims for moved alive cells (from their old row to their new row).
 	for _, m := range moves {
 		cell := g.board.grid.Cells[col][m[1]]
-		fx, fy := DeviceCellCenter(col, m[0], dcs)
-		tx, ty := DeviceCellCenter(col, m[1], dcs)
-		g.anim.moveAnims = append(g.anim.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+		fx, fy := board.DeviceCellCenter(col, m[0], dcs)
+		tx, ty := board.DeviceCellCenter(col, m[1], dcs)
+		g.anim.moveAnims = append(g.anim.moveAnims, board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 	}
 
 	if respawnCells {
@@ -473,8 +474,8 @@ func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs i
 			cell := g.board.grid.Cells[col][i]
 			fx := float32(col*dcs + dcs/2)
 			fy := float32(-dcs / 2)
-			tx, ty := DeviceCellCenter(col, i, dcs)
-			g.anim.moveAnims = append(g.anim.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+			tx, ty := board.DeviceCellCenter(col, i, dcs)
+			g.anim.moveAnims = append(g.anim.moveAnims, board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 			// The canvas position for row i was vacated by the moved cell above — already cleared.
 		}
 	}
@@ -510,10 +511,10 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 			continue
 		}
 
-		moves := GravityMoves(g.board.grid.Rows, holeRows)
+		moves := board.GravityMoves(g.board.grid.Rows, holeRows)
 
 		// Take a snapshot of the column before any writes (aliasing safety).
-		snapshot := make([]Cell, g.board.grid.Rows)
+		snapshot := make([]board.Cell, g.board.grid.Rows)
 		for row := 0; row < g.board.grid.Rows; row++ {
 			snapshot[row] = g.board.grid.Cells[col][row]
 		}
@@ -533,20 +534,20 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 // needed (caller falls through to stateWaiting).
 func (g *Game) buildCollapseAnims() bool {
 	emptyCols := g.emptyColumns()
-	moves := HorizontalCollapseMoves(g.board.grid.Cols, emptyCols)
+	moves := board.HorizontalCollapseMoves(g.board.grid.Cols, emptyCols)
 	if len(moves) == 0 {
 		return false
 	}
 
 	// Snapshot entire Cells slice to avoid aliasing during column moves.
-	snapshot := make([][]Cell, g.board.grid.Cols)
+	snapshot := make([][]board.Cell, g.board.grid.Cols)
 	for c := 0; c < g.board.grid.Cols; c++ {
-		snapshot[c] = make([]Cell, g.board.grid.Rows)
+		snapshot[c] = make([]board.Cell, g.board.grid.Rows)
 		copy(snapshot[c], g.board.grid.Cells[c])
 	}
 
 	// Apply the pure column reassignment.
-	newCells := ApplyColumnCollapse(snapshot, moves)
+	newCells := board.ApplyColumnCollapse(snapshot, moves)
 	for c := 0; c < g.board.grid.Cols; c++ {
 		copy(g.board.grid.Cells[c], newCells[c])
 	}
@@ -586,9 +587,9 @@ func (g *Game) buildCollapseAnims() bool {
 			if cell.Health <= 0 {
 				continue
 			}
-			fx, fy := DeviceCellCenter(oldCol, r, dcs)
-			tx, ty := DeviceCellCenter(newCol, r, dcs)
-			g.anim.moveAnims = append(g.anim.moveAnims, MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
+			fx, fy := board.DeviceCellCenter(oldCol, r, dcs)
+			tx, ty := board.DeviceCellCenter(newCol, r, dcs)
+			g.anim.moveAnims = append(g.anim.moveAnims, board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 		}
 	}
 
@@ -637,7 +638,7 @@ func (g *Game) settleAfterRemoval() {
 // updateColumnCollapsing waits for the horizontal column-collapse animation to
 // complete, commits cell positions to canvas, and returns to stateWaiting.
 func (g *Game) updateColumnCollapsing() error {
-	elapsed := ElapsedFraction(g.anim.animStart, time.Now(), dropDuration)
+	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), dropDuration)
 	if elapsed >= 1.0 {
 		dcs := g.view.deviceCellSize
 		for _, anim := range g.anim.moveAnims {
@@ -667,7 +668,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 	}
 
 	var nbuf [8][2]int
-	neighbors := eightNeighbors(nbuf[:0], col, row, g.board.grid.Cols, g.board.grid.Rows)
+	neighbors := board.EightNeighbors(nbuf[:0], col, row, g.board.grid.Cols, g.board.grid.Rows)
 
 	// Collect alive neighbours.
 	var aliveNeighbors [][2]int
@@ -676,19 +677,19 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 			aliveNeighbors = append(aliveNeighbors, n)
 		}
 	}
-	mixerAnim := MoveAnim{
+	mixerAnim := board.MoveAnim{
 		FromX:     float32(col*dcs + dcs/2),
 		FromY:     float32(row*dcs + dcs/2),
 		ToX:       float32(col*dcs + dcs/2),
 		ToY:       float32(row*dcs + dcs/2),
 		CtrlX:     float32(col*dcs + dcs/2),
 		CtrlY:     float32(row*dcs + dcs/2),
-		Cell:      Cell{Organism: g.board.grid.Cells[col][row].Organism, Health: oldMixerHealth},
+		Cell:      board.Cell{Organism: g.board.grid.Cells[col][row].Organism, Health: oldMixerHealth},
 		NewHealth: newMixerHealth,
 		PathType:  0, // stationary path
 		Rotations: 1, // reserved for future spin; currently unused
 	}
-	anims := make([]MoveAnim, len(aliveNeighbors)+1) // +1 for the mixer itself
+	anims := make([]board.MoveAnim, len(aliveNeighbors)+1) // +1 for the mixer itself
 	anims[0] = mixerAnim
 	if len(aliveNeighbors) > 0 {
 		// Fisher-Yates shuffle the positions (perm[i] = destination index for neighbour i).
@@ -697,7 +698,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		// Snapshot cells before modifying grid.
 		type neighborCell struct {
 			col, row int
-			cell     Cell
+			cell     board.Cell
 		}
 		orig := make([]neighborCell, len(aliveNeighbors))
 		for i, n := range aliveNeighbors {
@@ -708,8 +709,8 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		for i := range aliveNeighbors {
 			src := orig[i]
 			dst := aliveNeighbors[perm[i]]
-			fx, fy := DeviceCellCenter(src.col, src.row, dcs)
-			tx, ty := DeviceCellCenter(dst[0], dst[1], dcs)
+			fx, fy := board.DeviceCellCenter(src.col, src.row, dcs)
+			tx, ty := board.DeviceCellCenter(dst[0], dst[1], dcs)
 			dx := tx - fx
 			dy := ty - fy
 			dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
@@ -728,7 +729,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 				ctrlX = fx
 				ctrlY = fy
 			}
-			anims[i+1] = MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
+			anims[i+1] = board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, CtrlX: ctrlX, CtrlY: ctrlY, Cell: src.cell}
 		}
 
 		// Clear source positions on canvas (they will be drawn as moving overlays).
@@ -753,7 +754,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 // killing click (the action cell IsDead() after BumpHealth reached 0) it routes
 // into the drop pipeline so the dead Mixer's column collapses.
 func (g *Game) updateShuffling() error {
-	elapsed := ElapsedFraction(g.anim.animStart, time.Now(), shuffleDuration)
+	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), shuffleDuration)
 	if elapsed < 1.0 {
 		return nil
 	}
@@ -791,7 +792,7 @@ func (g *Game) updateShuffling() error {
 	return nil
 }
 
-func (g *Game) commitMixer(cell *Cell, col int, row int) error {
+func (g *Game) commitMixer(cell *board.Cell, col int, row int) error {
 	oldHealth := cell.BumpHealth(mixerHealthChangeOnClick)
 	if cell.IsDead() {
 		g.board.cellCount--
@@ -828,11 +829,11 @@ func (g *Game) commitCellAt(col, row int) error {
 		return nil
 	}
 
-	coords := FloodMatchCluster(g.board.grid.Cells, col, row, g.board.grid.Cols, g.board.grid.Rows)
+	coords := board.FloodMatchCluster(g.board.grid.Cells, col, row, g.board.grid.Cols, g.board.grid.Rows)
 
 	// No-op if the cluster contains no food: a lone animal (or animals-only
 	// cluster with no paired food) must not clear.
-	if !ClusterHasFood(g.board.grid.Cells, coords) {
+	if !board.ClusterHasFood(g.board.grid.Cells, coords) {
 		return nil
 	}
 
@@ -845,7 +846,7 @@ func (g *Game) commitCellAt(col, row int) error {
 		dcs = cellSize
 	}
 
-	seedCenterX, seedCenterY := DeviceCellCenter(col, row, dcs)
+	seedCenterX, seedCenterY := board.DeviceCellCenter(col, row, dcs)
 
 	for _, coord := range coords {
 		c, r := coord[0], coord[1]
@@ -855,15 +856,15 @@ func (g *Game) commitCellAt(col, row int) error {
 		g.drawCell(c, r, 1.0)
 		g.board.cellCount--
 
-		fromX, fromY := DeviceCellCenter(c, r, dcs)
+		fromX, fromY := board.DeviceCellCenter(c, r, dcs)
 
-		var v MoveAnim
+		var v board.MoveAnim
 		if c == col && r == row {
 			// Seed cell: shrinks in place (stationary).
-			v = MoveAnim{
+			v = board.MoveAnim{
 				Col:       c,
 				Row:       r,
-				Cell:      Cell{Organism: organism, Health: oldHealth},
+				Cell:      board.Cell{Organism: organism, Health: oldHealth},
 				FromX:     fromX,
 				FromY:     fromY,
 				ToX:       fromX,
@@ -877,10 +878,10 @@ func (g *Game) commitCellAt(col, row int) error {
 			// Clear victim's canvas position (it is now an overlay animation).
 			x0, y0 := c*dcs, r*dcs
 			g.view.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
-			v = MoveAnim{
+			v = board.MoveAnim{
 				Col:         c,
 				Row:         r,
-				Cell:        Cell{Organism: organism, Health: oldHealth},
+				Cell:        board.Cell{Organism: organism, Health: oldHealth},
 				FromX:       fromX,
 				FromY:       fromY,
 				ToX:         seedCenterX,
@@ -955,8 +956,8 @@ func (g *Game) updateHover(hc, hr int) {
 		g.input.victimHints = g.input.victimHints[:0]
 		return
 	}
-	cluster := FloodMatchCluster(g.board.grid.Cells, hc, hr, g.board.grid.Cols, g.board.grid.Rows)
-	if ClusterHasFood(g.board.grid.Cells, cluster) {
+	cluster := board.FloodMatchCluster(g.board.grid.Cells, hc, hr, g.board.grid.Cols, g.board.grid.Rows)
+	if board.ClusterHasFood(g.board.grid.Cells, cluster) {
 		g.input.victimHints = cluster
 	} else {
 		g.input.victimHints = g.input.victimHints[:0]
@@ -1045,13 +1046,13 @@ func (g *Game) updateWaiting() error {
 // updateVictimMoving advances the victim movement animation and transitions to
 // stateDropping (or stateWaiting) when the animation completes.
 func (g *Game) updateVictimMoving() error {
-	t := ElapsedFraction(g.anim.animStart, time.Now(), victimDuration)
+	t := board.ElapsedFraction(g.anim.animStart, time.Now(), victimDuration)
 	if t < 1.0 {
 		return nil
 	}
 	// Animation complete — score the clear and trigger drop.
 	// All victim cells already have Health=0 (set in commitCellAt).
-	g.board.score += ScoreForCluster(g.anim.victimCount)
+	g.board.score += board.ScoreForCluster(g.anim.victimCount)
 	var colSeen [gridCols]bool
 	colSeen[g.anim.actionCol] = true
 	for i := 0; i < g.anim.victimCount; i++ {
@@ -1084,7 +1085,7 @@ func (g *Game) updateVictimMoving() error {
 // cell positions and returns to stateWaiting (or stateColumnCollapsing when
 // empty columns remain after the drop settles).
 func (g *Game) updateDropping() error {
-	elapsed := ElapsedFraction(g.anim.animStart, time.Now(), dropDuration)
+	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), dropDuration)
 	if elapsed < 1.0 {
 		return nil
 	}
@@ -1119,7 +1120,7 @@ func (g *Game) Update() error {
 	g.input.victimHints = g.input.victimHints[:0]
 
 	if g.anim.targetAnimating {
-		if ElapsedFraction(g.anim.targetAnimStart, time.Now(), targetAnimDuration) >= 1.0 {
+		if board.ElapsedFraction(g.anim.targetAnimStart, time.Now(), targetAnimDuration) >= 1.0 {
 			g.anim.targetAnimating = false
 			g.drawCell(g.anim.actionCol, g.anim.actionRow, 1.0)
 		}
@@ -1254,7 +1255,7 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 		s = 1.0
 	}
 	xOff := float32(xOffset)
-	toX, toY := DeviceCellCenter(g.input.hoverCol, g.input.hoverRow, dcs)
+	toX, toY := board.DeviceCellCenter(g.input.hoverCol, g.input.hoverRow, dcs)
 	// Dot spacing and radius scale with device scale so they appear the same
 	// physical size on all displays.
 	dotSpacing := float32(8) * float32(s)
@@ -1264,7 +1265,7 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 	offset := float32(math.Mod(rawOff, float64(dotSpacing)))
 	for _, hint := range g.input.victimHints {
 		hc, hr := hint[0], hint[1]
-		fromX, fromY := DeviceCellCenter(hc, hr, dcs)
+		fromX, fromY := board.DeviceCellCenter(hc, hr, dcs)
 		dx := toX - fromX
 		dy := toY - fromY
 		length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
@@ -1298,7 +1299,7 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	if !g.anim.targetAnimating {
 		return
 	}
-	t := ElapsedFraction(g.anim.targetAnimStart, time.Now(), targetAnimDuration)
+	t := board.ElapsedFraction(g.anim.targetAnimStart, time.Now(), targetAnimDuration)
 	t = min(t, 1.0)
 	var r float32
 	if t < 0.5 {
@@ -1314,7 +1315,7 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	if dcs <= 0 {
 		dcs = cellSize
 	}
-	cx, cy := DeviceCellCenter(g.anim.actionCol, g.anim.actionRow, dcs)
+	cx, cy := board.DeviceCellCenter(g.anim.actionCol, g.anim.actionRow, dcs)
 	if r > 0 {
 		g.drawCompositeSprite(dst, cx+float32(xOffset), cy, r, g.anim.targetAnimOrganism)
 	}
@@ -1326,7 +1327,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	xOff := float32(xOffset)
 	if len(g.anim.moveAnims) > 0 {
 		dur := moveAnimDuration(g.anim.currentState)
-		t := ElapsedFraction(g.anim.animStart, time.Now(), dur)
+		t := board.ElapsedFraction(g.anim.animStart, time.Now(), dur)
 		t = min(t, 1.0)
 		dcs := g.view.deviceCellSize
 		if dcs <= 0 {
@@ -1358,7 +1359,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	}
 
 	if g.anim.currentState == stateVictimMoving {
-		t := ElapsedFraction(g.anim.animStart, time.Now(), victimDuration)
+		t := board.ElapsedFraction(g.anim.animStart, time.Now(), victimDuration)
 		t = min(t, 1.0)
 		for i := 0; i < g.anim.victimCount; i++ {
 			v := g.anim.victimAnims[i]
@@ -1496,7 +1497,7 @@ func main() {
 	ebiten.SetWindowTitle("go2d grid")
 	ebiten.SetWindowClosingHandled(false)
 
-	grid := NewGrid(gridCols, gridRows)
+	grid := board.NewGrid(gridCols, gridRows)
 
 	game := newGameState(grid)
 	game.anim.animStart = time.Now()

@@ -9,6 +9,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+	"mixersmash/internal/board"
 )
 
 // hud holds the persistent cache image for the HUD strip and the last-rendered
@@ -60,7 +61,7 @@ func hudWrapText(txt string, maxChars int) []string {
 // The HUD is rendered into h.image (a persistent cache) and re-rendered only
 // when the content or size changes.  Every frame we blit the cached image with
 // one DrawImage — no per-frame text render, no per-frame allocation.
-func (h *hud) draw(frame *ebiten.Image, hudDevW int, score int, hoverCol, hoverRow int, grid *Grid) {
+func (h *hud) draw(frame *ebiten.Image, hudDevW int, score int, hoverCol, hoverRow int, grid *board.Grid) {
 	frameH := frame.Bounds().Dy()
 	const themeName = "MixerSmash"
 
@@ -180,7 +181,7 @@ func (h *hud) needsRedraw(hudDevW, frameH, score, hoverCol, hoverRow int, themeN
 // "Level 1" header, the game instructions (wrapped to maxChars), score line, and
 // an optional blank spacer + "Name - Power" line when the hovered cell is
 // alive.  Pure; no ebiten calls.
-func (h *hud) buildTextLines(score, hoverCol, hoverRow, maxChars int, grid *Grid) []string {
+func (h *hud) buildTextLines(score, hoverCol, hoverRow, maxChars int, grid *board.Grid) []string {
 	var lines []string
 	lines = append(lines, "Level 1")
 	lines = append(lines, hudWrapText("Match animals with their food", maxChars)...)
