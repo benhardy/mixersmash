@@ -34,17 +34,29 @@ Authoritative targets are in `Makefile`. Summary:
 
 ## Architecture (file map)
 
-The repo root holds the flat `main` package. `internal/board` holds the pure, ebiten-free model layer (Plan B step B3). `internal/anim` holds the animation core (Plan B step B4). Import graph: `main → internal/anim → internal/board`, with `main` also importing `internal/board` directly; no cycles.
+The repo root holds the flat `main` package, split across several files. `internal/board` holds the pure, ebiten-free model layer. `internal/anim` holds the animation core. Import graph: `main → internal/anim → internal/board`, with `main` also importing `internal/board` directly; no cycles.
 
-- `main.go` — game loop entry point; Ebitengine `Update` state machine with per-state handlers; `Draw` + all rendering; input handling (mouse + touch); HUD; the `present` step that blits the offscreen frame to the real screen via `presentGeoM`; `gameState` enum and a `kindOf` helper that maps it to `internal/anim.StateKind`
-- `internal/board/` — ebiten-free model layer (`package board`): `Cell`, `Grid`, `NewGrid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `ElapsedFraction` (wall-clock animation progress); `Organism`, `OrganismPalette`, `GlyphTint`, OKLab colour math. `main` depends on this package; nothing here imports ebiten. `Grid` fully encapsulates its cell storage (unexported `cells` slice); `main` never indexes cells directly — all reads go through `At`/`Column`/`Snapshot`/`Live` and all mutations through `Place`/`BumpHealthAt`/`SetHealthZero`/`ReplaceColumn`, which maintain an exact live-cell count internally (replacing the old hand-maintained `boardState.cellCount`).
-- `internal/anim/` — ebiten-free animation core (`package anim`): `anim.go` + `lerp.go`; owns the `StateKind` enum; exports `MoveAnimDuration`, `MoveAnimPos`, `VictimPathParams`, `VictimAnimPos`, and the lerp/easing helpers. Depends on `internal/board`; nothing here imports ebiten.
-- `grid.go` — retained in `main` for call-site qualification bridge; pure model types now live in `internal/board`
-- `creatures.go` — glyph-font loader and embedded title-image asset; baked sprites are NOT stored here — they live in `Game.spriteCache` in the render layer. Pure `Organism` data and palette helpers have moved to `internal/board`
-- `device.go` — `LayoutF`; `frameScaleFor`; `deviceCellSize` / `spriteRef` sizing; sprite-cache clear on realloc (currently immediate — see gotchas)
+**Main package files:**
+
+- `main.go` — `Game` struct and its named sub-structs by concern (`board`, `anim`, `input`, `view`, `perf`), plus render resources (`shaders`, glyph font, `spriteCache`) and the `hud` cache; global consts; `newGameState`; `main()`; `gameState` enum and the `kindOf` helper that maps it to `internal/anim.StateKind`
+- `render.go` — `Draw` path; HUD compositing; the `present` step that blits the offscreen frame via `presentGeoM`; baked-sprite cache; perf debug overlay
+- `statemachine.go` — `Update`; all per-state handler functions; `repaintGrid` / `enterWaiting` settle logic
+- `input.go` — touch / pointer / hover event handling
+- `assets.go` — `//go:embed` declarations; glyph-font loader; decoded title image (GPU creation is deferred to the draw path, not `init()`); `init()` for embed setup
+- `device.go` — `LayoutF`; `frameScaleFor`; `deviceCellSize` / `spriteRef` sizing; sprite-cache clear deferred to settle when animating
 - `mapping.go` — `screenToFrame` / `screenToBoard`; inverts `presentGeoM` for input hit-testing
+- `hud.go` — HUD layout and rendering helpers
 - `shaders.go` — Kage gel/glow shader source strings
+- `grid.go` — retained in `main`; bridges call sites that qualify model types from `internal/board`
 - `orientation_js.go` / `orientation_other.go` — build-tagged orientation lock and fullscreen (JS-only on WASM; no-ops elsewhere)
+
+**Internal packages:**
+
+- `internal/board/` — ebiten-free model layer (`package board`): `Cell`, `Grid`, `NewGrid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `ElapsedFraction` (wall-clock animation progress); `Organism`, `OrganismPalette`, `GlyphTint`, OKLab colour math. Nothing here imports ebiten. `Grid` fully encapsulates its cell storage (unexported `cells` slice); callers never index cells directly — all reads go through `At`/`Column`/`Snapshot`/`Live` and all mutations through `Place`/`BumpHealthAt`/`SetHealthZero`/`ReplaceColumn`, which maintain an exact live-cell count internally (the old hand-maintained `boardState.cellCount` mirror is gone).
+- `internal/anim/` — ebiten-free animation core (`package anim`): `anim.go` + `lerp.go`; owns the `StateKind` enum; exports `MoveAnimDuration`, `MoveAnimPos`, `VictimPathParams`, `VictimAnimPos`, and the lerp/easing helpers. Depends on `internal/board`; nothing here imports ebiten.
+
+**Other:**
+
 - `tools/web_server/main.go` — minimal static file server for `make serve`
 - `web/` — `index.html` (loading screen, progress bar, Start overlay), `manifest.webmanifest` (PWA), `wasm_exec.js`, `mixersmash.wasm`, `wasm-meta.js`, icons, `title.png`
 
@@ -80,23 +92,37 @@ Full details in `CLAUDE.md` under "Ebitengine rendering notes". One line each:
 - **Build cannot catch Kage failures:** `go build` / `go test` pass even when a shader is broken; rendering changes require a visual check.
 - **Bake inside the game loop:** drawing or baking before `ebiten.RunGame()` has no graphics context and produces blank output.
 - **Sprite cache:** cell sprites are baked once per `color.RGBA` and cached; the shader runs only at bake time — do not invalidate the cache mid-animation.
-- **Sprite cache clear is immediate in `LayoutF`:** a scale change during an animation triggers a re-bake storm; deferring this clear to the next settle is a known latent hazard (tracked in `ROADMAP.md`).
+- **Sprite cache clear in `LayoutF`:** the clear is deferred to the next settle when an animation is in progress, avoiding a mid-animation re-bake storm. If this deferral logic breaks, expect visual glitches during scale changes.
 
 ---
 
 ## Current state
 
-Working: desktop and mobile play; mobile touch (hold = hover, release = commit); orientation lock and fullscreen on Start; loading screen with accurate progress bar and Start button; PWA manifest; animal/food cluster-matching mechanic (clear a flood-connected cluster that includes its paired food) plus the Mixer; HiDPI two-seam rotated rendering; perf tuned (wall-clock timing, GC-at-settle; ~90-100 fps, occasional ~33 ms spike).
+Working: desktop and mobile play; mobile touch (hold = hover, release = commit); orientation lock and fullscreen on Start; loading screen with accurate progress bar and Start button; PWA manifest; animal/food cluster-matching mechanic (clear a flood-connected cluster that includes its paired food) plus the Mixer; HiDPI two-seam rotated rendering; perf tuned (wall-clock timing, GC-at-settle; ~90-100 fps, occasional ~33 ms spike). Build, tests, and lint are all green; tree is clean on `main` as of `24dd49e`.
 
-A temporary perf readout exists behind `const showPerfDebug` in `main.go` (currently `false`).
+A temporary perf readout exists behind `const showPerfDebug` in `render.go` (currently `false`).
 
-Architecture refactor: Plan A (grouping `Game`'s fields into sub-structs) is complete. Plan B is fully complete — `internal/board` (B3, commits `56ffb71`, `a4ce4b4`) and `internal/anim` (B4, commits `b76ee20`, `ab3947c`) have both been extracted. `gameState` stays in `main`; `internal/anim` owns a `StateKind` enum and `main` bridges the two via a `kindOf` helper. Import graph is `main → internal/anim → internal/board` with no cycles.
+Architecture refactor: Plan A (`Game` sub-structs) complete. Plan B fully complete — `internal/board` extracted (B3), `internal/anim` extracted (B4), `main.go` split into `render.go` / `statemachine.go` / `input.go`, `creatures.go` renamed to `assets.go`, `Grid` population fully encapsulated, `titleImage` GPU creation deferred out of `init()`. `gameState` stays in `main`; `internal/anim` owns a `StateKind` enum bridged via `kindOf`.
 
 ---
 
 ## Where to look next
 
-- `ROADMAP.md` — parked perf ideas and deferred technical work
-- `DECISIONS.md` — chronological log of design rationale
+**Untriaged code-quality items** (catalogued, not yet fixed):
 
-Deferred product work noted by the user: scoring redesign (the old colour-bonus scoring is dead under the connection mechanic); nicer icon and HUD art; a predator/prey connection theme; level progression.
+- `MoveAnim` in `internal/board/grid.go` is a union struct spanning three path types with an unused `Rotations` field — consider splitting into distinct types.
+- `GravityMoves` in `internal/board/grid.go` allocates a `map[int]bool` per call on the drop path — could use a fixed-size scratch buffer.
+- `containsTouchID` / `findReleasedID` in `input.go` are near-duplicate linear searches — small but worth collapsing.
+- `updateColumnCollapsing` / `updateDropping` in `statemachine.go` truncate pixel→grid back-conversion — needs triage; likely safe-by-construction if coords are always cell centres, but not verified.
+- Lazy shader init in `render.go` is inconsistent (some paths fatal, some nil) — audit for uniform error handling.
+- `SetWindowTitle` is called every tick in `statemachine.go` — should be called only on change.
+- `drawPerfDebug` in `render.go` computes a manual four-way max — minor cleanup.
+
+**Parked on `ROADMAP.md`:** receiver migration of `*Game` methods onto sub-structs; SVG sprite overhaul (needs art assets); GC-spike diagnosis/tuning; Plan C state-machine-as-interfaces restructure.
+
+**Decision on record:** variable board sizes are YAGNI — `gridCols`/`gridRows` fixed-array sizing stays; do not decouple it.
+
+**Deferred product work:** scoring redesign (colour-bonus scoring is dead under the connection mechanic); nicer icon and HUD art; predator/prey connection theme; level progression.
+
+- `ROADMAP.md` — full list of parked ideas with pick-up triggers
+- `DECISIONS.md` — chronological log of design rationale
