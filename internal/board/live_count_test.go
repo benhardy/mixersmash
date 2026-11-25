@@ -6,12 +6,12 @@ import (
 
 // liveCell returns a Cell with Health=1.0 and a non-nil Organism.
 func liveCell() Cell {
-	return Cell{Organism: &Organism{}, Health: 1.0}
+	return Cell{organism: &Organism{}, health: 1.0}
 }
 
-// deadCell returns a Cell with Health=0 and a non-nil Organism.
+// deadCell returns a Cell with health=0 and a non-nil organism.
 func deadCell() Cell {
-	return Cell{Organism: &Organism{}, Health: 0}
+	return Cell{organism: &Organism{}, health: 0}
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ func TestPlaceLiveDeltas(t *testing.T) {
 			}
 			// Seed the cell directly and set live accordingly.
 			g.cells[0][0] = tc.initial
-			if tc.initial.Health > 0 {
+			if tc.initial.health > 0 {
 				g.live = 1
 			}
 
@@ -130,7 +130,7 @@ func TestBumpHealthAtLivenessAndReturn(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			cells: [][]Cell{{{Health: 0.5}}},
+			cells: [][]Cell{{{health: 0.5}}},
 			live:  1,
 		}
 		oldH := g.BumpHealthAt(0, 0, -0.6) // 0.5 + (-0.6) = -0.1 → clamped to 0
@@ -146,7 +146,7 @@ func TestBumpHealthAtLivenessAndReturn(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			cells: [][]Cell{{{Health: 0.5}}},
+			cells: [][]Cell{{{health: 0.5}}},
 			live:  1,
 		}
 		oldH := g.BumpHealthAt(0, 0, -0.3) // 0.5 - 0.3 = 0.2 > 0
@@ -162,7 +162,7 @@ func TestBumpHealthAtLivenessAndReturn(t *testing.T) {
 		g := &Grid{
 			Cols:  1,
 			Rows:  1,
-			cells: [][]Cell{{{Health: 0}}},
+			cells: [][]Cell{{{health: 0}}},
 			live:  0,
 		}
 		g.BumpHealthAt(0, 0, 0.5)

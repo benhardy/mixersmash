@@ -195,8 +195,8 @@ func (h *hud) buildTextLines(score, hoverCol, hoverRow, maxChars int, grid *boar
 	if hoverCol >= 0 && hoverRow >= 0 &&
 		hoverCol < grid.Cols && hoverRow < grid.Rows {
 		cell := grid.At(hoverCol, hoverRow)
-		if cell.Health > 0 && cell.Organism != nil {
-			name := cell.Organism.Name
+		if cell.Health() > 0 && cell.Organism() != nil {
+			name := cell.Organism().Name
 			if len(name) > 0 {
 				name = strings.ToUpper(name[:1]) + name[1:]
 			}

@@ -149,7 +149,7 @@ func TestBuildTextLines(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
 		creature := &board.Organism{Name: "cat"}
-		grid.Place(2, 3, board.Cell{Organism: creature, Health: 1.0})
+		grid.Place(2, 3, board.NewCell(creature, 1.0))
 
 		lines := h.buildTextLines(0, 2, 3, maxChars, grid)
 
@@ -183,7 +183,7 @@ func TestBuildTextLines(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
 		creature := &board.Organism{Name: "wolf"}
-		grid.Place(1, 1, board.Cell{Organism: creature, Health: 0}) // dead
+		grid.Place(1, 1, board.NewCell(creature, 0)) // dead
 
 		lines := h.buildTextLines(0, 1, 1, maxChars, grid)
 		for _, l := range lines {
@@ -196,7 +196,7 @@ func TestBuildTextLines(t *testing.T) {
 	t.Run("hover nil creature omits creature line", func(t *testing.T) {
 		h := &hud{}
 		grid := makeTestGrid(5, 5)
-		grid.Place(0, 0, board.Cell{Organism: nil, Health: 1.0})
+		grid.Place(0, 0, board.NewCell(nil, 1.0))
 
 		lines := h.buildTextLines(0, 0, 0, maxChars, grid)
 		for _, l := range lines {

@@ -28,10 +28,10 @@ func TestBuildDropMoveAnims(t *testing.T) {
 
 	cells := make([][]board.Cell, cols)
 	cells[0] = []board.Cell{
-		{Organism: nil, Health: 0},    // row 0: vacated slot
-		{Organism: cr(), Health: 1.0}, // row 1: compacted from row 0
-		{Organism: cr(), Health: 1.0}, // row 2: compacted from row 1
-		{Organism: cr(), Health: 1.0}, // row 3: unchanged
+		board.NewCell(nil, 0),    // row 0: vacated slot
+		board.NewCell(cr(), 1.0), // row 1: compacted from row 0
+		board.NewCell(cr(), 1.0), // row 2: compacted from row 1
+		board.NewCell(cr(), 1.0), // row 3: unchanged
 	}
 
 	g := &Game{

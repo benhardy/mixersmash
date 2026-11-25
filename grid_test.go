@@ -252,7 +252,7 @@ func makeHoverGame(cols, rows int) *Game {
 	for c := 0; c < cols; c++ {
 		for r := 0; r < rows; r++ {
 			idx := (c*rows + r) % len(board.OrganismPalette)
-			grid.Place(c, r, board.Cell{Organism: &board.OrganismPalette[idx], Health: 1.0})
+			grid.Place(c, r, board.NewCell(&board.OrganismPalette[idx], 1.0))
 		}
 	}
 	g := newGameState(grid)

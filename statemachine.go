@@ -48,7 +48,7 @@ func (g *Game) emptyColumns() []int {
 	for c := 0; c < g.board.grid.Cols; c++ {
 		empty := true
 		for r := 0; r < g.board.grid.Rows; r++ {
-			if g.board.grid.At(c, r).Health > 0 {
+			if g.board.grid.At(c, r).Health() > 0 {
 				empty = false
 				break
 			}
@@ -129,7 +129,7 @@ func (g *Game) buildDropAnims(removedCols []int) {
 		var holeRowsArr [gridRows]int
 		holeRowsCount := 0
 		for row := 0; row < g.board.grid.Rows; row++ {
-			if g.board.grid.At(col, row).Health <= 0 {
+			if g.board.grid.At(col, row).Health() <= 0 {
 				holeRowsArr[holeRowsCount] = row
 				holeRowsCount++
 			}
@@ -201,7 +201,7 @@ func (g *Game) buildCollapseAnims() bool {
 		oldCol, newCol := m[0], m[1]
 		for r := 0; r < g.board.grid.Rows; r++ {
 			cell := g.board.grid.At(newCol, r)
-			if cell.Health <= 0 {
+			if cell.Health() <= 0 {
 				continue
 			}
 			fx, fy := board.DeviceCellCenter(oldCol, r, dcs)
@@ -285,7 +285,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 	// Collect alive neighbours.
 	var aliveNeighbors [][2]int
 	for _, n := range neighbors {
-		if g.board.grid.At(n[0], n[1]).Health > 0 {
+		if g.board.grid.At(n[0], n[1]).Health() > 0 {
 			aliveNeighbors = append(aliveNeighbors, n)
 		}
 	}
@@ -296,7 +296,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		ToY:       float32(row*dcs + dcs/2),
 		CtrlX:     float32(col*dcs + dcs/2),
 		CtrlY:     float32(row*dcs + dcs/2),
-		Cell:      board.Cell{Organism: g.board.grid.At(col, row).Organism, Health: oldMixerHealth},
+		Cell:      board.NewCell(g.board.grid.At(col, row).Organism(), oldMixerHealth),
 		NewHealth: newMixerHealth,
 		PathType:  0, // stationary path
 		Rotations: 1, // reserved for future spin; currently unused
@@ -376,7 +376,7 @@ func (g *Game) updateShuffling() error {
 		g.anim.actionCol < g.board.grid.Cols &&
 		g.anim.actionRow >= 0 &&
 		g.anim.actionRow < g.board.grid.Rows &&
-		g.board.grid.At(g.anim.actionCol, g.anim.actionRow).Health <= 0
+		g.board.grid.At(g.anim.actionCol, g.anim.actionRow).Health() <= 0
 	if !killed {
 		g.enterWaiting()
 		return nil
@@ -403,7 +403,7 @@ func (g *Game) updateShuffling() error {
 
 func (g *Game) commitMixer(col int, row int) error {
 	oldHealth := g.board.grid.BumpHealthAt(col, row, mixerHealthChangeOnClick)
-	newHealth := g.board.grid.At(col, row).Health
+	newHealth := g.board.grid.At(col, row).Health()
 	g.drawCell(col, row, 1.0)
 	// Record the action position so updateShuffling can detect a killing click.
 	g.anim.actionCol = col
@@ -423,16 +423,16 @@ func (g *Game) commitCellAt(col, row int) error {
 		return nil
 	}
 	cell := g.board.grid.At(col, row)
-	if cell.Health <= 0 {
+	if cell.Health() <= 0 {
 		return nil
 	}
 
 	// Mixer click path: increment click count and either shuffle or remove.
-	if cell.Organism != nil && cell.Organism.IsMixer {
+	if cell.Organism() != nil && cell.Organism().IsMixer {
 		return g.commitMixer(col, row)
 	}
 
-	if cell.Organism == nil || !cell.Organism.IsAnimal {
+	if cell.Organism() == nil || !cell.Organism().IsAnimal {
 		return nil
 	}
 
@@ -458,8 +458,8 @@ func (g *Game) commitCellAt(col, row int) error {
 	for _, coord := range coords {
 		c, r := coord[0], coord[1]
 		snap := g.board.grid.At(c, r)
-		organism := snap.Organism
-		oldHealth := snap.Health
+		organism := snap.Organism()
+		oldHealth := snap.Health()
 		g.board.grid.SetHealthZero(c, r)
 		g.drawCell(c, r, 1.0)
 
@@ -471,7 +471,7 @@ func (g *Game) commitCellAt(col, row int) error {
 			v = board.MoveAnim{
 				Col:       c,
 				Row:       r,
-				Cell:      board.Cell{Organism: organism, Health: oldHealth},
+				Cell:      board.NewCell(organism, oldHealth),
 				FromX:     fromX,
 				FromY:     fromY,
 				ToX:       fromX,
@@ -488,7 +488,7 @@ func (g *Game) commitCellAt(col, row int) error {
 			v = board.MoveAnim{
 				Col:         c,
 				Row:         r,
-				Cell:        board.Cell{Organism: organism, Health: oldHealth},
+				Cell:        board.NewCell(organism, oldHealth),
 				FromX:       fromX,
 				FromY:       fromY,
 				ToX:         seedCenterX,

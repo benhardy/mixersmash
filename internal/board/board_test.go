@@ -10,7 +10,7 @@ import (
 // Health is left at its zero value; callers that need Health=1.0 must set it explicitly.
 func cellWithColor(c color.RGBA) Cell {
 	o := &Organism{Color: c}
-	return Cell{Organism: o}
+	return Cell{organism: o}
 }
 
 // TestGridInitialisation verifies that NewGrid returns a Grid whose Cells
@@ -48,8 +48,8 @@ func TestInitialCellHealth(t *testing.T) {
 	g := NewGrid(cols, rows)
 	for c := 0; c < cols; c++ {
 		for r := 0; r < rows; r++ {
-			if g.cells[c][r].Health != 1.0 {
-				t.Errorf("Cells[%d][%d].Health = %v, want 1.0", c, r, g.cells[c][r].Health)
+			if g.cells[c][r].health != 1.0 {
+				t.Errorf("Cells[%d][%d].health = %v, want 1.0", c, r, g.cells[c][r].health)
 			}
 		}
 	}
@@ -310,7 +310,7 @@ func makeSnapshot(numCols, numRows int) [][]Cell {
 		snapshot[c] = make([]Cell, numRows)
 		for r := 0; r < numRows; r++ {
 			snapshot[c][r] = cellWithColor(color.RGBA{R: uint8(c*10 + 10), G: uint8(r*10 + 10), B: 50, A: 255})
-			snapshot[c][r].Health = float32(c+1) * 0.1
+			snapshot[c][r].health = float32(c+1) * 0.1
 		}
 	}
 	return snapshot
@@ -681,7 +681,7 @@ func makeTestCells(cols, rows int) [][]Cell {
 
 // placeOrganism sets cells[col][row] to an alive cell with the given organism pointer.
 func placeOrganism(cells [][]Cell, col, row int, o *Organism) {
-	cells[col][row] = Cell{Organism: o, Health: 1.0}
+	cells[col][row] = Cell{organism: o, health: 1.0}
 }
 
 // ---------------------------------------------------------------------------

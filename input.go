@@ -51,11 +51,11 @@ func (g *Game) updateHover(hc, hr int) {
 		return
 	}
 	cell := g.board.grid.At(hc, hr)
-	if cell.Health <= 0 {
+	if cell.Health() <= 0 {
 		return
 	}
 	g.input.hoverCol, g.input.hoverRow = hc, hr
-	if cell.Organism == nil || !cell.Organism.IsAnimal {
+	if cell.Organism() == nil || !cell.Organism().IsAnimal {
 		g.input.victimHints = g.input.victimHints[:0]
 		return
 	}

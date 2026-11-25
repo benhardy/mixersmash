@@ -6,32 +6,48 @@ import (
 )
 
 // Cell holds a grid cell's organism reference and health (1.0 = full, 0.0 = dead).
-// A nil Organism means the cell is empty/dead.
+// A nil organism means the cell is empty/dead.
 type Cell struct {
-	Organism *Organism
-	Health   float32
+	organism *Organism
+	health   float32
+}
+
+// NewCell constructs a Cell with the given organism pointer and health value.
+// Use this from outside package board where struct-literal construction is not possible.
+func NewCell(o *Organism, health float32) Cell {
+	return Cell{organism: o, health: health}
+}
+
+// Organism returns the cell's organism pointer (may be nil for an empty cell).
+func (c Cell) Organism() *Organism {
+	return c.organism
+}
+
+// Health returns the cell's current health value (1.0 = full, 0.0 = dead).
+func (c Cell) Health() float32 {
+	return c.health
 }
 
 // BumpHealth adjusts the cell's health by delta (clamped to >= 0) and returns the old health.
 func (c *Cell) BumpHealth(delta float32) float32 {
-	oldHealth := c.Health
-	c.Health = max(c.Health+delta, 0)
+	oldHealth := c.health
+	c.health = max(c.health+delta, 0)
 	return oldHealth
 }
 
 // IsDead reports whether the cell's health is at or below zero.
 func (c Cell) IsDead() bool {
-	return c.Health <= 0
+	return c.health <= 0
 }
 
 // Color returns the palette colour for this cell's organism, or a zero color.RGBA
-// (A=0) if the cell is empty (Organism == nil). All palette colours have A=255,
+// (A=0) if the cell is empty (organism == nil). All palette colours have A=255,
 // so A=0 is a safe sentinel for an empty cell.
 func (c Cell) Color() color.RGBA {
-	if c.Organism == nil {
+	if c.organism == nil {
 		return color.RGBA{}
 	}
-	return c.Organism.Color
+	return c.organism.Color
 }
 
 // MoveAnim describes the animated movement of a cell from one pixel position to
@@ -76,8 +92,8 @@ func NewGrid(cols, rows int) *Grid {
 		cells[c] = make([]Cell, rows)
 		for r := 0; r < rows; r++ {
 			cells[c][r] = Cell{
-				Organism: PaletteOrganism(),
-				Health:   1.0,
+				organism: PaletteOrganism(),
+				health:   1.0,
 			}
 		}
 	}
@@ -96,7 +112,7 @@ func GridFromCells(cols, rows int, cells [][]Cell) *Grid {
 	live := 0
 	for c := 0; c < cols; c++ {
 		for r := 0; r < rows; r++ {
-			if cells[c][r].Health > 0 {
+			if cells[c][r].health > 0 {
 				live++
 			}
 		}
@@ -139,11 +155,11 @@ func (g *Grid) Place(col, row int, c Cell) {
 	old := g.cells[col][row]
 	g.cells[col][row] = c
 	wasAlive := 0
-	if old.Health > 0 {
+	if old.health > 0 {
 		wasAlive = 1
 	}
 	isAlive := 0
-	if c.Health > 0 {
+	if c.health > 0 {
 		isAlive = 1
 	}
 	g.live += isAlive - wasAlive
@@ -152,9 +168,9 @@ func (g *Grid) Place(col, row int, c Cell) {
 // BumpHealthAt applies BumpHealth to the cell at (col, row) and returns the
 // old health. g.live is updated by the liveness delta.
 func (g *Grid) BumpHealthAt(col, row int, delta float32) float32 {
-	wasAlive := g.cells[col][row].Health > 0
+	wasAlive := g.cells[col][row].health > 0
 	oldHealth := g.cells[col][row].BumpHealth(delta)
-	isAlive := g.cells[col][row].Health > 0
+	isAlive := g.cells[col][row].health > 0
 	if wasAlive && !isAlive {
 		g.live--
 	} else if !wasAlive && isAlive {
@@ -166,8 +182,8 @@ func (g *Grid) BumpHealthAt(col, row int, delta float32) float32 {
 // SetHealthZero sets the Health of the cell at (col, row) to zero.
 // g.live is decremented only if the cell was previously alive (Health > 0).
 func (g *Grid) SetHealthZero(col, row int) {
-	if g.cells[col][row].Health > 0 {
-		g.cells[col][row].Health = 0
+	if g.cells[col][row].health > 0 {
+		g.cells[col][row].health = 0
 		g.live--
 	}
 }
@@ -180,11 +196,11 @@ func (g *Grid) ReplaceColumn(col int, src []Cell) {
 		old := g.cells[col][r]
 		g.cells[col][r] = c
 		wasAlive := 0
-		if old.Health > 0 {
+		if old.health > 0 {
 			wasAlive = 1
 		}
 		isAlive := 0
-		if c.Health > 0 {
+		if c.health > 0 {
 			isAlive = 1
 		}
 		delta += isAlive - wasAlive
@@ -337,7 +353,7 @@ func ApplyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 // Returns a [][2]int of (col, row) pairs including the seed. A lone animal with no
 // matching neighbours returns a single-element slice.
 func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
-	seed := cells[col][row].Organism
+	seed := cells[col][row].organism
 	if seed == nil || !seed.IsAnimal {
 		return nil
 	}
@@ -361,7 +377,7 @@ func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 			if visited[nc][nr] {
 				continue
 			}
-			o := cells[nc][nr].Organism
+			o := cells[nc][nr].organism
 			if o == nil {
 				continue
 			}
@@ -385,7 +401,7 @@ func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 // no-food no-op rule: a cluster with no paired food must not clear.
 func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
 	for _, coord := range coords {
-		o := cells[coord[0]][coord[1]].Organism
+		o := cells[coord[0]][coord[1]].organism
 		if o != nil && !o.IsAnimal {
 			return true
 		}
@@ -417,7 +433,7 @@ func (g *Grid) CountLiveCells() int {
 	n := 0
 	for c := 0; c < g.Cols; c++ {
 		for r := 0; r < g.Rows; r++ {
-			if g.cells[c][r].Health > 0 {
+			if g.cells[c][r].health > 0 {
 				n++
 			}
 		}
