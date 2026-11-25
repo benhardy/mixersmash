@@ -16,6 +16,7 @@ import (
 	text "github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 	"golang.org/x/image/font/basicfont"
+	"mixersmash/internal/anim"
 	"mixersmash/internal/board"
 )
 
@@ -44,12 +45,10 @@ const (
 
 	// Animation durations expressed as wall-clock time.
 	// Values are equivalent to the original tick counts at 60 TPS:
-	//   shuffleDuration  = 18 ticks / 60 TPS = 300ms
-	//   dropDuration     = 18 ticks / 60 TPS = 300ms
-	//   victimDuration   = 24 ticks / 60 TPS = 400ms
-	//   targetAnimDuration = 15 ticks / 60 TPS = 250ms
-	shuffleDuration    = 18 * time.Second / 60 // 300ms
-	dropDuration       = 18 * time.Second / 60 // 300ms
+	//   anim.ShuffleDuration = 18 ticks / 60 TPS = 300ms
+	//   anim.DropDuration    = 18 ticks / 60 TPS = 300ms
+	//   victimDuration       = 24 ticks / 60 TPS = 400ms
+	//   targetAnimDuration   = 15 ticks / 60 TPS = 250ms
 	victimDuration     = 24 * time.Second / 60 // 400ms
 	targetAnimDuration = 15 * time.Second / 60 // 250ms
 
@@ -638,12 +637,12 @@ func (g *Game) settleAfterRemoval() {
 // updateColumnCollapsing waits for the horizontal column-collapse animation to
 // complete, commits cell positions to canvas, and returns to stateWaiting.
 func (g *Game) updateColumnCollapsing() error {
-	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), dropDuration)
+	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), anim.DropDuration)
 	if elapsed >= 1.0 {
 		dcs := g.view.deviceCellSize
-		for _, anim := range g.anim.moveAnims {
-			col := int(anim.ToX) / dcs
-			row := int(anim.ToY) / dcs
+		for _, mv := range g.anim.moveAnims {
+			col := int(mv.ToX) / dcs
+			row := int(mv.ToY) / dcs
 			if col >= 0 && col < g.board.grid.Cols && row >= 0 && row < g.board.grid.Rows {
 				g.drawCell(col, row, 1.0)
 			}
@@ -754,7 +753,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 // killing click (the action cell IsDead() after BumpHealth reached 0) it routes
 // into the drop pipeline so the dead Mixer's column collapses.
 func (g *Game) updateShuffling() error {
-	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), shuffleDuration)
+	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), anim.ShuffleDuration)
 	if elapsed < 1.0 {
 		return nil
 	}
@@ -874,7 +873,7 @@ func (g *Game) commitCellAt(col, row int) error {
 			}
 		} else {
 			// Non-seed: animate toward the seed using spiral/curved path.
-			pt, cx, cy, st := VictimPathParams(fromX, fromY, seedCenterX, seedCenterY)
+			pt, cx, cy, st := anim.VictimPathParams(fromX, fromY, seedCenterX, seedCenterY)
 			// Clear victim's canvas position (it is now an overlay animation).
 			x0, y0 := c*dcs, r*dcs
 			g.view.canvas.SubImage(image.Rect(x0, y0, x0+dcs, y0+dcs)).(*ebiten.Image).Clear()
@@ -1085,14 +1084,14 @@ func (g *Game) updateVictimMoving() error {
 // cell positions and returns to stateWaiting (or stateColumnCollapsing when
 // empty columns remain after the drop settles).
 func (g *Game) updateDropping() error {
-	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), dropDuration)
+	elapsed := board.ElapsedFraction(g.anim.animStart, time.Now(), anim.DropDuration)
 	if elapsed < 1.0 {
 		return nil
 	}
 	dcs := g.view.deviceCellSize
-	for _, anim := range g.anim.moveAnims {
-		col := int(anim.ToX) / dcs
-		row := int(anim.ToY) / dcs
+	for _, mv := range g.anim.moveAnims {
+		col := int(mv.ToX) / dcs
+		row := int(mv.ToY) / dcs
 		if col >= 0 && col < g.board.grid.Cols && row >= 0 && row < g.board.grid.Rows {
 			g.drawCell(col, row, 1.0)
 		}
@@ -1303,13 +1302,13 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	t = min(t, 1.0)
 	var r float32
 	if t < 0.5 {
-		lt := t * 2              // 0→1 in phase 1
-		eased := EaseOutQuad(lt) // ease-out: fast start, slow at peak
-		r = Lerp(g.anim.targetAnimStartR, g.anim.targetAnimPeakR, eased)
+		lt := t * 2                   // 0→1 in phase 1
+		eased := anim.EaseOutQuad(lt) // ease-out: fast start, slow at peak
+		r = anim.Lerp(g.anim.targetAnimStartR, g.anim.targetAnimPeakR, eased)
 	} else {
-		lt := (t - 0.5) * 2     // 0→1 in phase 2
-		eased := EaseInQuad(lt) // ease-in: slow at peak, fast at end
-		r = Lerp(g.anim.targetAnimPeakR, g.anim.targetAnimEndR, eased)
+		lt := (t - 0.5) * 2          // 0→1 in phase 2
+		eased := anim.EaseInQuad(lt) // ease-in: slow at peak, fast at end
+		r = anim.Lerp(g.anim.targetAnimPeakR, g.anim.targetAnimEndR, eased)
 	}
 	dcs := g.view.deviceCellSize
 	if dcs <= 0 {
@@ -1321,12 +1320,26 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	}
 }
 
+// kindOf converts a main-package gameState to the anim.StateKind used by the
+// anim package functions.  This is the only coupling point between the two
+// state enumerations; no shim types or aliases are created.
+func kindOf(state gameState) anim.StateKind {
+	switch state {
+	case stateShuffling:
+		return anim.KindShuffle
+	case stateDropping, stateColumnCollapsing:
+		return anim.KindDrop
+	default:
+		return anim.KindOther
+	}
+}
+
 // drawMoveAnims renders in-motion cells for shuffle, drop, and victim-move animations.
 // xOffset is added to all board-local X coordinates before drawing into dst.
 func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 	xOff := float32(xOffset)
 	if len(g.anim.moveAnims) > 0 {
-		dur := MoveAnimDuration(g.anim.currentState)
+		dur := anim.MoveAnimDuration(kindOf(g.anim.currentState))
 		t := board.ElapsedFraction(g.anim.animStart, time.Now(), dur)
 		t = min(t, 1.0)
 		dcs := g.view.deviceCellSize
@@ -1334,26 +1347,26 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 			dcs = cellSize
 		}
 		maxR := float32(dcs/2 - 2)
-		for _, anim := range g.anim.moveAnims {
-			cx, cy := MoveAnimPos(anim, g.anim.currentState, t)
+		for _, mv := range g.anim.moveAnims {
+			cx, cy := anim.MoveAnimPos(mv, kindOf(g.anim.currentState), t)
 			var r float32
-			if g.anim.currentState == stateShuffling && anim.Rotations != 0 {
+			if g.anim.currentState == stateShuffling && mv.Rotations != 0 {
 				// Clicked-mixer entry only: interpolate radius from old health to new health
 				// with a gentle bounce envelope so the shrink is visually sprung.
 				// Identified by Rotations!=0 (set to 1 only on the prepended mixer entry in
 				// buildShuffleAnims); neighbour Mixers have Rotations==0 and fall through
 				// to the standard radius path below. Works for NewHealth==0 (final click).
-				// anim.Cell.Health = pre-click health; anim.NewHealth = post-click health.
-				et := EaseInOutQuad(t)
-				base := Lerp(anim.Cell.Health, anim.NewHealth, et)
+				// mv.Cell.Health = pre-click health; mv.NewHealth = post-click health.
+				et := anim.EaseInOutQuad(t)
+				base := anim.Lerp(mv.Cell.Health, mv.NewHealth, et)
 				// Bounce: gentle spring envelope peaks at t=0.5, amplitude 15%.
 				bounce := base * (1 + 0.15*float32(math.Sin(float64(t)*math.Pi)))
 				r = maxR * bounce
 			} else {
-				r = maxR * anim.Cell.Health
+				r = maxR * mv.Cell.Health
 			}
 			if r > 0 {
-				g.drawCompositeSprite(dst, xOff+cx, cy, r, anim.Cell.Organism)
+				g.drawCompositeSprite(dst, xOff+cx, cy, r, mv.Cell.Organism)
 			}
 		}
 	}
@@ -1363,7 +1376,7 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		t = min(t, 1.0)
 		for i := 0; i < g.anim.victimCount; i++ {
 			v := g.anim.victimAnims[i]
-			cx, cy := VictimAnimPos(v, t)
+			cx, cy := anim.VictimAnimPos(v, t)
 			dcs2 := g.view.deviceCellSize
 			if dcs2 <= 0 {
 				dcs2 = cellSize

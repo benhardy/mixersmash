@@ -1,4 +1,4 @@
-package main
+package anim
 
 // Lerp returns the linear interpolation between a and b at parameter t.
 // t=0 returns a, t=1 returns b; values outside [0,1] extrapolate linearly.

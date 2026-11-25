@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"mixersmash/internal/anim"
 	"mixersmash/internal/board"
 )
 
@@ -32,11 +33,11 @@ func TestStateConstants(t *testing.T) {
 // TestDurationConstants documents the wall-clock duration of each animation
 // phase and verifies that they equal the original tick-based values at 60 TPS.
 func TestDurationConstants(t *testing.T) {
-	if shuffleDuration != 300*time.Millisecond {
-		t.Errorf("shuffleDuration = %v, want 300ms", shuffleDuration)
+	if anim.ShuffleDuration != 300*time.Millisecond {
+		t.Errorf("anim.ShuffleDuration = %v, want 300ms", anim.ShuffleDuration)
 	}
-	if dropDuration != 300*time.Millisecond {
-		t.Errorf("dropDuration = %v, want 300ms", dropDuration)
+	if anim.DropDuration != 300*time.Millisecond {
+		t.Errorf("anim.DropDuration = %v, want 300ms", anim.DropDuration)
 	}
 	if victimDuration != 400*time.Millisecond {
 		t.Errorf("victimDuration = %v, want 400ms", victimDuration)
@@ -85,8 +86,8 @@ func TestElapsedFraction(t *testing.T) {
 		tickWindow := time.Second / 60 // ~16.67ms
 		now1 := start.Add(tickWindow / 3)
 		now2 := start.Add(2 * tickWindow / 3)
-		f1 := board.ElapsedFraction(start, now1, shuffleDuration)
-		f2 := board.ElapsedFraction(start, now2, shuffleDuration)
+		f1 := board.ElapsedFraction(start, now1, anim.ShuffleDuration)
+		f2 := board.ElapsedFraction(start, now2, anim.ShuffleDuration)
 		if f1 == f2 {
 			t.Errorf("sub-tick: ElapsedFraction at %v and %v within same tick window returned identical fraction %v; wall-clock not used",
 				now1.Sub(start), now2.Sub(start), f1)

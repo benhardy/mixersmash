@@ -1,39 +1,38 @@
-package main
+package anim
 
 import (
 	"math"
 	"testing"
-	"time"
 
 	"mixersmash/internal/board"
 )
 
-// --- moveAnimDuration tests ---
+// --- MoveAnimDuration tests ---
 
 func TestMoveAnimDuration(t *testing.T) {
 	t.Helper()
 
 	tests := []struct {
-		state gameState
-		want  time.Duration
+		name string
+		kind StateKind
+		want interface{}
 	}{
-		{stateShuffling, shuffleDuration},
-		{stateWaiting, shuffleDuration},
-		{stateVictimMoving, shuffleDuration},
-		{stateDropping, dropDuration},
-		{stateColumnCollapsing, dropDuration},
+		{"KindShuffle", KindShuffle, ShuffleDuration},
+		{"KindOther", KindOther, ShuffleDuration},
+		{"KindDrop", KindDrop, DropDuration},
 	}
 	for _, tc := range tests {
-		t.Run("", func(t *testing.T) {
-			got := MoveAnimDuration(tc.state)
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := MoveAnimDuration(tc.kind)
 			if got != tc.want {
-				t.Errorf("moveAnimDuration(%d) = %v; want %v", tc.state, got, tc.want)
+				t.Errorf("MoveAnimDuration(%v) = %v; want %v", tc.kind, got, tc.want)
 			}
 		})
 	}
 }
 
-// --- moveAnimPos tests ---
+// --- MoveAnimPos tests ---
 
 const float32Eps = float32(1e-4)
 
@@ -48,62 +47,62 @@ func approxEqF32(a, b float32) bool {
 func TestMoveAnimPos(t *testing.T) {
 	t.Helper()
 
-	anim := board.MoveAnim{
+	mv := board.MoveAnim{
 		FromX: 10, FromY: 20,
 		ToX: 110, ToY: 220,
 		CtrlX: 60, CtrlY: 320, // arc control point
 	}
 
-	t.Run("stateShuffling t=0 returns From", func(t *testing.T) {
-		cx, cy := MoveAnimPos(anim, stateShuffling, 0)
-		if !approxEqF32(cx, anim.FromX) || !approxEqF32(cy, anim.FromY) {
-			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, anim.FromX, anim.FromY)
+	t.Run("KindShuffle t=0 returns From", func(t *testing.T) {
+		cx, cy := MoveAnimPos(mv, KindShuffle, 0)
+		if !approxEqF32(cx, mv.FromX) || !approxEqF32(cy, mv.FromY) {
+			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, mv.FromX, mv.FromY)
 		}
 	})
 
-	t.Run("stateShuffling t=1 returns To", func(t *testing.T) {
-		cx, cy := MoveAnimPos(anim, stateShuffling, 1)
-		if !approxEqF32(cx, anim.ToX) || !approxEqF32(cy, anim.ToY) {
-			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, anim.ToX, anim.ToY)
+	t.Run("KindShuffle t=1 returns To", func(t *testing.T) {
+		cx, cy := MoveAnimPos(mv, KindShuffle, 1)
+		if !approxEqF32(cx, mv.ToX) || !approxEqF32(cy, mv.ToY) {
+			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, mv.ToX, mv.ToY)
 		}
 	})
 
-	t.Run("stateDropping t=0 returns From", func(t *testing.T) {
-		cx, cy := MoveAnimPos(anim, stateDropping, 0)
-		if !approxEqF32(cx, anim.FromX) || !approxEqF32(cy, anim.FromY) {
-			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, anim.FromX, anim.FromY)
+	t.Run("KindDrop t=0 returns From", func(t *testing.T) {
+		cx, cy := MoveAnimPos(mv, KindDrop, 0)
+		if !approxEqF32(cx, mv.FromX) || !approxEqF32(cy, mv.FromY) {
+			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, mv.FromX, mv.FromY)
 		}
 	})
 
-	t.Run("stateDropping t=1 returns To", func(t *testing.T) {
-		cx, cy := MoveAnimPos(anim, stateDropping, 1)
-		if !approxEqF32(cx, anim.ToX) || !approxEqF32(cy, anim.ToY) {
-			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, anim.ToX, anim.ToY)
+	t.Run("KindDrop t=1 returns To", func(t *testing.T) {
+		cx, cy := MoveAnimPos(mv, KindDrop, 1)
+		if !approxEqF32(cx, mv.ToX) || !approxEqF32(cy, mv.ToY) {
+			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, mv.ToX, mv.ToY)
 		}
 	})
 
-	t.Run("stateShuffling mid-t uses eased bezier", func(t *testing.T) {
-		// At t=0.5 the easeInOutQuad returns exactly 0.5 (by definition),
-		// so the Bézier at eased=0.5 equals quadBezier2 at 0.5.
+	t.Run("KindShuffle mid-t uses eased bezier", func(t *testing.T) {
+		// At t=0.5 the EaseInOutQuad returns exactly 0.5 (by definition),
+		// so the Bézier at eased=0.5 equals QuadBezier2 at 0.5.
 		et := EaseInOutQuad(0.5)
-		wantX, wantY := QuadBezier2(anim.FromX, anim.FromY, anim.CtrlX, anim.CtrlY, anim.ToX, anim.ToY, et)
-		cx, cy := MoveAnimPos(anim, stateShuffling, 0.5)
+		wantX, wantY := QuadBezier2(mv.FromX, mv.FromY, mv.CtrlX, mv.CtrlY, mv.ToX, mv.ToY, et)
+		cx, cy := MoveAnimPos(mv, KindShuffle, 0.5)
 		if !approxEqF32(cx, wantX) || !approxEqF32(cy, wantY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, wantX, wantY)
 		}
 	})
 
-	t.Run("stateDropping mid-t uses eased lerp", func(t *testing.T) {
+	t.Run("KindDrop mid-t uses eased lerp", func(t *testing.T) {
 		posT := EaseInQuad(0.5)
-		wantX, wantY := Lerp2(anim.FromX, anim.FromY, anim.ToX, anim.ToY, posT)
-		cx, cy := MoveAnimPos(anim, stateDropping, 0.5)
+		wantX, wantY := Lerp2(mv.FromX, mv.FromY, mv.ToX, mv.ToY, posT)
+		cx, cy := MoveAnimPos(mv, KindDrop, 0.5)
 		if !approxEqF32(cx, wantX) || !approxEqF32(cy, wantY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, wantX, wantY)
 		}
 	})
 }
 
-// --- victimAnimPos tests ---
+// --- VictimAnimPos tests ---
 
 func TestVictimAnimPos(t *testing.T) {
 	t.Helper()
