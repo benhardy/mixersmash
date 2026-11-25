@@ -105,8 +105,8 @@ func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs i
 	// Anims for moved alive cells (from their old row to their new row).
 	for _, m := range moves {
 		cell := g.board.grid.At(col, m[1])
-		fx, fy := board.DeviceCellCenter(col, m[0], dcs)
-		tx, ty := board.DeviceCellCenter(col, m[1], dcs)
+		fx, fy := deviceCellCenter(col, m[0], dcs)
+		tx, ty := deviceCellCenter(col, m[1], dcs)
 		g.anim.moveAnims = append(g.anim.moveAnims, board.NewMoveAnim(fx, fy, tx, ty, cell))
 	}
 }
@@ -204,8 +204,8 @@ func (g *Game) buildCollapseAnims() bool {
 			if cell.Health() <= 0 {
 				continue
 			}
-			fx, fy := board.DeviceCellCenter(oldCol, r, dcs)
-			tx, ty := board.DeviceCellCenter(newCol, r, dcs)
+			fx, fy := deviceCellCenter(oldCol, r, dcs)
+			tx, ty := deviceCellCenter(newCol, r, dcs)
 			g.anim.moveAnims = append(g.anim.moveAnims, board.NewMoveAnim(fx, fy, tx, ty, cell))
 		}
 	}
@@ -315,8 +315,8 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		for i := range aliveNeighbors {
 			src := orig[i]
 			dst := aliveNeighbors[perm[i]]
-			fx, fy := board.DeviceCellCenter(src.col, src.row, dcs)
-			tx, ty := board.DeviceCellCenter(dst[0], dst[1], dcs)
+			fx, fy := deviceCellCenter(src.col, src.row, dcs)
+			tx, ty := deviceCellCenter(dst[0], dst[1], dcs)
 			dx := tx - fx
 			dy := ty - fy
 			dist := float32(math.Sqrt(float64(dx*dx + dy*dy)))
@@ -447,7 +447,7 @@ func (g *Game) commitCellAt(col, row int) error {
 		dcs = cellSize
 	}
 
-	seedCenterX, seedCenterY := board.DeviceCellCenter(col, row, dcs)
+	seedCenterX, seedCenterY := deviceCellCenter(col, row, dcs)
 
 	for _, coord := range coords {
 		c, r := coord[0], coord[1]
@@ -457,7 +457,7 @@ func (g *Game) commitCellAt(col, row int) error {
 		g.board.grid.SetHealthZero(c, r)
 		g.drawCell(c, r, 1.0)
 
-		fromX, fromY := board.DeviceCellCenter(c, r, dcs)
+		fromX, fromY := deviceCellCenter(c, r, dcs)
 
 		var v board.MoveAnim
 		if c == col && r == row {

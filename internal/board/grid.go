@@ -565,10 +565,3 @@ func ElapsedFraction(start, now time.Time, duration time.Duration) float32 {
 	}
 	return f
 }
-
-// DeviceCellCenter returns the device-pixel centre of a grid cell for the given
-// device cell size dcs.  Used wherever pixel coordinates must map to the
-// device-resolution canvas or screen.
-func DeviceCellCenter(col, row, dcs int) (float32, float32) {
-	return float32(col*dcs + dcs/2), float32(row*dcs + dcs/2)
-}

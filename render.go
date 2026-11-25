@@ -294,7 +294,7 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 		s = 1.0
 	}
 	xOff := float32(xOffset)
-	toX, toY := board.DeviceCellCenter(g.input.hoverCol, g.input.hoverRow, dcs)
+	toX, toY := deviceCellCenter(g.input.hoverCol, g.input.hoverRow, dcs)
 	// Dot spacing and radius scale with device scale so they appear the same
 	// physical size on all displays.
 	dotSpacing := float32(8) * float32(s)
@@ -304,7 +304,7 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 	offset := float32(math.Mod(rawOff, float64(dotSpacing)))
 	for _, hint := range g.input.victimHints {
 		hc, hr := hint[0], hint[1]
-		fromX, fromY := board.DeviceCellCenter(hc, hr, dcs)
+		fromX, fromY := deviceCellCenter(hc, hr, dcs)
 		dx := toX - fromX
 		dy := toY - fromY
 		length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
@@ -354,7 +354,7 @@ func (g *Game) drawTargetBounce(dst *ebiten.Image, xOffset int) {
 	if dcs <= 0 {
 		dcs = cellSize
 	}
-	cx, cy := board.DeviceCellCenter(g.anim.actionCol, g.anim.actionRow, dcs)
+	cx, cy := deviceCellCenter(g.anim.actionCol, g.anim.actionRow, dcs)
 	if r > 0 {
 		g.drawCompositeSprite(dst, cx+float32(xOffset), cy, r, g.anim.targetAnimOrganism)
 	}

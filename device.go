@@ -50,6 +50,12 @@ func frameScaleFor(sw, sh int, portrait bool) float64 {
 	return k
 }
 
+// deviceCellCenter returns the device-pixel centre of a grid cell for the
+// given device cell size dcs.
+func deviceCellCenter(col, row, dcs int) (float32, float32) {
+	return float32(col*dcs + dcs/2), float32(row*dcs + dcs/2)
+}
+
 // deviceCellSizeFor derives the device-pixel cell size from the rounded canvas
 // dimensions, dividing by the grid dimensions so tiles cover exactly.
 func deviceCellSizeFor(canvasW int) int {
