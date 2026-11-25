@@ -81,7 +81,7 @@ func TestMoveAnimPos(t *testing.T) {
 		// At t=0.5 the EaseInOutQuad returns exactly 0.5 (by definition),
 		// so the Bézier at eased=0.5 equals QuadBezier2 at 0.5.
 		et := EaseInOutQuad(0.5)
-		wantX, wantY := QuadBezier2(mv.FromX(), mv.FromY(), mv.CtrlX(), mv.CtrlY(), mv.ToX(), mv.ToY(), et)
+		wantX, wantY := quadBezier2(mv.FromX(), mv.FromY(), mv.CtrlX(), mv.CtrlY(), mv.ToX(), mv.ToY(), et)
 		cx, cy := MoveAnimPos(mv, KindShuffle, 0.5)
 		if !approxEqF32(cx, wantX) || !approxEqF32(cy, wantY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, wantX, wantY)
@@ -90,7 +90,7 @@ func TestMoveAnimPos(t *testing.T) {
 
 	t.Run("KindDrop mid-t uses eased lerp", func(t *testing.T) {
 		posT := EaseInQuad(0.5)
-		wantX, wantY := Lerp2(mv.FromX(), mv.FromY(), mv.ToX(), mv.ToY(), posT)
+		wantX, wantY := lerp2(mv.FromX(), mv.FromY(), mv.ToX(), mv.ToY(), posT)
 		cx, cy := MoveAnimPos(mv, KindDrop, 0.5)
 		if !approxEqF32(cx, wantX) || !approxEqF32(cy, wantY) {
 			t.Errorf("got (%.4f,%.4f); want (%.4f,%.4f)", cx, cy, wantX, wantY)

@@ -55,7 +55,7 @@ func TestLerp2(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gx, gy := Lerp2(tc.ax, tc.ay, tc.bx, tc.by, tc.tVal)
+			gx, gy := lerp2(tc.ax, tc.ay, tc.bx, tc.by, tc.tVal)
 			if !approxEq(gx, tc.wantX) || !approxEq(gy, tc.wantY) {
 				t.Errorf("lerp2(%v,%v,%v,%v,%v) = (%v,%v), want (%v,%v)",
 					tc.ax, tc.ay, tc.bx, tc.by, tc.tVal, gx, gy, tc.wantX, tc.wantY)
@@ -83,7 +83,7 @@ func TestQuadBezier(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := QuadBezier(p0, c, p1, tc.tVal)
+			got := quadBezier(p0, c, p1, tc.tVal)
 			if !approxEq(got, tc.want) {
 				t.Errorf("quadBezier(%v,%v,%v,%v) = %v, want %v", p0, c, p1, tc.tVal, got, tc.want)
 			}
@@ -109,7 +109,7 @@ func TestQuadBezier2(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gx, gy := QuadBezier2(p0x, p0y, cX, cY, p1x, p1y, tc.tVal)
+			gx, gy := quadBezier2(p0x, p0y, cX, cY, p1x, p1y, tc.tVal)
 			if !approxEq(gx, tc.wantX) || !approxEq(gy, tc.wantY) {
 				t.Errorf("quadBezier2 at t=%v = (%v,%v), want (%v,%v)",
 					tc.tVal, gx, gy, tc.wantX, tc.wantY)

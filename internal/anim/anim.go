@@ -44,10 +44,10 @@ func MoveAnimDuration(kind StateKind) time.Duration {
 func MoveAnimPos(mv board.MoveAnim, kind StateKind, t float32) (cx, cy float32) {
 	if kind == KindShuffle {
 		et := EaseInOutQuad(t)
-		cx, cy = QuadBezier2(mv.FromX(), mv.FromY(), mv.CtrlX(), mv.CtrlY(), mv.ToX(), mv.ToY(), et)
+		cx, cy = quadBezier2(mv.FromX(), mv.FromY(), mv.CtrlX(), mv.CtrlY(), mv.ToX(), mv.ToY(), et)
 	} else {
 		posT := EaseInQuad(t)
-		cx, cy = Lerp2(mv.FromX(), mv.FromY(), mv.ToX(), mv.ToY(), posT)
+		cx, cy = lerp2(mv.FromX(), mv.FromY(), mv.ToX(), mv.ToY(), posT)
 	}
 	return cx, cy
 }
@@ -91,9 +91,9 @@ func VictimPathParams(fromX, fromY, toX, toY float32) (pathType int, ctrlX, ctrl
 func VictimAnimPos(v board.MoveAnim, t float32) (cx, cy float32) {
 	switch v.PathType() {
 	case 0: // straight line
-		cx, cy = Lerp2(v.FromX(), v.FromY(), v.ToX(), v.ToY(), t)
+		cx, cy = lerp2(v.FromX(), v.FromY(), v.ToX(), v.ToY(), t)
 	case 1: // quadratic Bézier arc
-		cx, cy = QuadBezier2(v.FromX(), v.FromY(), v.CtrlX(), v.CtrlY(), v.ToX(), v.ToY(), t)
+		cx, cy = quadBezier2(v.FromX(), v.FromY(), v.CtrlX(), v.CtrlY(), v.ToX(), v.ToY(), t)
 	case 2: // inward spiral (radius shrinks, angle rotates)
 		ddx := v.FromX() - v.ToX()
 		ddy := v.FromY() - v.ToY()

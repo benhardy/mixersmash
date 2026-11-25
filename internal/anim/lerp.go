@@ -6,23 +6,23 @@ func Lerp(a, b, t float32) float32 {
 	return a + (b-a)*t
 }
 
-// Lerp2 returns the 2D linear interpolation between (ax,ay) and (bx,by) at t.
-func Lerp2(ax, ay, bx, by, t float32) (float32, float32) {
+// lerp2 returns the 2D linear interpolation between (ax,ay) and (bx,by) at t.
+func lerp2(ax, ay, bx, by, t float32) (float32, float32) {
 	return Lerp(ax, bx, t), Lerp(ay, by, t)
 }
 
-// QuadBezier returns the 1D quadratic Bézier value at parameter t, with
+// quadBezier returns the 1D quadratic Bézier value at parameter t, with
 // start p0, control point c, and end p1.
 // t=0 returns p0, t=1 returns p1.
-func QuadBezier(p0, c, p1, t float32) float32 {
+func quadBezier(p0, c, p1, t float32) float32 {
 	u := 1 - t
 	return u*u*p0 + 2*u*t*c + t*t*p1
 }
 
-// QuadBezier2 returns the 2D quadratic Bézier position at parameter t.
+// quadBezier2 returns the 2D quadratic Bézier position at parameter t.
 // (p0x,p0y) is the start, (cx,cy) is the control point, (p1x,p1y) is the end.
-func QuadBezier2(p0x, p0y, cx, cy, p1x, p1y, t float32) (float32, float32) {
-	return QuadBezier(p0x, cx, p1x, t), QuadBezier(p0y, cy, p1y, t)
+func quadBezier2(p0x, p0y, cx, cy, p1x, p1y, t float32) (float32, float32) {
+	return quadBezier(p0x, cx, p1x, t), quadBezier(p0y, cy, p1y, t)
 }
 
 // EaseInQuad returns the quadratic ease-in value for t: t².
