@@ -110,7 +110,7 @@ Architecture refactor: Plan A (`Game` sub-structs) complete. Plan B fully comple
 
 **Untriaged code-quality items** (catalogued, not yet fixed):
 
-- `MoveAnim` in `internal/board/grid.go` is a union struct spanning three path types; typed constructors now exist per variant (`NewMoveAnim`/`NewShuffleAnim`/`NewMixerAnim`/`NewVictimSeedAnim`/`NewVictimAnim`). The `Rotations` field is retained for planned use. If the variants diverge further, splitting into distinct types remains an option.
+- `MoveAnim` in `internal/board/grid.go` is a union struct spanning three path types; typed constructors now exist per variant (`NewMoveAnim`/`NewShuffleAnim`/`NewMixerAnim`/`NewVictimSeedAnim`/`NewVictimAnim`). The `Rotations` field (signed spin count — full 360° rotations over the animation) is live: shuffle neighbours draw from a weighted distribution (−2:5% −1:20% 0:50% +1:20% +2:5%) via `shuffleRotation`; the render path applies `rotations×2π` eased with `EaseInOutQuad` around the sprite's centre (`spriteTurnGeoM`), positive = clockwise. Purely cosmetic — `Rotations()` is read only in the render path, no gameplay or model effect. If the variants diverge further, splitting into distinct types remains an option.
 - `GravityMoves` in `internal/board/grid.go` allocates a `map[int]bool` per call on the drop path — could use a fixed-size scratch buffer.
 - `containsTouchID` / `findReleasedID` in `input.go` are near-duplicate linear searches — small but worth collapsing.
 - `updateColumnCollapsing` / `updateDropping` in `statemachine.go` truncate pixel→grid back-conversion — needs triage; likely safe-by-construction if coords are always cell centres, but not verified.
