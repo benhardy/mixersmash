@@ -52,8 +52,8 @@ The repo root holds the flat `main` package, split across several files. `intern
 
 **Internal packages:**
 
-- `internal/board/` — ebiten-free model layer (`package board`): `Cell`, `Grid`, `NewGrid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `ElapsedFraction` (wall-clock animation progress); `Organism`, `OrganismPalette`, `GlyphTint`, OKLab colour math. Nothing here imports ebiten. `Grid` fully encapsulates its cell storage (unexported `cells` slice); callers never index cells directly — all reads go through `At`/`Column`/`Snapshot`/`Live` and all mutations through `Place`/`BumpHealthAt`/`SetHealthZero`/`ReplaceColumn`, which maintain an exact live-cell count internally (the old hand-maintained `boardState.cellCount` mirror is gone).
-- `internal/anim/` — ebiten-free animation core (`package anim`): `anim.go` + `lerp.go`; owns the `StateKind` enum; exports `MoveAnimDuration`, `MoveAnimPos`, `VictimPathParams`, `VictimAnimPos`, and the lerp/easing helpers. Depends on `internal/board`; nothing here imports ebiten.
+- `internal/board/` — ebiten-free model layer (`package board`): `Cell`, `Grid`, `NewGrid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `ElapsedFraction` (wall-clock animation progress); `Organism`, `GlyphTint`, OKLab colour math. Nothing here imports ebiten. All fields on `Cell`, `Organism`, and `MoveAnim` are unexported; callers use constructors (`NewCell`, `NewOrganism`, `NewMoveAnim`/`NewShuffleAnim`/`NewMixerAnim`/`NewVictimSeedAnim`/`NewVictimAnim`) and accessor methods. The organism palette is unexported (`organismPalette`); read-only access is via `PaletteOrganismAt(idx)` and `PaletteSize()`. `Grid` fully encapsulates its cell storage (unexported `cells` slice); callers never index cells directly — all reads go through `At`/`Column`/`Snapshot`/`Live` and all mutations through `Place`/`BumpHealthAt`/`SetHealthZero`/`ReplaceColumn`, which maintain an exact live-cell count internally. Cross-package helpers `EightNeighbors`, `FloodMatchCluster`, and `ClusterHasFood` have been removed; `Grid` methods are the sole public API for cluster operations.
+- `internal/anim/` — ebiten-free animation core (`package anim`): `anim.go` + `lerp.go`; owns the `StateKind` enum; exports `MoveAnimDuration`, `MoveAnimPos`, `VictimPathParams`, `VictimAnimPos`, and the easing helpers. `Lerp2`, `QuadBezier`, and `QuadBezier2` are unexported (no cross-package callers). Depends on `internal/board`; nothing here imports ebiten.
 
 **Other:**
 
@@ -102,7 +102,7 @@ Working: desktop and mobile play; mobile touch (hold = hover, release = commit);
 
 A temporary perf readout exists behind `const showPerfDebug` in `render.go` (currently `false`).
 
-Architecture refactor: Plan A (`Game` sub-structs) complete. Plan B fully complete — `internal/board` extracted (B3), `internal/anim` extracted (B4), `main.go` split into `render.go` / `statemachine.go` / `input.go`, `creatures.go` renamed to `assets.go`, `Grid` population fully encapsulated, `titleImage` GPU creation deferred out of `init()`. `gameState` stays in `main`; `internal/anim` owns a `StateKind` enum bridged via `kindOf`.
+Architecture refactor: Plan A (`Game` sub-structs) complete. Plan B fully complete — `internal/board` extracted (B3), `internal/anim` extracted (B4), `main.go` split into `render.go` / `statemachine.go` / `input.go`, `creatures.go` renamed to `assets.go`, `Grid` population fully encapsulated, `titleImage` GPU creation deferred out of `init()`. `gameState` stays in `main`; `internal/anim` owns a `StateKind` enum bridged via `kindOf`. Encapsulation pass complete: all fields on `Cell`, `Organism`, and `MoveAnim` are unexported; palette access is via read-only functions; free cluster helpers removed in favour of `Grid` methods; `anim` package internals (`Lerp2`/`QuadBezier`/`QuadBezier2`) unexported.
 
 ---
 
@@ -110,7 +110,7 @@ Architecture refactor: Plan A (`Game` sub-structs) complete. Plan B fully comple
 
 **Untriaged code-quality items** (catalogued, not yet fixed):
 
-- `MoveAnim` in `internal/board/grid.go` is a union struct spanning three path types with an unused `Rotations` field — consider splitting into distinct types.
+- `MoveAnim` in `internal/board/grid.go` is a union struct spanning three path types; typed constructors now exist per variant (`NewMoveAnim`/`NewShuffleAnim`/`NewMixerAnim`/`NewVictimSeedAnim`/`NewVictimAnim`). The `Rotations` field is retained for planned use. If the variants diverge further, splitting into distinct types remains an option.
 - `GravityMoves` in `internal/board/grid.go` allocates a `map[int]bool` per call on the drop path — could use a fixed-size scratch buffer.
 - `containsTouchID` / `findReleasedID` in `input.go` are near-duplicate linear searches — small but worth collapsing.
 - `updateColumnCollapsing` / `updateDropping` in `statemachine.go` truncate pixel→grid back-conversion — needs triage; likely safe-by-construction if coords are always cell centres, but not verified.

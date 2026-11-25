@@ -402,6 +402,21 @@ The decision was driven by a user preference that all population changes be chan
 
 ---
 
+## Encapsulation pass: internal/board and internal/anim (2026-11-25)
+
+**Aggressive field-level encapsulation across board and anim packages**
+All fields on `board.Cell`, `board.Organism`, and `board.MoveAnim` were unexported; constructors and zero-alloc accessor methods are the only public interface. The `OrganismPalette` var was replaced by `PaletteOrganismAt`/`PaletteSize` read-only functions. The exported free functions `EightNeighbors`, `FloodMatchCluster`, and `ClusterHasFood` were removed; `Grid` methods are now the sole cluster API. In `internal/anim`, `Lerp2`, `QuadBezier`, and `QuadBezier2` were unexported (no callers outside the package).
+
+The goal was to shrink the mutable public surface of these packages: an exported struct field is an implicit contract that any caller can read or write it at any time. Unexported fields turn unintended mutation from a convention violation into a compile error, eliminating a category of drift.
+
+**Pointer-identity cache invariant drove the Organism approach**
+`main` uses `*board.Organism` pointer identity as the sprite-cache key (a `map[*board.Organism]...`) and also takes palette entry addresses for board seeding (`&palette[i]`). These two uses require that the slice of `Organism` values not be replaced or moved. Exporting a mutable slice (`var OrganismPalette []Organism`) makes copying or reassigning it easy to do accidentally. The fix was to unexport the slice and expose only index-based accessors, preserving the pointer-identity guarantee at the API level while removing the footgun.
+
+**Stop boundary**
+Encapsulation stopped where the remaining exported `board` and `anim` symbols (`DeviceCellCenter`, `GravityMoves`, `HorizontalCollapseMoves`, `ApplyColumnCollapse`, `ScoreForCluster`, `ElapsedFraction`, `Grid.Cols`/`Rows`, `GridFromCells`) each have a legitimate cross-package caller in `main`. Unexporting them would require moving render or state-machine logic into `board`, which is code relocation, not encapsulation. All added accessors are inlinable field returns, so no measurable per-frame cost was incurred; the stop was the API boundary, not a performance constraint.
+
+---
+
 **Game struct separation of concerns (Plan A: sub-structs)**
 The `Game` struct had grown to ~60 flat fields in a 1485-line `main.go`, mixing board/model state, animation/state-machine state, device/presentation state, input state, and perf-debug counters. Grouped the fields into named sub-structs on `Game` — `boardState` (grid, cellCount, score), `animState` (phase, timing, action cell, move/victim/target anims), `inputState` (hover + pointer/touch), `viewState` (canvas/frame, scales, screen dims, portrait), and `perfCounters` — plus a distinct typed `gameState` enum for the dispatch switch. Render resources (shaders, glyph font, hud cache) stay on `Game` as they are not state.
 
