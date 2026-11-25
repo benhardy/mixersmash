@@ -38,8 +38,6 @@ const (
 	healthMin           = float32(0.562)
 	healthEpsilon       = float32(0.001)
 
-	respawnCells = false // set false to leave gaps at top instead of spawning new cells
-
 	mixerHealthChangeOnClick = float32(-0.334) // each click reduces health
 )
 
@@ -50,7 +48,7 @@ func (g *Game) emptyColumns() []int {
 	for c := 0; c < g.board.grid.Cols; c++ {
 		empty := true
 		for r := 0; r < g.board.grid.Rows; r++ {
-			if g.board.grid.Cells[c][r].Health > 0 {
+			if g.board.grid.At(c, r).Health > 0 {
 				empty = false
 				break
 			}
@@ -69,24 +67,16 @@ func (g *Game) emptyColumns() []int {
 // col is the column being processed. holeRows is the slice of dead-cell row
 // indices in that column. moves is the [][2]int output of gravityMoves.
 // snapshot is a per-row copy of the column taken before any writes (aliasing
-// safety). spawned is incremented for each new cell written (respawnCells path).
-func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapshot []board.Cell) (spawned int) {
+// safety).
+func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapshot []board.Cell) {
 	// Write moved alive cells to their new positions.
 	for _, m := range moves {
-		g.board.grid.Cells[col][m[1]] = snapshot[m[0]]
+		g.board.grid.Place(col, m[1], snapshot[m[0]])
 	}
 
-	if respawnCells {
-		// Write new random cells into the top slots (0..len(holeRows)-1).
-		for i := 0; i < len(holeRows); i++ {
-			g.board.grid.Cells[col][i] = board.Cell{Organism: board.PaletteOrganism(), Health: 1.0}
-			spawned++
-		}
-	} else {
-		// Zero the top slots that were vacated and are not being filled.
-		for i := 0; i < len(holeRows); i++ {
-			g.board.grid.Cells[col][i] = board.Cell{} // Health=0, invisible; canvas already cleared by vacating moves
-		}
+	// Zero the top slots that were vacated and are not being filled.
+	for i := 0; i < len(holeRows); i++ {
+		g.board.grid.Place(col, i, board.Cell{}) // Health=0, invisible; canvas already cleared by vacating moves
 	}
 
 	// Clear only the vacated canvas positions (clipped to canvas bounds).
@@ -102,7 +92,6 @@ func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapsh
 			g.view.canvas.SubImage(image.Rect(x0, y0, x1, y1)).(*ebiten.Image).Clear()
 		}
 	}
-	return spawned
 }
 
 // buildDropMoveAnims appends MoveAnim entries for a single column after the
@@ -115,34 +104,20 @@ func (g *Game) applyDropAndClear(col int, holeRows []int, moves [][2]int, snapsh
 func (g *Game) buildDropMoveAnims(col int, holeRows []int, moves [][2]int, dcs int) {
 	// Anims for moved alive cells (from their old row to their new row).
 	for _, m := range moves {
-		cell := g.board.grid.Cells[col][m[1]]
+		cell := g.board.grid.At(col, m[1])
 		fx, fy := board.DeviceCellCenter(col, m[0], dcs)
 		tx, ty := board.DeviceCellCenter(col, m[1], dcs)
 		g.anim.moveAnims = append(g.anim.moveAnims, board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
 	}
-
-	if respawnCells {
-		// Anims for new cells animating in from above screen.
-		for i := 0; i < len(holeRows); i++ {
-			cell := g.board.grid.Cells[col][i]
-			fx := float32(col*dcs + dcs/2)
-			fy := float32(-dcs / 2)
-			tx, ty := board.DeviceCellCenter(col, i, dcs)
-			g.anim.moveAnims = append(g.anim.moveAnims, board.MoveAnim{FromX: fx, FromY: fy, ToX: tx, ToY: ty, Cell: cell})
-			// The canvas position for row i was vacated by the moved cell above — already cleared.
-		}
-	}
 }
 
 // buildDropAnims computes MoveAnim entries for each affected column: alive cells
-// compact downward, and new random cells fall from above the screen top.
-// Only canvas positions that cells are vacating are cleared — not the whole column.
-// Returns the number of new cells spawned (non-zero only when respawnCells is true).
-func (g *Game) buildDropAnims(removedCols []int) int {
+// compact downward. Only canvas positions that cells are vacating are cleared —
+// not the whole column.
+func (g *Game) buildDropAnims(removedCols []int) {
 	if cap(g.anim.moveAnims) > 0 {
 		g.anim.moveAnims = g.anim.moveAnims[:0]
 	}
-	spawned := 0
 	var seen [gridCols]bool
 	for _, col := range removedCols {
 		if seen[col] {
@@ -154,7 +129,7 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		var holeRowsArr [gridRows]int
 		holeRowsCount := 0
 		for row := 0; row < g.board.grid.Rows; row++ {
-			if g.board.grid.Cells[col][row].Health <= 0 {
+			if g.board.grid.At(col, row).Health <= 0 {
 				holeRowsArr[holeRowsCount] = row
 				holeRowsCount++
 			}
@@ -167,15 +142,11 @@ func (g *Game) buildDropAnims(removedCols []int) int {
 		moves := board.GravityMoves(g.board.grid.Rows, holeRows)
 
 		// Take a snapshot of the column before any writes (aliasing safety).
-		snapshot := make([]board.Cell, g.board.grid.Rows)
-		for row := 0; row < g.board.grid.Rows; row++ {
-			snapshot[row] = g.board.grid.Cells[col][row]
-		}
+		snapshot := g.board.grid.Column(col)
 
-		spawned += g.applyDropAndClear(col, holeRows, moves, snapshot)
+		g.applyDropAndClear(col, holeRows, moves, snapshot)
 		g.buildDropMoveAnims(col, holeRows, moves, g.view.deviceCellSize)
 	}
-	return spawned
 }
 
 // buildCollapseAnims computes MoveAnim entries for the horizontal column-collapse
@@ -192,17 +163,10 @@ func (g *Game) buildCollapseAnims() bool {
 		return false
 	}
 
-	// Snapshot entire Cells slice to avoid aliasing during column moves.
-	snapshot := make([][]board.Cell, g.board.grid.Cols)
+	// Apply the pure column reassignment (Snapshot copy acceptable: rare click-time path).
+	newCells := board.ApplyColumnCollapse(g.board.grid.Snapshot(), moves)
 	for c := 0; c < g.board.grid.Cols; c++ {
-		snapshot[c] = make([]board.Cell, g.board.grid.Rows)
-		copy(snapshot[c], g.board.grid.Cells[c])
-	}
-
-	// Apply the pure column reassignment.
-	newCells := board.ApplyColumnCollapse(snapshot, moves)
-	for c := 0; c < g.board.grid.Cols; c++ {
-		copy(g.board.grid.Cells[c], newCells[c])
+		g.board.grid.ReplaceColumn(c, newCells[c])
 	}
 
 	// Clear canvas strips for every column that is a move source OR destination.
@@ -236,7 +200,7 @@ func (g *Game) buildCollapseAnims() bool {
 	for _, m := range moves {
 		oldCol, newCol := m[0], m[1]
 		for r := 0; r < g.board.grid.Rows; r++ {
-			cell := g.board.grid.Cells[newCol][r]
+			cell := g.board.grid.At(newCol, r)
 			if cell.Health <= 0 {
 				continue
 			}
@@ -321,7 +285,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 	// Collect alive neighbours.
 	var aliveNeighbors [][2]int
 	for _, n := range neighbors {
-		if !g.board.grid.Cells[n[0]][n[1]].IsDead() {
+		if g.board.grid.At(n[0], n[1]).Health > 0 {
 			aliveNeighbors = append(aliveNeighbors, n)
 		}
 	}
@@ -332,7 +296,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		ToY:       float32(row*dcs + dcs/2),
 		CtrlX:     float32(col*dcs + dcs/2),
 		CtrlY:     float32(row*dcs + dcs/2),
-		Cell:      board.Cell{Organism: g.board.grid.Cells[col][row].Organism, Health: oldMixerHealth},
+		Cell:      board.Cell{Organism: g.board.grid.At(col, row).Organism, Health: oldMixerHealth},
 		NewHealth: newMixerHealth,
 		PathType:  0, // stationary path
 		Rotations: 1, // reserved for future spin; currently unused
@@ -350,7 +314,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		}
 		orig := make([]neighborCell, len(aliveNeighbors))
 		for i, n := range aliveNeighbors {
-			orig[i] = neighborCell{n[0], n[1], g.board.grid.Cells[n[0]][n[1]]}
+			orig[i] = neighborCell{n[0], n[1], g.board.grid.At(n[0], n[1])}
 		}
 
 		// Build MoveAnims: neighbour i animates from its current centre to perm[i]'s centre.
@@ -389,7 +353,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 		// Write cells to their permuted destinations in the grid now (canvas repaint on settle).
 		for i := range aliveNeighbors {
 			dst := aliveNeighbors[perm[i]]
-			g.board.grid.Cells[dst[0]][dst[1]] = orig[i].cell
+			g.board.grid.Place(dst[0], dst[1], orig[i].cell)
 		}
 	}
 	g.anim.moveAnims = anims
@@ -412,7 +376,7 @@ func (g *Game) updateShuffling() error {
 		g.anim.actionCol < g.board.grid.Cols &&
 		g.anim.actionRow >= 0 &&
 		g.anim.actionRow < g.board.grid.Rows &&
-		g.board.grid.Cells[g.anim.actionCol][g.anim.actionRow].IsDead()
+		g.board.grid.At(g.anim.actionCol, g.anim.actionRow).Health <= 0
 	if !killed {
 		g.enterWaiting()
 		return nil
@@ -427,10 +391,7 @@ func (g *Game) updateShuffling() error {
 	// falling cells in actionCol, so painting them first is harmless.  Without
 	// this repaint the non-actionCol neighbours stay blank throughout the drop.
 	g.repaintGrid()
-	spawned := g.buildDropAnims([]int{g.anim.actionCol})
-	if respawnCells {
-		g.board.cellCount += spawned
-	}
+	g.buildDropAnims([]int{g.anim.actionCol})
 	if len(g.anim.moveAnims) > 0 {
 		g.anim.animStart = time.Now()
 		g.anim.currentState = stateDropping
@@ -440,11 +401,9 @@ func (g *Game) updateShuffling() error {
 	return nil
 }
 
-func (g *Game) commitMixer(cell *board.Cell, col int, row int) error {
-	oldHealth := cell.BumpHealth(mixerHealthChangeOnClick)
-	if cell.IsDead() {
-		g.board.cellCount--
-	}
+func (g *Game) commitMixer(col int, row int) error {
+	oldHealth := g.board.grid.BumpHealthAt(col, row, mixerHealthChangeOnClick)
+	newHealth := g.board.grid.At(col, row).Health
 	g.drawCell(col, row, 1.0)
 	// Record the action position so updateShuffling can detect a killing click.
 	g.anim.actionCol = col
@@ -452,7 +411,7 @@ func (g *Game) commitMixer(cell *board.Cell, col int, row int) error {
 	// Show new size, shuffle neighbours.  On the killing click the mixer
 	// shrinks to 0 during this animation; updateShuffling will route to the
 	// drop pipeline when it detects IsDead() at the action position.
-	g.buildShuffleAnims(col, row, oldHealth, cell.Health)
+	g.buildShuffleAnims(col, row, oldHealth, newHealth)
 	return nil
 }
 
@@ -463,25 +422,25 @@ func (g *Game) commitCellAt(col, row int) error {
 	if col < 0 || col >= g.board.grid.Cols || row < 0 || row >= g.board.grid.Rows {
 		return nil
 	}
-	cell := &g.board.grid.Cells[col][row]
-	if cell.IsDead() {
+	cell := g.board.grid.At(col, row)
+	if cell.Health <= 0 {
 		return nil
 	}
 
 	// Mixer click path: increment click count and either shuffle or remove.
 	if cell.Organism != nil && cell.Organism.IsMixer {
-		return g.commitMixer(cell, col, row)
+		return g.commitMixer(col, row)
 	}
 
 	if cell.Organism == nil || !cell.Organism.IsAnimal {
 		return nil
 	}
 
-	coords := board.FloodMatchCluster(g.board.grid.Cells, col, row, g.board.grid.Cols, g.board.grid.Rows)
+	coords := g.board.grid.FloodMatchCluster(col, row)
 
 	// No-op if the cluster contains no food: a lone animal (or animals-only
 	// cluster with no paired food) must not clear.
-	if !board.ClusterHasFood(g.board.grid.Cells, coords) {
+	if !g.board.grid.ClusterHasFood(coords) {
 		return nil
 	}
 
@@ -498,11 +457,11 @@ func (g *Game) commitCellAt(col, row int) error {
 
 	for _, coord := range coords {
 		c, r := coord[0], coord[1]
-		organism := g.board.grid.Cells[c][r].Organism
-		oldHealth := g.board.grid.Cells[c][r].Health
-		g.board.grid.Cells[c][r].Health = 0
+		snap := g.board.grid.At(c, r)
+		organism := snap.Organism
+		oldHealth := snap.Health
+		g.board.grid.SetHealthZero(c, r)
 		g.drawCell(c, r, 1.0)
-		g.board.cellCount--
 
 		fromX, fromY := board.DeviceCellCenter(c, r, dcs)
 
@@ -575,10 +534,7 @@ func (g *Game) updateVictimMoving() error {
 		}
 	}
 	g.anim.victimCount = 0
-	spawned := g.buildDropAnims(affectedColsArr[:affectedColsCount])
-	if respawnCells {
-		g.board.cellCount += spawned
-	}
+	g.buildDropAnims(affectedColsArr[:affectedColsCount])
 	if len(g.anim.moveAnims) > 0 {
 		g.anim.animStart = time.Now()
 		g.anim.currentState = stateDropping
@@ -620,7 +576,7 @@ func (g *Game) Update() error {
 		g.view.initialPainted = true
 	}
 
-	ebiten.SetWindowTitle(fmt.Sprintf("MixerSmash — cells: %d  score: %d", g.board.cellCount, g.board.score))
+	ebiten.SetWindowTitle(fmt.Sprintf("MixerSmash — cells: %d  score: %d", g.board.grid.Live(), g.board.score))
 
 	// Reset hover every tick; recompute below if conditions are met.
 	g.input.hoverCol, g.input.hoverRow = -1, -1

@@ -148,7 +148,8 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o 
 // redraws the antialiased circle for (col, row).  No glow is drawn here;
 // glow is composited onto the screen each frame in Draw().
 func (g *Game) drawCell(col, row int, cellFullness float32) {
-	cell := &g.board.grid.Cells[col][row]
+	c := g.board.grid.At(col, row)
+	cell := &c
 	cs := g.view.deviceCellSize
 	csFloat := float32(cs)
 
@@ -312,7 +313,7 @@ func (g *Game) drawVictimLine(dst *ebiten.Image, xOffset int) {
 		}
 		ux := dx / length
 		uy := dy / length
-		vc := g.board.grid.Cells[hc][hr].Color()
+		vc := g.board.grid.At(hc, hr).Color()
 		dotCol := color.RGBA{vc.R, vc.G, vc.B, 255}
 		for pos := offset; pos < length; pos += dotSpacing {
 			vector.FillCircle(dst, xOff+fromX+ux*pos, fromY+uy*pos, dotRadius, dotCol, true)

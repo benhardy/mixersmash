@@ -3,7 +3,6 @@ package main
 import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"mixersmash/internal/board"
 )
 
 // containsTouchID reports whether ids contains id.
@@ -51,8 +50,8 @@ func (g *Game) updateHover(hc, hr int) {
 	if hc < 0 || hc >= g.board.grid.Cols || hr < 0 || hr >= g.board.grid.Rows {
 		return
 	}
-	cell := g.board.grid.Cells[hc][hr]
-	if cell.IsDead() {
+	cell := g.board.grid.At(hc, hr)
+	if cell.Health <= 0 {
 		return
 	}
 	g.input.hoverCol, g.input.hoverRow = hc, hr
@@ -60,8 +59,8 @@ func (g *Game) updateHover(hc, hr int) {
 		g.input.victimHints = g.input.victimHints[:0]
 		return
 	}
-	cluster := board.FloodMatchCluster(g.board.grid.Cells, hc, hr, g.board.grid.Cols, g.board.grid.Rows)
-	if board.ClusterHasFood(g.board.grid.Cells, cluster) {
+	cluster := g.board.grid.FloodMatchCluster(hc, hr)
+	if g.board.grid.ClusterHasFood(cluster) {
 		g.input.victimHints = cluster
 	} else {
 		g.input.victimHints = g.input.victimHints[:0]

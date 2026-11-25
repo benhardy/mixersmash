@@ -67,9 +67,8 @@ type Game struct {
 // count, and the cumulative score. It is the model layer that the update*
 // methods mutate and the HUD and renderer read.
 type boardState struct {
-	grid      *board.Grid
-	cellCount int // number of live cells currently in the grid
-	score     int // cumulative score
+	grid  *board.Grid
+	score int // cumulative score
 }
 
 // animState holds the update/animation state machine: the current phase, the
@@ -184,8 +183,7 @@ func newGameState(grid *board.Grid) *Game {
 	return &Game{
 		spriteCache: make(map[*board.Organism]*ebiten.Image),
 		board: boardState{
-			grid:      grid,
-			cellCount: grid.Cols * grid.Rows,
+			grid: grid,
 		},
 		anim: animState{
 			currentState:    stateWaiting,

@@ -252,8 +252,7 @@ func makeHoverGame(cols, rows int) *Game {
 	for c := 0; c < cols; c++ {
 		for r := 0; r < rows; r++ {
 			idx := (c*rows + r) % len(board.OrganismPalette)
-			grid.Cells[c][r].Organism = &board.OrganismPalette[idx]
-			grid.Cells[c][r].Health = 1.0
+			grid.Place(c, r, board.Cell{Organism: &board.OrganismPalette[idx], Health: 1.0})
 		}
 	}
 	g := newGameState(grid)
@@ -269,7 +268,7 @@ func TestUpdateHoverDeadCellLeavesHoverUnchanged(t *testing.T) {
 	g.input.hoverRow = 0
 
 	// Kill cell (1,1).
-	g.board.grid.Cells[1][1].Health = 0
+	g.board.grid.SetHealthZero(1, 1)
 
 	g.updateHover(1, 1)
 

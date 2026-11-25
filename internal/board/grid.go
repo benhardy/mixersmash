@@ -96,6 +96,21 @@ func NewGrid(cols, rows int) *Grid {
 	}
 }
 
+// GridFromCells constructs a Grid backed by the provided cells slice (not
+// copied). The live count is computed from the supplied cells. Intended for
+// tests that build grids from hand-crafted cell slices.
+func GridFromCells(cols, rows int, cells [][]Cell) *Grid {
+	live := 0
+	for c := 0; c < cols; c++ {
+		for r := 0; r < rows; r++ {
+			if cells[c][r].Health > 0 {
+				live++
+			}
+		}
+	}
+	return &Grid{Cols: cols, Rows: rows, Cells: cells, live: live}
+}
+
 // Live returns the number of cells whose Health is greater than zero.
 func (g *Grid) Live() int {
 	return g.live
@@ -383,6 +398,18 @@ func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
 		}
 	}
 	return false
+}
+
+// FloodMatchCluster is a method that delegates to the package-level
+// FloodMatchCluster function using the receiver's own Cells slice.
+func (g *Grid) FloodMatchCluster(col, row int) [][2]int {
+	return FloodMatchCluster(g.Cells, col, row, g.Cols, g.Rows)
+}
+
+// ClusterHasFood is a method that delegates to the package-level
+// ClusterHasFood function using the receiver's own Cells slice.
+func (g *Grid) ClusterHasFood(coords [][2]int) bool {
+	return ClusterHasFood(g.Cells, coords)
 }
 
 // ScoreForCluster returns the score for clearing a cluster of n cells.

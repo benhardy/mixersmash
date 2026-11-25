@@ -35,7 +35,7 @@ func TestBuildDropMoveAnims(t *testing.T) {
 	}
 
 	g := &Game{
-		board: boardState{grid: &board.Grid{Cols: cols, Rows: rows, Cells: cells}},
+		board: boardState{grid: board.GridFromCells(cols, rows, cells)},
 	}
 
 	holeRows := []int{2}
@@ -43,7 +43,7 @@ func TestBuildDropMoveAnims(t *testing.T) {
 
 	g.buildDropMoveAnims(0, holeRows, moves, dcs)
 
-	// respawnCells is false (compile-time constant), so only moved-cell anims are produced.
+	// Gaps are left at top (no respawn), so only moved-cell anims are produced.
 	wantCount := len(moves) // 2
 	if len(g.anim.moveAnims) != wantCount {
 		t.Fatalf("moveAnims count = %d; want %d", len(g.anim.moveAnims), wantCount)
