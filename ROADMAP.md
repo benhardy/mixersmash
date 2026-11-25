@@ -38,7 +38,6 @@ Prerequisites DONE (commits `105ce26`, `ed1863b`):
 Completed:
 - **B3 — create `internal/board`** — DONE (commits `56ffb71`, `a4ce4b4`). `internal/board` now holds the pure, ebiten-free model layer: `Cell` (+`Die`/`BumpHealth`/`IsDead`/`Color`), `Grid`, `NewGrid`, `MoveAnim`, `eightNeighbors`, `GravityMoves`, `HorizontalCollapseMoves`, `ApplyColumnCollapse`, `FloodMatchCluster`, `ClusterHasFood`, `ScoreForCluster`, `ElapsedFraction`, `DeviceCellCenter`, `Organism`, `OrganismPalette`, `PaletteOrganism`, `mixerBias`, `SRGBToOKLab`, `GlyphTint`. 139 subtests pass across `main` and `internal/board`. The asset embeds, `titleImage`, `init()`, `loadGlyphFont`, and `Game.spriteCache` remain in `main`.
 
-Remaining, when picked up:
-- **B4 — create `internal/anim`.** Move `anim.go` + `lerp.go` and the `gameState` enum + state constants. `anim` depends on `board.MoveAnim` and `board.ElapsedFraction`; decide whether `gameState` lives in `anim` or `board` (it is consumed by the state machine in `main` and by `anim`'s `moveAnimDuration`/`moveAnimPos`). Export `MoveAnimDuration`, `MoveAnimPos`, `VictimPathParams`, `VictimAnimPos`, and the lerp/easing helpers `main` still calls.
+- **B4 — create `internal/anim`** — DONE (renames b76ee20, extraction ab3947c). `anim.go` + `lerp.go` moved to `internal/anim`; the package owns a `StateKind` enum. `main` maps its `gameState` to `StateKind` via a `kindOf` helper; `gameState` itself stays in `main`. Import graph is `main → internal/anim → internal/board`, with `main` also importing `internal/board` directly; no cycles.
 
-Reference-count hotspots to expect (all `.go`): `Organism` 72, `Cell` 69, `MoveAnim` 33, `floodMatchCluster` 26, `gravityMoves` 24, `organismPalette` 21, `Grid` 18, `elapsedFraction` 16, `eightNeighbors` 15, `deviceCellCenter` 14.
+**Plan B is fully complete.**

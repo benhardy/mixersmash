@@ -34,15 +34,15 @@ Authoritative targets are in `Makefile`. Summary:
 
 ## Architecture (file map)
 
-The repo root holds the flat `main` package. `internal/board` holds the pure, ebiten-free model layer extracted under Plan B step B3.
+The repo root holds the flat `main` package. `internal/board` holds the pure, ebiten-free model layer (Plan B step B3). `internal/anim` holds the animation core (Plan B step B4). Import graph: `main → internal/anim → internal/board`, with `main` also importing `internal/board` directly; no cycles.
 
-- `main.go` — game loop entry point; Ebitengine `Update` state machine with per-state handlers; `Draw` + all rendering; input handling (mouse + touch); HUD; the `present` step that blits the offscreen frame to the real screen via `presentGeoM`
+- `main.go` — game loop entry point; Ebitengine `Update` state machine with per-state handlers; `Draw` + all rendering; input handling (mouse + touch); HUD; the `present` step that blits the offscreen frame to the real screen via `presentGeoM`; `gameState` enum and a `kindOf` helper that maps it to `internal/anim.StateKind`
 - `internal/board/` — ebiten-free model layer (`package board`): `Cell`, `Grid`, `NewGrid`, `MoveAnim`; gravity/collapse logic; flood-match cluster + food gating; `ElapsedFraction` (wall-clock animation progress); `Organism`, `OrganismPalette`, `GlyphTint`, OKLab colour math. `main` depends on this package; nothing here imports ebiten.
+- `internal/anim/` — ebiten-free animation core (`package anim`): `anim.go` + `lerp.go`; owns the `StateKind` enum; exports `MoveAnimDuration`, `MoveAnimPos`, `VictimPathParams`, `VictimAnimPos`, and the lerp/easing helpers. Depends on `internal/board`; nothing here imports ebiten.
 - `grid.go` — retained in `main` for call-site qualification bridge; pure model types now live in `internal/board`
 - `creatures.go` — glyph-font loader and embedded title-image asset; baked sprites are NOT stored here — they live in `Game.spriteCache` in the render layer. Pure `Organism` data and palette helpers have moved to `internal/board`
 - `device.go` — `LayoutF`; `frameScaleFor`; `deviceCellSize` / `spriteRef` sizing; sprite-cache clear on realloc (currently immediate — see gotchas)
 - `mapping.go` — `screenToFrame` / `screenToBoard`; inverts `presentGeoM` for input hit-testing
-- `lerp.go` — easing and bezier helpers
 - `shaders.go` — Kage gel/glow shader source strings
 - `orientation_js.go` / `orientation_other.go` — build-tagged orientation lock and fullscreen (JS-only on WASM; no-ops elsewhere)
 - `tools/web_server/main.go` — minimal static file server for `make serve`
@@ -90,7 +90,7 @@ Working: desktop and mobile play; mobile touch (hold = hover, release = commit);
 
 A temporary perf readout exists behind `const showPerfDebug` in `main.go` (currently `false`).
 
-Architecture refactor in progress: Plan A (grouping `Game`'s fields into sub-structs) is complete. Plan B step B3 is complete — `internal/board` now holds the ebiten-free model layer and `main` depends on it (commits `56ffb71`, `a4ce4b4`; 139 subtests pass). B4 (extract `internal/anim`) is next; its `gameState`-placement open question is documented in `ROADMAP.md` → Architecture.
+Architecture refactor: Plan A (grouping `Game`'s fields into sub-structs) is complete. Plan B is fully complete — `internal/board` (B3, commits `56ffb71`, `a4ce4b4`) and `internal/anim` (B4, commits `b76ee20`, `ab3947c`) have both been extracted. `gameState` stays in `main`; `internal/anim` owns a `StateKind` enum and `main` bridges the two via a `kindOf` helper. Import graph is `main → internal/anim → internal/board` with no cycles.
 
 ---
 
