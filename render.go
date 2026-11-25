@@ -144,6 +144,46 @@ func (g *Game) drawCompositeSprite(dst *ebiten.Image, cx, cy, radius float32, o 
 	dst.DrawImage(img, &opts)
 }
 
+// spriteTurnGeoM returns the GeoM that maps the sprite image for a sprite with
+// the given bake radius onto screen position (cx, cy), scaled and rotated by
+// angle radians about the sprite centre.
+//
+// Transform order: Scale(scale,scale) → Translate(-radius,-radius) → Rotate(angle) → Translate(cx,cy).
+// Positive angle rotates clockwise (Ebiten's GeoM.Rotate is clockwise for positive theta).
+func spriteTurnGeoM(cx, cy, radius, scale, angle float64) ebiten.GeoM {
+	var m ebiten.GeoM
+	m.Scale(scale, scale)
+	m.Translate(-radius, -radius)
+	m.Rotate(angle)
+	m.Translate(cx, cy)
+	return m
+}
+
+// drawCompositeSpriteTurned blits the pre-rendered composite organism sprite for
+// o centred at (cx, cy), scaled so its inscribed circle matches radius, and
+// rotated by angle radians about its own centre.
+// GeoM order: Scale → centre-to-origin translate → Rotate → translate to (cx,cy).
+// Does nothing if radius < 1, o is nil, or the sprite could not be baked.
+func (g *Game) drawCompositeSpriteTurned(dst *ebiten.Image, cx, cy, radius float32, angle float64, o *board.Organism) {
+	if o == nil || radius < 1 {
+		return
+	}
+	img := g.compositeCachedSprite(o)
+	if img == nil {
+		return
+	}
+	g.perf.spritesThisFrame++
+	refSz := g.view.spriteRefSize
+	if refSz <= 0 {
+		refSz = compositeSpriteRefSize
+	}
+	scale := float64(radius*2) / float64(refSz)
+	var opts ebiten.DrawImageOptions
+	opts.GeoM = spriteTurnGeoM(float64(cx), float64(cy), float64(radius), scale, angle)
+	opts.Filter = ebiten.FilterLinear
+	dst.DrawImage(img, &opts)
+}
+
 // drawCell erases the cell's bounding rectangle on canvas with black and
 // redraws the antialiased circle for (col, row).  No glow is drawn here;
 // glow is composited onto the screen each frame in Draw().
@@ -390,23 +430,32 @@ func (g *Game) drawMoveAnims(dst *ebiten.Image, xOffset int) {
 		for _, mv := range g.anim.moveAnims {
 			cx, cy := anim.MoveAnimPos(mv, kindOf(g.anim.currentState), t)
 			var r float32
-			if g.anim.currentState == stateShuffling && mv.Rotations() != 0 {
+			if g.anim.currentState == stateShuffling && mv.NewHealth() != 0 {
 				// Clicked-mixer entry only: interpolate radius from old health to new health
 				// with a gentle bounce envelope so the shrink is visually sprung.
-				// Identified by Rotations!=0 (set to 1 only on the prepended mixer entry in
-				// buildShuffleAnims); neighbour Mixers have Rotations==0 and fall through
-				// to the standard radius path below. Works for NewHealth==0 (final click).
+				// Identified by NewHealth()!=0 (set only on the mixer entry in
+				// buildShuffleAnims via NewMixerAnim). Works for NewHealth==0 (final click,
+				// guarded out by this condition). Shuffle neighbours always have NewHealth==0.
 				// mv.Cell().Health() = pre-click health; mv.NewHealth() = post-click health.
 				et := anim.EaseInOutQuad(t)
 				base := anim.Lerp(mv.Cell().Health(), mv.NewHealth(), et)
 				// Bounce: gentle spring envelope peaks at t=0.5, amplitude 15%.
 				bounce := base * (1 + 0.15*float32(math.Sin(float64(t)*math.Pi)))
 				r = maxR * bounce
+				if r > 0 {
+					g.drawCompositeSprite(dst, xOff+cx, cy, r, mv.Cell().Organism())
+				}
 			} else {
 				r = maxR * mv.Cell().Health()
-			}
-			if r > 0 {
-				g.drawCompositeSprite(dst, xOff+cx, cy, r, mv.Cell().Organism())
+				if r > 0 {
+					if g.anim.currentState == stateShuffling && mv.Rotations() != 0 {
+						et := anim.EaseInOutQuad(t)
+						angle := float64(mv.Rotations()) * 2 * math.Pi * float64(et)
+						g.drawCompositeSpriteTurned(dst, xOff+cx, cy, r, angle, mv.Cell().Organism())
+					} else {
+						g.drawCompositeSprite(dst, xOff+cx, cy, r, mv.Cell().Organism())
+					}
+				}
 			}
 		}
 	}

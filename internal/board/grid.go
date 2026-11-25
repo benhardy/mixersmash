@@ -64,8 +64,8 @@ func (c Cell) Color() color.RGBA {
 // post-click health so the bounce animation can interpolate from cell.Health
 // (pre-click) to newHealth (post-click). Zero for all other entries.
 //
-// rotations is reserved for a planned feature (spin animation). The mixer
-// constructor sets it to 1; render uses it as a non-zero sentinel.
+// rotations is the signed cosmetic spin count for shuffle-neighbour animations.
+// Negative = CW, positive = CCW, 0 = no spin. Set via NewShuffleAnim only.
 type MoveAnim struct {
 	fromX, fromY float32
 	toX, toY     float32
@@ -87,20 +87,22 @@ func NewMoveAnim(fromX, fromY, toX, toY float32, cell Cell) MoveAnim {
 
 // NewShuffleAnim constructs a shuffle-neighbour animation with a quadratic
 // Bézier arc from (fromX,fromY) to (toX,toY) through (ctrlX,ctrlY).
-func NewShuffleAnim(fromX, fromY, toX, toY, ctrlX, ctrlY float32, cell Cell) MoveAnim {
+// rotations is the signed spin count applied cosmetically during the animation
+// (negative = CW, positive = CCW); 0 means no spin.
+func NewShuffleAnim(fromX, fromY, toX, toY, ctrlX, ctrlY float32, cell Cell, rotations float32) MoveAnim {
 	return MoveAnim{
 		fromX: fromX, fromY: fromY,
 		toX: toX, toY: toY,
 		ctrlX: ctrlX, ctrlY: ctrlY,
-		cell: cell,
+		cell:      cell,
+		rotations: rotations,
 	}
 }
 
 // NewMixerAnim constructs the stationary mixer-click animation entry. The
 // position is a fixed point (fromX,fromY) == (toX,toY) == (ctrlX,ctrlY).
-// rotations is set to 1 as a non-zero sentinel used by render to identify this
-// entry and apply the bounce-radius interpolation. newHealth is the post-click
-// health for the radius interpolation.
+// newHealth is the post-click health for the bounce-radius interpolation.
+// The render layer identifies this entry via NewHealth()!=0 (set only here).
 func NewMixerAnim(fromX, fromY float32, cell Cell, newHealth float32) MoveAnim {
 	return MoveAnim{
 		fromX: fromX, fromY: fromY,
@@ -109,7 +111,7 @@ func NewMixerAnim(fromX, fromY float32, cell Cell, newHealth float32) MoveAnim {
 		cell:      cell,
 		newHealth: newHealth,
 		pathType:  0,
-		rotations: 1,
+		rotations: 0,
 	}
 }
 
@@ -176,8 +178,8 @@ func (m MoveAnim) PathType() int { return m.pathType }
 // SpiralTurns returns the signed spiral turn count (victim spiral path only).
 func (m MoveAnim) SpiralTurns() float32 { return m.spiralTurns }
 
-// Rotations returns the signed rotation count. Non-zero identifies the mixer
-// entry in the shuffle animation; reserved for a future spin feature.
+// Rotations returns the signed cosmetic spin count for shuffle-neighbour
+// animations (negative = CW, positive = CCW, 0 = no spin).
 func (m MoveAnim) Rotations() float32 { return m.rotations }
 
 // NewHealth returns the post-click health for the mixer bounce animation.

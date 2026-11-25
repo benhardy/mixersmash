@@ -648,6 +648,41 @@ func TestSRGBToOKLabRedGreenDistance(t *testing.T) {
 // ScoreForCluster
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// NewShuffleAnim rotations round-trip
+// ---------------------------------------------------------------------------
+
+// TestNewShuffleAnimRotationsRoundTrip verifies that the rotations parameter
+// passed to NewShuffleAnim is returned unchanged by Rotations().
+//
+// NOTE: These tests target the intended new signature:
+//
+//	NewShuffleAnim(fromX, fromY, toX, toY, ctrlX, ctrlY float32, cell Cell, rotations float32) MoveAnim
+//
+// They will not compile until the constructor gains the trailing rotations arg.
+func TestNewShuffleAnimRotationsRoundTrip(t *testing.T) {
+	t.Helper()
+
+	cases := []struct {
+		name      string
+		rotations float32
+	}{
+		{"negative two", -2},
+		{"zero", 0},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewShuffleAnim(10, 20, 110, 220, 60, 320, Cell{}, tc.rotations)
+			if m.Rotations() != tc.rotations {
+				t.Errorf("NewShuffleAnim rotations=%v: Rotations() = %v; want %v",
+					tc.rotations, m.Rotations(), tc.rotations)
+			}
+		})
+	}
+}
+
 // TestScoreForCluster verifies the n*n scoring formula.
 func TestScoreForCluster(t *testing.T) {
 	cases := []struct {

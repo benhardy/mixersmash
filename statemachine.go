@@ -335,7 +335,8 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 				ctrlX = fx
 				ctrlY = fy
 			}
-			anims[i+1] = board.NewShuffleAnim(fx, fy, tx, ty, ctrlX, ctrlY, src.cell)
+			rotations := shuffleRotation(rand.Float32())
+			anims[i+1] = board.NewShuffleAnim(fx, fy, tx, ty, ctrlX, ctrlY, src.cell, rotations)
 		}
 
 		// Clear source positions on canvas (they will be drawn as moving overlays).

@@ -47,7 +47,7 @@ func approxEqF32(a, b float32) bool {
 func TestMoveAnimPos(t *testing.T) {
 	t.Helper()
 
-	mv := board.NewShuffleAnim(10, 20, 110, 220, 60, 320, board.Cell{})
+	mv := board.NewShuffleAnim(10, 20, 110, 220, 60, 320, board.Cell{}, 0)
 
 	t.Run("KindShuffle t=0 returns From", func(t *testing.T) {
 		cx, cy := MoveAnimPos(mv, KindShuffle, 0)
