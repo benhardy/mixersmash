@@ -81,6 +81,11 @@ func (h *hud) draw(frame *ebiten.Image, hudDevW int, score int, hoverCol, hoverR
 		vector.FillRect(h.image, 0, 0, float32(hudDevW), float32(frameH),
 			color.RGBA{0x99, 0x99, 0xAA, 0xFF}, false)
 
+		// Lazy GPU upload of the title image — created once, inside the game loop.
+		if titleImage == nil && titleImageDecoded != nil {
+			titleImage = ebiten.NewImageFromImage(titleImageDecoded)
+		}
+
 		// Title image at the top of the HUD strip.
 		titleH := 0
 		if titleImage != nil {

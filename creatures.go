@@ -17,7 +17,10 @@ var notoEmojiTTF []byte
 //go:embed assets/mixersmashtitle.png
 var mixerSmashTitlePNG []byte
 
-// titleImage is the decoded title image, loaded once at startup.
+// titleImageDecoded is the CPU-decoded title PNG, available before the GPU context.
+var titleImageDecoded image.Image
+
+// titleImage is the GPU-side ebiten.Image, created lazily on first Draw call.
 var titleImage *ebiten.Image
 
 func init() {
@@ -26,7 +29,7 @@ func init() {
 		log.Printf("title image decode error: %v", err)
 		return
 	}
-	titleImage = ebiten.NewImageFromImage(img)
+	titleImageDecoded = img
 }
 
 // loadGlyphFont parses the embedded NotoEmoji TTF and returns a GoTextFaceSource.
