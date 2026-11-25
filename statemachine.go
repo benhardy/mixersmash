@@ -280,7 +280,7 @@ func (g *Game) buildShuffleAnims(col, row int, oldMixerHealth float32, newMixerH
 	}
 
 	var nbuf [8][2]int
-	neighbors := board.EightNeighbors(nbuf[:0], col, row, g.board.grid.Cols, g.board.grid.Rows)
+	neighbors := g.board.grid.EightNeighbors(nbuf[:0], col, row)
 
 	// Collect alive neighbours.
 	var aliveNeighbors [][2]int

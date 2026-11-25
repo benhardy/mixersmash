@@ -229,10 +229,11 @@ func eightNeighbors(buf [][2]int, col, row, cols, rows int) [][2]int {
 	return buf
 }
 
-// EightNeighbors is the exported gateway to eightNeighbors for callers outside
-// this package (e.g. the main package's buildShuffleAnims).
-func EightNeighbors(buf [][2]int, col, row, cols, rows int) [][2]int {
-	return eightNeighbors(buf, col, row, cols, rows)
+// EightNeighbors returns the in-bounds 8-neighbours of (col, row) in this Grid,
+// appending into buf (reset to [:0] first). The caller owns buf; pass a
+// pre-allocated slice to avoid per-call allocation once capacity stabilises at 8.
+func (g *Grid) EightNeighbors(buf [][2]int, col, row int) [][2]int {
+	return eightNeighbors(buf, col, row, g.Cols, g.Rows)
 }
 
 // GravityMoves returns the [oldRow, newRow] mapping for cells in a column of numRows
@@ -341,7 +342,7 @@ func ApplyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 	return result
 }
 
-// FloodMatchCluster returns all grid coordinates that belong to the flood-match
+// floodMatchCluster returns all grid coordinates that belong to the flood-match
 // cluster seeded at (col, row). The seed cell must hold an animal Organism.
 //
 // Rules (BFS over 8-neighbours, pure — no mutation):
@@ -352,7 +353,7 @@ func ApplyColumnCollapse(snapshot [][]Cell, moves [][2]int) [][]Cell {
 //
 // Returns a [][2]int of (col, row) pairs including the seed. A lone animal with no
 // matching neighbours returns a single-element slice.
-func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
+func floodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 	seed := cells[col][row].organism
 	if seed == nil || !seed.isAnimal {
 		return nil
@@ -396,10 +397,10 @@ func FloodMatchCluster(cells [][]Cell, col, row, cols, rows int) [][2]int {
 	return result
 }
 
-// ClusterHasFood reports whether any cell in coords is a food cell
+// clusterHasFood reports whether any cell in coords is a food cell
 // (Organism != nil and IsAnimal == false). Used by commitCellAt to gate the
 // no-food no-op rule: a cluster with no paired food must not clear.
-func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
+func clusterHasFood(cells [][]Cell, coords [][2]int) bool {
 	for _, coord := range coords {
 		o := cells[coord[0]][coord[1]].organism
 		if o != nil && !o.isAnimal {
@@ -409,16 +410,16 @@ func ClusterHasFood(cells [][]Cell, coords [][2]int) bool {
 	return false
 }
 
-// FloodMatchCluster is a method that delegates to the package-level
-// FloodMatchCluster function using the receiver's own Cells slice.
+// FloodMatchCluster returns all grid coordinates that belong to the flood-match
+// cluster seeded at (col, row). See floodMatchCluster for the BFS rules.
 func (g *Grid) FloodMatchCluster(col, row int) [][2]int {
-	return FloodMatchCluster(g.cells, col, row, g.Cols, g.Rows)
+	return floodMatchCluster(g.cells, col, row, g.Cols, g.Rows)
 }
 
-// ClusterHasFood is a method that delegates to the package-level
-// ClusterHasFood function using the receiver's own Cells slice.
+// ClusterHasFood reports whether any cell in coords is a food cell
+// (Organism != nil and IsAnimal == false).
 func (g *Grid) ClusterHasFood(coords [][2]int) bool {
-	return ClusterHasFood(g.cells, coords)
+	return clusterHasFood(g.cells, coords)
 }
 
 // ScoreForCluster returns the score for clearing a cluster of n cells.

@@ -181,16 +181,16 @@ func TestGravityMovesAllHoles(t *testing.T) {
 // organismPalette — structure and palette-level invariants
 // ---------------------------------------------------------------------------
 
-// TestorganismPaletteSize verifies the palette has exactly 23 entries.
-func TestorganismPaletteSize(t *testing.T) {
+// TestOrganismPaletteSize verifies the palette has exactly 23 entries.
+func TestOrganismPaletteSize(t *testing.T) {
 	if len(organismPalette) != 23 {
 		t.Errorf("organismPalette has %d entries, want exactly 23", len(organismPalette))
 	}
 }
 
-// TestorganismPaletteGlyphsUniqueAndNonZero verifies that every entry has a
+// TestOrganismPaletteGlyphsUniqueAndNonZero verifies that every entry has a
 // distinct, non-zero glyph rune.
-func TestorganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
+func TestOrganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
 	seen := make(map[rune]int)
 	for i, e := range organismPalette {
 		if e.glyph == 0 {
@@ -204,8 +204,8 @@ func TestorganismPaletteGlyphsUniqueAndNonZero(t *testing.T) {
 	}
 }
 
-// TestorganismPaletteAlphaAll255 verifies that every palette entry has Color.A == 255.
-func TestorganismPaletteAlphaAll255(t *testing.T) {
+// TestOrganismPaletteAlphaAll255 verifies that every palette entry has Color.A == 255.
+func TestOrganismPaletteAlphaAll255(t *testing.T) {
 	for i, e := range organismPalette {
 		if e.color.A != 255 {
 			t.Errorf("organismPalette[%d] (%q) Color.A = %d, want 255", i, e.name, e.color.A)
@@ -521,13 +521,13 @@ func TestHorizontalCollapseMoves(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestorganismPalettePairStructure — new palette invariants
+// TestOrganismPalettePairStructure — new palette invariants
 // ---------------------------------------------------------------------------
 
-// TestorganismPalettePairStructure verifies that the palette has the correct
+// TestOrganismPalettePairStructure verifies that the palette has the correct
 // structure: exactly one Mixer entry (PairID -1, IsAnimal false, IsMixer true)
 // and 22 non-mixer entries forming 11 animal/food pairs (PairIDs 0..10).
-func TestorganismPalettePairStructure(t *testing.T) {
+func TestOrganismPalettePairStructure(t *testing.T) {
 	// Separate mixer entries from non-mixer entries.
 	var mixers []Organism
 	var nonMixers []Organism
@@ -701,7 +701,7 @@ func TestFloodMatchClusterLoneAnimal(t *testing.T) {
 	placeOrganism(cells, 1, 0, other)
 	placeOrganism(cells, 1, 2, other)
 
-	got := FloodMatchCluster(cells, 1, 1, 3, 3)
+	got := floodMatchCluster(cells, 1, 1, 3, 3)
 	if len(got) != 1 || got[0] != [2]int{1, 1} {
 		t.Errorf("FloodMatchCluster lone animal = %v, want [{1 1}]", got)
 	}
@@ -718,7 +718,7 @@ func TestFloodMatchClusterChainOfAnimals(t *testing.T) {
 	placeOrganism(cells, 1, 0, animal)
 	placeOrganism(cells, 2, 0, animal)
 
-	got := FloodMatchCluster(cells, 0, 0, 3, 1)
+	got := floodMatchCluster(cells, 0, 0, 3, 1)
 	if len(got) != 3 {
 		t.Fatalf("FloodMatchCluster chain of 3 = %v (len %d), want 3 results", got, len(got))
 	}
@@ -743,7 +743,7 @@ func TestFloodMatchClusterWithPairedFood(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 0, food)
 
-	got := FloodMatchCluster(cells, 0, 0, 2, 1)
+	got := floodMatchCluster(cells, 0, 0, 2, 1)
 	if len(got) != 2 {
 		t.Fatalf("FloodMatchCluster animal+food = %v (len %d), want 2", got, len(got))
 	}
@@ -766,7 +766,7 @@ func TestFloodMatchClusterNonPairedFoodExcluded(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 0, wrongFood)
 
-	got := FloodMatchCluster(cells, 0, 0, 2, 1)
+	got := floodMatchCluster(cells, 0, 0, 2, 1)
 	if len(got) != 1 || got[0] != [2]int{0, 0} {
 		t.Errorf("FloodMatchCluster non-paired food = %v, want only [{0 0}]", got)
 	}
@@ -787,7 +787,7 @@ func TestFloodMatchClusterFoodDoesNotSpread(t *testing.T) {
 	placeOrganism(cells, 1, 0, food)
 	placeOrganism(cells, 2, 0, animal)
 
-	got := FloodMatchCluster(cells, 0, 0, 3, 1)
+	got := floodMatchCluster(cells, 0, 0, 3, 1)
 	// Seed at (0,0) finds food at (1,0) → included but not enqueued.
 	// (2,0) is never reached from (1,0) because food is not enqueued.
 	if len(got) != 2 {
@@ -817,7 +817,7 @@ func TestFloodMatchClusterDiagonalIncluded(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 1, animal)
 
-	got := FloodMatchCluster(cells, 0, 0, 2, 2)
+	got := floodMatchCluster(cells, 0, 0, 2, 2)
 	if len(got) != 2 {
 		t.Fatalf("FloodMatchCluster diagonal included = %v (len %d), want 2 results", got, len(got))
 	}
@@ -843,7 +843,7 @@ func TestFloodMatchClusterDiagonalFoodIncluded(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 	placeOrganism(cells, 1, 1, food)
 
-	got := FloodMatchCluster(cells, 0, 0, 2, 2)
+	got := floodMatchCluster(cells, 0, 0, 2, 2)
 	if len(got) != 2 {
 		t.Fatalf("FloodMatchCluster diagonal food included = %v (len %d), want 2 results", got, len(got))
 	}
@@ -870,7 +870,7 @@ func TestClusterHasFoodWithFood(t *testing.T) {
 	placeOrganism(cells, 1, 0, food)
 
 	coords := [][2]int{{0, 0}, {1, 0}}
-	if !ClusterHasFood(cells, coords) {
+	if !clusterHasFood(cells, coords) {
 		t.Error("ClusterHasFood with food cell = false, want true")
 	}
 }
@@ -884,7 +884,7 @@ func TestClusterHasFoodAnimalsOnly(t *testing.T) {
 	placeOrganism(cells, 1, 0, animal)
 
 	coords := [][2]int{{0, 0}, {1, 0}}
-	if ClusterHasFood(cells, coords) {
+	if clusterHasFood(cells, coords) {
 		t.Error("ClusterHasFood animals-only = true, want false")
 	}
 }
@@ -897,7 +897,7 @@ func TestClusterHasFoodSingleAnimal(t *testing.T) {
 	placeOrganism(cells, 0, 0, animal)
 
 	coords := [][2]int{{0, 0}}
-	if ClusterHasFood(cells, coords) {
+	if clusterHasFood(cells, coords) {
 		t.Error("ClusterHasFood single animal = true, want false")
 	}
 }
